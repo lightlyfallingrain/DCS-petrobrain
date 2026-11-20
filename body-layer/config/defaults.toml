@@ -15,7 +15,7 @@
 # source: belief/ai_pilot_wheel.py:AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M
 AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M = 700.0
 
-# "Good enough" tolerance for the hold-up/down nudge loop Stage P2's `set_parked_altitude` goal will use (user, `aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5: "within 20m is good enough").
+# "Good enough" tolerance this module declares to mirror the *takeover-correction* loop's own closed-loop release point ("the read current altitude equals the AI's held altitude") -- a plain Lua local (`AI_PILOT_ALT_TOLERANCE_M`, `Export.lua`, renamed from `AI_PILOT_NUDGE_EPSILON_M` by the "Revised 2026-11-16" takeover revision) -- because the Architecture decision keeps all per-frame press timing in Lua.
 # status: agreed-guess | range: 1.0 .. 200.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_ALTITUDE_TOLERANCE_M
 AI_PILOT_ALTITUDE_TOLERANCE_M = 20.0
@@ -25,7 +25,7 @@ AI_PILOT_ALTITUDE_TOLERANCE_M = 20.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_GOAL_SLICE_S
 AI_PILOT_GOAL_SLICE_S = 3.0
 
-# How close a spoken heading goal must read before Lua's hold-and-poll loop releases it -- same judgement call as mode 1's own D-c default (`plans/flight-control/plan.md`, "Series -- unparked mode"), not re-litigated here, same default.
+# Declared to mirror the same judgement call as mode 1's own D-c default (`plans/flight-control/plan.md`, "Series -- unparked mode"), not re-litigated here.
 # status: judgement | range: 1.0 .. 30.0
 # source: belief/ai_pilot_wheel.py:AI_PILOT_HEADING_TOLERANCE_DEG
 AI_PILOT_HEADING_TOLERANCE_DEG = 5.0

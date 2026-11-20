@@ -19,6 +19,13 @@ numbers. Confirmed valuable twice now:
   focused and had never looked at engine/rotor instruments. Two of the names it gave (rotor brake
   745, rotor-RPM circuit breaker 606) independently cross-checked clean against this project's own
   `mi24p-command-surface.md`.
+- 2026-11-20 (`aircraft-layer/research/2026-11-20-slip-ball-recon.md`, BL-16 mode 1 pedal law):
+  found the pilot/operator ADI slip-ball draw args (943/784, category `"PKP72M Gauges"`) that no
+  official DCS source or forum thread named anywhere — again a gap this project's own corpus had
+  (the `clickabledata.lua`-driven generator skips pure-gauge elements with no click action, so the
+  ball was never going to appear in `mi24p-command-surface.md` on its own). Device family
+  (`PKP72M_P`/`PKP72M_O`, ids 32/33) cross-checked clean against that file. Third confirmation —
+  reach for this file before guessing or declaring a gauge's arg "undocumented."
 
 **How to use it:** `git clone --depth 1 https://github.com/DCS-Skunkworks/dcs-bios.git <scratch>`,
 then grep the one file above. Works from a Mac dev session with no DCS install at all — this is

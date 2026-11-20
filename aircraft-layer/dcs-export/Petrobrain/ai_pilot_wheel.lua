@@ -81,19 +81,56 @@ local SEAT_CAMERA_MIN_FWD_M = 2.0
 local SEAT_CAMERA_MAX_FWD_M = 7.0
 local SEAT_CAMERA_MAX_OFFAXIS_M = 1.5
 
--- "Good enough" tolerance for the altitude-correction loop below: how
--- close the AI's held altitude (`alt_text`) must read to a target before
--- the loop treats it as reached. Renamed from `AI_PILOT_NUDGE_EPSILON_M`
--- (same value) now that the same number governs three decisions instead
--- of one (the pre-correction "is anything wrong" check, and both hold
--- phases' own release point). Mirrors body-layer's `AI_PILOT_ALTITUDE_
--- TOLERANCE_M` tunable (`belief/ai_pilot_wheel.py`, default 20) --
--- duplicated here, not read over the wire, because Stage P1 sends no
--- goal message yet (the Architecture decision's per-frame press timing
--- stays entirely in this file until Stage P2 wires a goal channel
--- through); revisit once that channel exists so there is one source of
--- truth for this number.
+-- "Good enough" tolerance for the **takeover correction** loop only: how
+-- close the AI's held altitude (`alt_text`) must read to the *flown*
+-- target (the live altitude in phase 1, the handover snapshot in phase
+-- 2) before that correction treats itself as resolved. Renamed from
+-- `AI_PILOT_NUDGE_EPSILON_M` (same value) now that the same number
+-- governs three decisions instead of one (the pre-correction "is
+-- anything wrong" check, and both hold phases' own release point).
+-- Mirrors body-layer's `AI_PILOT_ALTITUDE_TOLERANCE_M` tunable
+-- (`belief/ai_pilot_wheel.py`, default 20) -- duplicated here, not read
+-- over the wire, because Stage P1 sends no goal message yet (the
+-- Architecture decision's per-frame press timing stays entirely in this
+-- file until Stage P2 wires a goal channel through); revisit once that
+-- channel exists so there is one source of truth for this number.
+--
+-- **No longer the altitude *goal*'s own stop condition** (fix,
+-- 2026-11-20, `docs/acceptance/2026-11-20-sortie-feedback.md`, "Desired
+-- value must be exact; flying may be imprecise"): a voice-commanded
+-- "altitude 100 radar" left the overlay's *set* value at 116 (a 16 m
+-- error, inside this 20 m band, so `ai_pilot_goal_tick_altitude` below
+-- stopped pressing with the overlay still wrong). The user's rule --
+-- "the value *set* as desired must still be what player commanded...
+-- flying is allowed to deviate from it a bit" -- means this band may
+-- still gate whether *flown* altitude counts as having reached a
+-- target, never whether the *overlay's own displayed number* matches
+-- what was asked for. `ai_pilot_correction_direction` below now takes an
+-- explicit tolerance argument; every takeover-correction call site below
+-- still passes none (so it defaults to this constant), and only the
+-- goal tick passes `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M` instead.
 local AI_PILOT_ALT_TOLERANCE_M = 20.0
+
+-- The altitude **goal**'s own stop condition (fix, 2026-11-20, same
+-- sortie feedback as above): how close `alt_text` must read to the
+-- voice-commanded target before `ai_pilot_goal_tick_altitude` stops
+-- pressing. Every overlay altitude reading observed so far (research
+-- note `2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 3: `196 R`,
+-- `948 B`; `2026-10-31-mi24p-park-controls-ai-pilot.md`'s `alt_text`
+-- holder) has been a bare integer with no decimal point, so 0.5 is
+-- "exactly equal to the nearest whole metre" rather than a real
+-- tolerance window -- **not independently verified live** (no screenshot
+-- has shown a fractional reading, but none was taken specifically
+-- looking for one). The per-tick redirect in `ai_pilot_goal_tick_
+-- altitude` already reverses direction the instant the needed direction
+-- flips (see that function's own comment), so an overshoot past the
+-- exact target on one hold-and-poll tick self-corrects on the next
+-- rather than needing a second, finer press type -- FLT/HVR altitude has
+-- no short-tap option to fall back to (layout research note section 5:
+-- the outer up/down button's short-press behaviour in FLT/HVR is
+-- undocumented, only its long-hold ramp is), so a tight hold-and-poll
+-- band is the only lever available.
+local AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M = 0.5
 
 -- Delay from the park-rising edge to the blind reference-toggle press
 -- (pilot, verbatim: "I'd put a half second delay there").
@@ -153,12 +190,30 @@ local AI_PILOT_ALTITUDE_CORRECTION_MAX_HOLD_S = 60.0
 -- correction path (below) is attempted at all.
 local AI_PILOT_QUICK_PATH_MAX_AGL_M = 700.0
 
--- How close a spoken heading goal must read before the hold releases it.
--- Mirrors body-layer's `AI_PILOT_HEADING_TOLERANCE_DEG` tunable
--- (`belief/ai_pilot_wheel.py`, default 5) -- duplicated here for the
--- identical reason `AI_PILOT_ALT_TOLERANCE_M` above is: the Architecture
--- decision keeps all per-frame press timing in Lua.
-local AI_PILOT_HEADING_TOLERANCE_DEG = 5.0
+-- How close a spoken heading goal must read before the hold releases it
+-- -- the heading goal's own stop condition, the only user of this
+-- constant (unlike altitude, heading has no separate takeover-correction
+-- use to keep a wider band for). **Tightened from 5.0 to 0.5, fix
+-- 2026-11-20** (`docs/acceptance/2026-11-20-sortie-feedback.md`, "Desired
+-- value must be exact; flying may be imprecise"): the same "good enough"
+-- reasoning that left altitude's overlay 16 m off target applied here
+-- too (a spoken heading landing anywhere within 5 deg of the target
+-- would stop being corrected, overlay still wrong) -- 0.5 is "exactly
+-- equal to the nearest whole degree," the same integer-display
+-- assumption `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M` makes and with the
+-- same caveat: every `course_text` reading seen so far (`71` in the
+-- layout research note) has been a bare integer, but no screenshot was
+-- taken specifically looking for a fractional one. **No longer mirrors**
+-- body-layer's `AI_PILOT_HEADING_TOLERANCE_DEG` tunable (`belief/
+-- ai_pilot_wheel.py`) -- that tunable is declared but has no code
+-- consumer of its own (confirmed by grep: it is read nowhere in
+-- body-layer), so nothing on that side needed to change, but its
+-- docstring is updated alongside this fix to stop claiming a mirror this
+-- precise. `ai_pilot_goal_heading_direction` below's own redirect-on-
+-- overshoot behaviour (see that function's comment) is what keeps a
+-- tight band from oscillating forever, the same reasoning the altitude
+-- goal's own comment above gives.
+local AI_PILOT_HEADING_TOLERANCE_DEG = 0.5
 
 -- The wheel's own highest *real* speed step -- a speed goal at or above
 -- this is "aim for MAX" (body-layer's own `AI_PILOT_SPEED_MAX_SENTINEL_
@@ -489,12 +544,21 @@ end
 -- within tolerance, or nothing to compare" (a missing reading on either
 -- side is never treated as "needs correction"). The AI climbs toward a
 -- high target, so a held value *above* the target means press DOWN to
--- lower it; below means press UP.
-local function ai_pilot_correction_direction(held_m, target_m)
+-- lower it; below means press UP. `tolerance_m` defaults to
+-- `AI_PILOT_ALT_TOLERANCE_M` (every takeover-correction call site below
+-- passes none) -- the altitude **goal** tick is the one caller that
+-- passes its own, much tighter `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M`
+-- instead (fix, 2026-11-20: see that constant's own comment for why the
+-- two must not share one band).
+local function ai_pilot_correction_direction(held_m, target_m, tolerance_m)
     if held_m == nil or target_m == nil then
         return nil
     end
-    if math.abs(held_m - target_m) <= AI_PILOT_ALT_TOLERANCE_M then
+    local tol = tolerance_m
+    if tol == nil then
+        tol = AI_PILOT_ALT_TOLERANCE_M
+    end
+    if math.abs(held_m - target_m) <= tol then
         return nil
     end
     if held_m > target_m then
@@ -933,7 +997,8 @@ local function ai_pilot_goal_tick_altitude(t)
     end
     ai_pilot_goal.toggling_reference = false
     local held_m = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
-    local dir = ai_pilot_correction_direction(held_m, ai_pilot_goal.altitude_target_m)
+    local dir = ai_pilot_correction_direction(
+        held_m, ai_pilot_goal.altitude_target_m, AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M)
     if dir == nil then
         ai_pilot_goal_release_hold()
         ai_pilot_goal.progress = "settled"

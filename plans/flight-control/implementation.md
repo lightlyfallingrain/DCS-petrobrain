@@ -2330,3 +2330,122 @@ about, before writing a line:**
   `law_update` for the first time -- it had been sent on the wire since Stage M1 but never read by
   the law itself before this batch; the toy-plant suite's own `_LIMITS` fixture needed the same
   addition, confirming the field really was new to that function, not an oversight in this round.
+
+## Sortie 2026-11-20 follow-up: collective on, torque pedal, turn-coordination pedal
+
+Branch `impl/collective-turn-pedal` off `fix/bl16-sortie-1120` @ `c440dbcc` (that commit's own
+"collective on now, turn pedal, no tuning yet" decisions). Scope: axis-enable flags and
+`law_update`'s collective/pedal steps, plus their constants and tests. Two other branches worked
+the same base in parallel on a body-layer-start reset and exact-setpoint fixes — no overlap, this
+batch never touched `flight_control.py`, `ai_pilot_wheel.lua`, or anything AI-wheel-adjacent.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua`:
+  - `FC_AXES_ENABLED.collective` flipped `false` → `true` (user, *"absolutely yes. Now."*). Every
+    per-axis gate (`capture_from_seat`/`axis_magnitude`/`write_outputs`/the status feed) already
+    iterated `FC_AXES_ENABLED`, so this one flag is the whole activation — no other write-path
+    change was needed. Updated the module header, the `SIGN`/`FC_AXES_ENABLED` comment blocks, and
+    `axis_command`'s own comment (it cited collective as *the* disabled-axis example) to stop
+    claiming collective is off, per this project's "prune the comment you are standing next to"
+    rule — pruned only the blocks directly above code this change touches, not a sweep.
+  - Step 3 (`d_theta`/`u_c` split): **no behaviour change.** Added a comment confirming the
+    existing split (`d_theta` only ever picks up the altitude channel's `a_z_d` term while
+    `collective_limited`) already *is* "favour collective 100% while it has room" — enabling the
+    axis is what makes it take effect on the real aircraft for the first time, not a change to the
+    split. Verified with a toy-plant comparison (see Notable Discoveries) before writing it down as
+    fact.
+  - Step 5 (`K_PEDAL_FROM_COLLECTIVE_RATE`): no sign change. Added a comment tracing the existing
+    positive sign against `plans/flight-control/explore-notes.md` (2026-10-26): more collective
+    (more torque) needs more right pedal, which only matches the code's sign if positive `t_y` is
+    "right" — itself an unmeasured guess `PEDAL_LIMIT_POSITIVE`'s own asymmetry already makes.
+    Consistent, not independently confirmed; gain left at its existing, already-conservative value.
+  - New `K_TURN_COORD_PEDAL` constant (step 5) and `turn_coord_pedal` state field
+    (`law_init_at_take`, `law_update`, read in `law_outputs`): the turn-coordination pedal term.
+    **Design note, not in the plan**: the first implementation fed `K_TURN_COORD_PEDAL * r_d` into
+    the `t_y` *integrator* (the same shape `break_bias`/`d_t_y` already use) — wrong, found by
+    actually running it (toy-plant probe): during a sustained ordinary turn `r_d` stays roughly
+    constant for many seconds, so a rate term integrates without bound and saturates the pedal axis
+    almost immediately, which is correct for a break's own short, aggressive `K_BREAK_PEDAL_BIAS`
+    but wrong for ordinary-turn coordination. Rebuilt as a **position overlay**: recomputed fresh
+    every `law_update` frame from the *current* `r_d`, never itself integrated, added only at
+    `law_outputs` (`pedals = t_y + turn_coord_pedal`). This is what makes all three stated
+    requirements fall out for free: exactly zero in straight flight (zero below
+    `TURN_SETTLE_DEG_S`, reusing step 1's own "stopped turning" threshold rather than a bare
+    `~= 0.0` check, since a critically-damped heading error never bit-exactly reaches zero);
+    cannot stack with the break bias (gated on `rate_override_deg_s == nil`, the same mutual
+    exclusion `break_bias` already uses); needs no "unwind" bookkeeping at all (it already *is* the
+    unwind, every frame) — no accumulator, no settle-trigger, unlike `break_pedal_bias_accum`.
+    `law_init_at_take` sets it to `0.0` so Decision 24's bit-exact-at-take guarantee is untouched.
+    Sign assumption (unmeasured, flagged in the constant's own comment): pedal in the same sign as
+    the turn, consistent with `PEDAL_LIMIT_POSITIVE`'s own "positive is right" guess.
+
+### Tests Added
+
+`aircraft-layer/tests/test_flight_control_law.py`:
+- `TestCollectiveHoldsAltitudeInABankedTurn` (3 tests) — toy-plant comparison, collective-effective
+  vs. collective-ineffective in a 40° banked turn: pitch demand stays exactly `0.0` and `u_c` never
+  saturates when collective actually reaches the plant; pitch demand grows past 1° and `u_c`
+  saturates when it does not; the direct comparison (`theta_on < theta_off`).
+- `TestTurnCoordinationPedal` (4 tests) — zero throughout straight-and-level flight (covers the
+  take-time no-drift requirement too); positive pedal while turning right, unwinding to exactly the
+  pre-turn value once settled; the mirror negative-pedal left-turn case; suppressed to exactly
+  `0.0` throughout a break, with the break's own bias unchanged (`0.5`, its pre-existing saturated
+  value).
+
+`aircraft-layer/tests/test_flight_control_lua.py` (whole-module, real `LoSetCommand` capture):
+- `TestCaptureIsBitExact.test_collective_capture_writes_with_the_measured_sign` — a take now
+  actually writes command 2087 (`SIGN.collective = -1.0`), not just internal law state.
+- `TestAxesEnabledOnTheWire.test_all_four_axes_enabled` (renamed from `test_pedal_enabled_
+  collective_disabled`, which this batch's own change makes false) — `fc_axes_collective` now
+  reports `true` on the wire.
+
+### Checks
+
+**aircraft-layer** (this worktree has no `.venv`; ran via the main checkout's
+`aircraft-layer/.venv`, pointed at this worktree's own files):
+- `ruff format --check src tests` — pass (86 files; one new test file needed one auto-format pass,
+  applied and re-verified clean).
+- `ruff check src tests` — pass.
+- `mypy src` (from `aircraft-layer/`) — pass, 28 files (no `src/` Python touched this batch; run
+  for completeness).
+- `luac5.1 -p dcs-export/Petrobrain/flight_control.lua` — pass.
+- `luac5.1 -l -p ... | grep GETGLOBAL` — clean; every name is a genuine stdlib/DCS global or an
+  existing module helper (`ai_pilot_wheel`, `client`, `debug_log`, `safe_call`, the `extract_
+  json_*`/`fmt_*`/`json_escape_string` core helpers), nothing from this batch's own new locals
+  (`turn_coord_bias`→removed, `turn_coord_pedal`, `pedal_step_delta`→removed) leaked as an
+  undefined global.
+- `pytest tests -q` (full suite) — **1012 passed** (1004 pre-existing + 8 new/changed).
+- `.claude/scripts/fast-tests.sh aircraft-layer` — refused: it expects `aircraft-layer/.venv` to
+  exist inside *this* worktree, which it does not (worktrees ship with no `.venv`, per this
+  project's own convention); ran the full suite directly instead (above), which subsumes it.
+
+**body-layer** — untouched (`git status --porcelain` shows no `body-layer/` changes). Ran its own
+test suite anyway, since `FC_AXES_ENABLED.collective`'s wire field (`fc_axes_collective`) is
+schema-parsed there: `pytest tests/test_flight_control.py tests/test_body_flight_control.py -q` —
+**59 passed**, no changes needed (the one fixture mentioning `"fc_axes_collective": False` is a
+wire-parsing test value, not an assertion about the Lua module's current default).
+
+### Notable Discoveries
+
+- **The plan's own `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md` does not
+  exist anywhere in this branch's history or on `main`** — `flight_control.lua`'s module header and
+  `read_measured()`'s own comment both cite it (sign/scale measurements, the yaw-rate convention).
+  It exists on an unmerged commit (`eef87430`, and its predecessors back through `b1feb9a0`) that
+  is not an ancestor of `main` or of this task's base commit. Pre-existing dangling reference, not
+  introduced by this batch, not touched here — flagging since the next person chasing one of those
+  citations will hit the same dead end. The actual sign/scale/rotor-direction facts this batch
+  needed (pedal sign asymmetry, "the hind yaws much easier to left") were available instead in
+  `plans/flight-control/explore-notes.md` (2026-10-26) and the module's own already-measured
+  `SIGN`/`PEDAL_LIMIT_*` constants.
+- **A rate term and a position-overlay term look interchangeable until you actually run one** —
+  the toy-plant probe that caught the turn-coordination integrator bug (saturating almost
+  immediately during an ordinary turn) is the only reason this shipped as a position overlay
+  instead of a second `break_pedal_bias_accum`-style accumulator; reading the code alone would not
+  have surfaced it, since both shapes compile and both "look conservative" from the gain value
+  alone without running the actual accumulation over several seconds.
+- **Step 3's altitude/collective split needed no code change at all** — it already favoured
+  collective fully whenever `collective_limited` is false, written before collective was ever
+  enabled. The only way to see that this was already correct (rather than assume it from reading
+  the `if`) was to run the toy-plant comparison and confirm `max_theta == 0.0` on the collective-
+  effective side.

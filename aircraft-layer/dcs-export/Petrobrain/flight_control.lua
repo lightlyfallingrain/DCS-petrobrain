@@ -73,13 +73,12 @@ collective** -- arg 1102 stayed at -0.1728 for 11 s of writes, because
 control collective axis; the real id is 2087 (`iCommandPlaneCollective`,
 the same binding file). **M0-C re-flown (flight 6, 2026-11-18) against
 the corrected id: `SIGN.collective = -1.0`, scale 1, same shape as
-pedal** (command = `-arg 1102`). Entered below; `FC_AXES_ENABLED.
-collective` is kept **false** regardless -- M0-C's sign/scale is now
-measured but its step-response lag and VS behaviour are not (the same
-two figures M0-B needed before pedal was enabled), so this is a
-judgement call extending pedal's own "measure the whole response before
-flipping the flag" bar to collective, not a literal reading of the
-plan's "sign and scale" wording. Flag this for confirmation at review.
+pedal** (command = `-arg 1102`). Entered below. **`FC_AXES_ENABLED.
+collective` is now `true`** (sortie 2026-11-20, `docs/acceptance/
+2026-11-20-sortie-feedback.md`, user: "absolutely yes. Now." -- its
+step-response lag and VS behaviour are still unmeasured, the same two
+figures M0-B needed before pedal was enabled, but the user's own
+direction overrides the judgement call that previously kept it off).
 **Flight 6 also measured M0-F (plan, Decision 4): once a write stops,
 the arg holds Petrovich's last-commanded value until the player
 physically moves that control** -- arg 1102 sat 16+ s with the lever
@@ -115,21 +114,23 @@ local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2087 }
 -- command = SIGN * captured-arg. pitch/roll are probe v2's own unverified
 -- guesses, flip once M0-E reports; pedals = -1.0 is measured (M0-B,
 -- 2026-11-18); collective = -1.0 is measured too (M0-C re-fly, flight 6,
--- 2026-11-18, module header) -- never written while `FC_AXES_ENABLED.
--- collective` is false (its lag/VS response are the still-owed figures).
+-- 2026-11-18, module header) and now actually written, per `FC_AXES_
+-- ENABLED.collective` below.
 local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
 -- defaults off for pedal and collective until M0-B and M0-C" -- each
 -- axis gated on its own probe). Pitch/roll are the axes probe v2
 -- actually exercised; pedals is enabled on M0-B's own measurement
--- (module header, both sign/scale AND the step-response lag). collective
--- stays disabled: its sign/scale is now measured (flight 6) but its own
--- lag/VS response is not, and pedal's own bar was the whole response,
--- not sign/scale alone -- a judgement call, flagged in the Implementer's
--- report. An unmapped/unmeasured axis is left entirely with the player
--- (safe), never written with a guessed sign/scale.
-local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = true, collective = false }
+-- (module header, both sign/scale AND the step-response lag). **Collective
+-- enabled, sortie 2026-11-20** (`docs/acceptance/2026-11-20-sortie-
+-- feedback.md`, user: "absolutely yes. Now.") -- sign/scale is measured
+-- (flight 6) but its own lag/VS response is still unmeasured (the same
+-- bar pedal cleared before being enabled); the user's direction accepts
+-- that gap rather than waiting for M0-E. An unmapped/unmeasured axis is
+-- left entirely with the player (safe), never written with a guessed
+-- sign/scale.
+local FC_AXES_ENABLED = { pitch = true, roll = true, pedals = true, collective = true }
 
 -- `UNPARK_TAKE_ENABLED` -- on by default now that M0-J passes with the
 -- last-fully-stowed capture fix below (flight 9). While off, an unpark
@@ -353,6 +354,20 @@ local K_P = 0.01
 -- axis therefore runs on the collective-coupling feedforward alone
 -- until a probe measures the slip ball. Owed by M0-E and a slip-ball
 -- probe both.
+-- Sign check (sortie 2026-11-20, collective now written): `plans/
+-- flight-control/explore-notes.md` (2026-10-26), user -- "due to the
+-- angular momentum forces of engine turning the rotor, the hind yaws
+-- much easier to left. At hover and slow flight a lot of right rudder
+-- is needed... not much right rudder left" -- i.e. more torque (higher
+-- collective) eats further into the *already-scarce right* pedal
+-- margin. Positive `c_dot` here already means "more collective" (the
+-- same sign `law_update`'s own altitude step assumes), and the sign
+-- below (positive gain, feeding `t_y` positive) only matches that
+-- physics if positive `t_y` is "right" -- which is itself an unmeasured
+-- guess, the same one `PEDAL_LIMIT_POSITIVE`'s own asymmetry below
+-- already makes. Consistent with that guess, not independently
+-- confirmed; kept at this same conservative magnitude rather than
+-- tuned, pending M0-E and a slip-ball probe.
 local K_PEDAL_FROM_COLLECTIVE_RATE = 0.25
 -- The right-pedal limit is smaller than the left one (user: "not much
 -- right rudder left"), but which *sign* of the pedal axis is
@@ -385,6 +400,28 @@ local COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL = 0.0
 -- Mode-1 batch, Decision 27's own pedal-into-the-turn bias while a
 -- break's rate override is active -- judgement, owed by Flight M-A.
 local K_BREAK_PEDAL_BIAS = 0.2
+
+-- Turn-coordination pedal (sortie 2026-11-20, user: "turn right 50 ->
+-- turns but does not use pedals at all. Use pedals. All the axis are
+-- interdependent in helicopter flight." -- `docs/acceptance/2026-11-20-
+-- sortie-feedback.md`). Proportional to the commanded turn rate `r_d`,
+-- so an ordinary turn (not only a break) carries pedal too -- a
+-- placeholder pending the same slip-ball probe `K_PEDAL_FROM_
+-- COLLECTIVE_RATE` is already owed to (module header, step 5): no
+-- `LoGetSlipBallPosition` reading exists yet to tell which way the ball
+-- actually slides in a turn. **Sign assumption, unmeasured**: pedal in
+-- the *same* sign as the turn (a right turn, `r_d > 0`, pulls positive/
+-- "right" pedal) -- the same positive-command-is-right convention
+-- `PEDAL_LIMIT_POSITIVE`'s own asymmetry already guesses, kept
+-- consistent with it rather than independently chosen. Applied only
+-- while no break rate-override is active (`state.rate_override_deg_s
+-- == nil`, step 5 below) so this term and `K_BREAK_PEDAL_BIAS` never
+-- both feed the same frame -- the break already has its own
+-- turn-direction pedal bias, tuned/owed separately. Sized small and
+-- conservative: at the ordinary turn ceiling (`max_turn_bank_deg`,
+-- 20 deg, around 5-10 deg/s of `r_d` at cruise IAS) this contributes at
+-- most ~0.1-0.2 of pedal travel, well inside the axis range.
+local K_TURN_COORD_PEDAL = 0.02
 
 -- Rotor RPM proxy (mode-1 batch, explore-notes 2026-11-18/19, Q-M1-1).
 -- "dummy": a fixed stand-in value, the user's own fallback. "arg_
@@ -611,6 +648,15 @@ local function law_init_at_take(measured, limits, command)
         -- "settling clears it"). A fresh activation starts clean, same
         -- reasoning as `rate_override_deg_s`/`break_entry_h_m` above.
         break_pedal_bias_accum = 0.0,
+        -- Sortie 2026-11-20 -- the turn-coordination pedal overlay
+        -- (step 5, `K_TURN_COORD_PEDAL`), zero until the first
+        -- `law_update` recomputes it from `r_d`. Unlike `break_pedal_
+        -- bias_accum`, this is never accumulated -- see its own
+        -- comment in `law_update` for why a position overlay needs no
+        -- running total to unwind. Zero here keeps `law_outputs` on
+        -- this take state bit-exact (Decision 24): nothing is added
+        -- to `t_y` before the first `law_update` frame.
+        turn_coord_pedal = 0.0,
     }
 end
 
@@ -727,6 +773,20 @@ local function law_update(state, dt, measured, limits)
     -- reactively, the same shape the pedal-near-limit cap already
     -- uses -- no RPM-vs-collective or stall-vs-collective model, a
     -- feedback cap only.
+    --
+    -- Altitude/collective split (sortie 2026-11-20, user: "all the axes
+    -- are interdependent... use then all to maintain desired state" --
+    -- also the steep-break speed-bleed observation that prompted
+    -- enabling collective at all): `d_theta` below only ever picks up
+    -- `a_z_d` (the altitude channel's own demand) when `collective_
+    -- limited` is true -- so collective alone carries 100% of the
+    -- altitude error whenever it still has room, and pitch only takes
+    -- over the vertical job once collective is maxed/RPM-floored/
+    -- stall-margined. This already *is* "favour collective"; it was
+    -- already written this way before collective was ever enabled, so
+    -- enabling the axis (`FC_AXES_ENABLED.collective` above) is what
+    -- makes it take effect on the real aircraft for the first time,
+    -- not a change to this split itself.
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
     local rotor_rpm_limited = measured.rotor_rpm_pct
         <= (limits.rotor_rpm_floor_pct + ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT)
@@ -774,25 +834,30 @@ local function law_update(state, dt, measured, limits)
     next_state.t_p = state.t_p + K_THETA_I * (next_state.theta_d - measured.pitch_deg) * dt
     next_state.t_r = state.t_r + K_PHI_I * (next_state.phi_d - measured.bank_deg) * dt
 
-    -- Step 5: pedal (collective-coupling feedforward, plus Decision
-    -- 27's own pedal-into-the-turn bias while a break's rate override
-    -- is active -- no slip-ball feedback, module header).
+    -- Step 5: pedal (collective-coupling feedforward, Decision 27's own
+    -- pedal-into-the-turn bias while a break's rate override is active
+    -- -- no slip-ball feedback, module header). The turn-coordination
+    -- overlay (`next_state.turn_coord_pedal`, below this integrator) is
+    -- a separate, non-integrated term added only at `law_outputs`.
     --
     -- BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`): the
     -- collective-coupling feedforward only applies while the
     -- collective axis is actually written to the aircraft (`measured.
     -- collective_enabled`, set from `FC_AXES_ENABLED.collective` by
-    -- `read_measured()`). While disabled, `u_c`/`c_dot` above are an
-    -- internal-only bookkeeping value with no effect on the real
-    -- aircraft; feeding that rate into the pedal instead compounded a
-    -- genuine altitude-hold tracking error (the shaper's own `h_ref`
-    -- marches toward its goal with no real coupling back from the
-    -- never-written collective) into a continuously *ramping* pedal
-    -- bias with nothing to arrest it -- confirmed with the toy-plant
-    -- harness: a steady 5 m real/goal altitude offset alone, held for
-    -- 20 s with collective disabled, drove the pedal from -0.001 to
-    -- -0.101 under the unguarded term. This never changes pitch/roll's
-    -- own feedback, only this one feedforward term.
+    -- `read_measured()`, now `true` by default). While disabled, `u_c`/
+    -- `c_dot` above are an internal-only bookkeeping value with no
+    -- effect on the real aircraft; feeding that rate into the pedal
+    -- instead compounded a genuine altitude-hold tracking error (the
+    -- shaper's own `h_ref` marches toward its goal with no real
+    -- coupling back from the never-written collective) into a
+    -- continuously *ramping* pedal bias with nothing to arrest it --
+    -- confirmed with the toy-plant harness: a steady 5 m real/goal
+    -- altitude offset alone, held for 20 s with collective disabled,
+    -- drove the pedal from -0.001 to -0.101 under the unguarded term.
+    -- This never changes pitch/roll's own feedback, only this one
+    -- feedforward term. The guard itself is kept (not removed now that
+    -- collective defaults on) so the axis can still be switched off
+    -- live without this term going unstable again.
     local d_t_y = 0.0
     if measured.collective_enabled then
         d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
@@ -815,16 +880,53 @@ local function law_update(state, dt, measured, limits)
     -- toy-plant harness: `K_BREAK_PEDAL_BIAS` alone reaches
     -- `PEDAL_LIMIT_POSITIVE` in 2.5 s), so a nominal tally overshoots
     -- the unwind by whatever the clamp already absorbed. While
-    -- `d_t_y` is zero (collective disabled, today's default), this
-    -- accumulator equals exactly the break's own contribution; once
-    -- collective is enabled the two terms share one clamp and are no
-    -- longer separable post-saturation -- Flight M-A's own call, same
-    -- as every other gain in this step.
+    -- `d_t_y` is zero (collective disabled), this accumulator equals
+    -- exactly the break's own contribution; once collective is enabled
+    -- the two terms share one clamp and are no longer separable
+    -- post-saturation -- Flight M-A's own call, same as every other
+    -- gain in this step.
     if state.rate_override_deg_s ~= nil then
         next_state.break_pedal_bias_accum =
             (state.break_pedal_bias_accum or 0.0) + (next_state.t_y - t_y_before_break_step)
     else
         next_state.break_pedal_bias_accum = state.break_pedal_bias_accum or 0.0
+    end
+
+    -- Sortie 2026-11-20, user: "turn right 50 -> turns but does not use
+    -- pedals at all. Use pedals." -- proportional to `r_d` (the same
+    -- commanded rate step 1 already computed this frame, above), so an
+    -- ordinary turn carries pedal too.
+    --
+    -- Deliberately a **position overlay, not a rate fed into the `t_y`
+    -- integrator** (unlike `d_t_y`/`break_bias` above) -- recomputed
+    -- fresh from the *current* `r_d` every frame and added only at
+    -- `law_outputs`, never folded into `state.t_y` itself. Trying the
+    -- rate-into-the-integrator shape first (toy-plant harness) showed
+    -- why that is wrong here: during a sustained ordinary turn `r_d`
+    -- stays roughly constant for many seconds, so a rate term integrates
+    -- without bound and saturates the pedal axis almost immediately --
+    -- appropriate for a break's own short, aggressive `break_bias`
+    -- (which is *meant* to pin the pedal hard over), wrong for an
+    -- ordinary turn's coordination, which should track the turn rate
+    -- itself, not its time integral. A position overlay has no such
+    -- accumulation, is exactly zero whenever `r_d` is (so it needs no
+    -- separate "unwind" bookkeeping -- it already is the unwind, every
+    -- frame), and cannot by itself defeat the take-time pedal-drift fix
+    -- above (it adds nothing at `law_init_at_take`, below).
+    --
+    -- Zero below `TURN_SETTLE_DEG_S` (step 1's own "effectively stopped
+    -- turning" threshold, reused here) rather than a bare `~= 0.0`
+    -- check -- a critically-damped heading error asymptotically
+    -- approaches zero and never quite bit-exactly reaches it, so a bare
+    -- check would leave a vanishingly small but nonzero pedal forever.
+    -- Suppressed while a break's rate override is active
+    -- (`K_BREAK_PEDAL_BIAS` above already supplies a turn-direction
+    -- bias for that case) so the two never both feed the same frame --
+    -- see `K_TURN_COORD_PEDAL`'s own comment for the sign assumption.
+    if state.rate_override_deg_s == nil and math.abs(r_d) >= TURN_SETTLE_DEG_S then
+        next_state.turn_coord_pedal = K_TURN_COORD_PEDAL * r_d
+    else
+        next_state.turn_coord_pedal = 0.0
     end
 
     next_state.measured_v_t_mps = measured.v_t_mps
@@ -866,22 +968,32 @@ end
 -- writes (clamped defensively; `law_update`'s own saturation already
 -- keeps `u_c`/`t_y` in range, but the pitch/roll inner-loop terms below
 -- are not themselves saturated upstream). Pure, no mutation.
+--
+-- `pedals` adds `state.turn_coord_pedal` (sortie 2026-11-20, step 5) on
+-- top of `t_y` -- the one deliberate exception to "every output comes
+-- straight from an integrator in `state`": this term is recomputed
+-- fresh each `law_update` frame and never itself integrated, so adding
+-- it here rather than folding it into `t_y` is what keeps it from
+-- needing its own "unwind" bookkeeping (see `law_update`'s own
+-- comment). `law_init_at_take` sets it to `0.0`, so Decision 24's
+-- bit-exact-at-take guarantee is untouched: calling this on a take
+-- state (before any `law_update` has run) adds exactly zero.
 local function law_outputs(state, measured)
     local u_pitch = state.t_p + K_THETA * (state.theta_d - measured.pitch_deg) - K_Q * measured.q_deg_s
     local u_roll = state.t_r + K_PHI * (state.phi_d - measured.bank_deg) - K_P * measured.p_deg_s
     return {
         pitch = law_clamp(u_pitch, -1.0, 1.0),
         roll = law_clamp(u_roll, -1.0, 1.0),
-        pedals = law_clamp(state.t_y, -1.0, 1.0),
+        pedals = law_clamp(state.t_y + (state.turn_coord_pedal or 0.0), -1.0, 1.0),
         collective = law_clamp(state.u_c, -1.0, 1.0),
     }
 end
 
 -- `SIGN`-mapped command value for one axis of a raw captured-arg table
--- (`fc_captured`-shaped); `0.0` when that axis was never captured
--- (disabled axes, e.g. collective today) -- internal law state still
--- needs a number for every axis even when nothing will ever be written
--- for it.
+-- (`fc_captured`-shaped); `0.0` when that axis was never captured (any
+-- axis with its `FC_AXES_ENABLED` flag off) -- internal law state
+-- still needs a number for every axis even when nothing will ever be
+-- written for it.
 local function axis_command(values, axis)
     local v = values[axis]
     if v == nil then

@@ -586,3 +586,169 @@ so inventing a distinct "superseded" status would have no reader.
 - `luac5.1 -p` on `ai_pilot_wheel.lua` and `Export.lua`: both pass.
 - Full-suite runs deferred to Reviewer/DoD per this project's "fast set while working, full suite
   once at DoD" policy (root `CLAUDE.md`, "Verification") -- not re-run a third time here.
+
+### Debug Report (BL-16 sortie 2026-11-20 -- "Desired value must be exact; flying may be imprecise")
+
+### Observed Issue
+
+`docs/acceptance/2026-11-20-sortie-feedback.md`, last section, user's own words:
+
+> desired values: I've said that a certain band is acceptable, holding a value need not be exact.
+> However, the value *set* as desired must still be what player commanded. Actual flight is then
+> allowed to deviate from it a bit, but the desired value must be correct.
+>
+> Now oberver "altitude 100 radar" -> alt set to 116 R. should set to 100. This was mode 2, but
+> just as well the desired value must be correctly set in mode 1. Flying itself is allowed to be a
+> bit imprecice.
+
+Expected: the overlay's own *set* value (mode 2) or the stored goal (mode 1) lands on exactly what
+was commanded (or the nearest value the wheel can represent, if coarser); only the *flown* value
+may lag behind it.
+
+### Hypothesis
+
+Mode 2's goal convergence and mode 1's goal storage are two different mechanisms, so each needed
+its own check:
+
+- **Mode 2** (`aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua`): `ai_pilot_goal_tick_
+  altitude`/`ai_pilot_goal_tick_heading` stop pressing the AI-pilot-wheel hold the instant the
+  overlay's own readback (`alt_text`/`course_text`) is within `AI_PILOT_ALT_TOLERANCE_M` (20 m) /
+  `AI_PILOT_HEADING_TOLERANCE_DEG` (5°) of the commanded target -- the same band the user had
+  described as acceptable for *holding* a value once flown, reused as the stop condition for
+  *setting* it. "Altitude 100 radar" landing at 116 (16 m error, inside the 20 m band) is exactly
+  this: the goal tick saw "close enough" and released the hold with the overlay still 16 m wrong.
+- **Mode 1** (`aircraft-layer/dcs-export/Petrobrain/flight_control.lua`,
+  `body-layer/src/belief/flight_control.py`): no equivalent mechanism was known to exist --
+  `law_apply_goal` stores `goal.heading_deg`/`goal.alt_m`/`goal.ias_kmh` directly with no
+  tolerance check at all, so the working hypothesis was "mode 1 has no bug here," to be confirmed
+  by reading the whole path rather than assumed.
+
+### Evidence
+
+- Read `ai_pilot_wheel.lua`'s `ai_pilot_correction_direction`/`ai_pilot_goal_heading_direction`
+  (the two pure "which way to press, or stop" decisions): both return `nil` (stop) once
+  `|held - target| <= tolerance`, and the altitude goal tick (`ai_pilot_goal_tick_altitude`, line
+  ~936 pre-fix) called the former with no override, so it shared the takeover-correction loop's
+  20 m band. The heading goal tick (`ai_pilot_goal_tick_heading`) has always had its own 5°
+  constant with no other caller, confirming it is purely a goal-exactness setting, not a shared
+  flown-value one.
+- `aircraft-layer/research/2026-11-14-mi24p-ai-pilot-wheel-layout.md` section 5 (the pilot's own
+  operating-model writeup): FLT/HVR altitude and heading are changed **only** by a long hold
+  ("altitude climbs/descends while held; release at target", "heading CCW/CW while held") -- no
+  short-tap option exists for either in FLT/HVR (only HVRT's own `+2m`/`-2m` inner buttons do, a
+  different mode). So "finish with short taps" (the user's own suggested anti-oscillation
+  strategy) is not an available lever here; the only lever is when the existing hold-and-poll
+  releases.
+- `aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md` ("Nudge step sizes"):
+  `$S/HelperAI/HelperAI.lua`'s own constants (`course_change_low_speed = 10`,
+  `alt_change_low_speed = 15`, ramping to `course_change_high_speed = 40`/`alt_change_high_speed =
+  50` only after holding past `course_alt_change_transition_time = 2` seconds). At the 5 Hz poll
+  rate (`EXPORT_INTERVAL_S = 0.2 s`, `Export.lua`) this bounds one poll's worth of movement during
+  an ordinary (sub-2 s) correction to roughly 2-3 units -- a tight stop tolerance will only ever
+  overshoot by about that much, and the goal tick's own existing "switch direction immediately
+  without waiting for a release" behaviour (already in `ai_pilot_goal_tick_heading`'s/`_altitude`'s
+  code, confirmed by reading it) self-corrects any overshoot on the very next tick. Units
+  (deg/s vs m/s) are the research note's own unverified guess, flagged there as "measure before
+  relying on it" -- not re-verified live here, but the bound holds regardless of the exact units
+  since it only needs "small relative to a tight tolerance," which 2-3 vs. a target band of
+  0.5 satisfies either way.
+- Every overlay altitude/heading reading in both research notes' screenshots (`196 R`, `948 B`,
+  `71`, `60`, `150`) is a bare integer, no decimal point -- the basis for treating "exact" as
+  "equal to the nearest whole unit" (tolerance 0.5) rather than true floating-point equality.
+  **Not independently re-verified live** for this fix -- flagged in the new constants' own
+  comments, since no screenshot was taken specifically looking for a fractional reading.
+- Read mode 1 end to end for the same question: `body-layer/src/belief/crew_console.py`'s
+  `axes_set_heading`/`axes_set_altitude`/`axes_set_speed`/`axes_step_altitude`/`axes_step_speed`
+  pass the commanded value through `clamp_altitude`/`clamp_speed` only (the documented AGL floor
+  and the documented IAS ceiling/floor -- no rounding, no band-snapping) before building
+  `FlightControlGoalRequest`; `flight_control.lua`'s `apply_goal_fields` parses the wire JSON with
+  `extract_json_number_field` (exact `tonumber`, no rounding) straight into `fc_goal_heading_deg`/
+  `fc_goal_alt_m`/`fc_goal_ias_kmh` and into `law_apply_goal`, which assigns `next_state.heading_
+  goal_deg = goal.heading_deg` / `next_state.alt_goal_m = goal.alt_m` / `next_state.speed_goal_mps
+  = goal.ias_kmh / 3.6` verbatim (the last is an exact unit conversion, not a rounding); the wire
+  echo (`fc_goal_heading`/`fc_goal_altitude`/`fc_goal_speed`) reads the same locals straight back.
+  `round(clamped)` appears once, in `axes_set_altitude`/`axes_step_altitude`'s own **returned**
+  dict (the spoken-readback value), never in the `FlightControlGoalRequest` sent on the wire. No
+  deviation found anywhere in this path -- hypothesis confirmed as "no bug."
+
+### Fix Applied
+
+**Mode 2 only** (`aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua`):
+
+- `ai_pilot_correction_direction(held_m, target_m, tolerance_m)` gained a third, optional
+  parameter (defaults to `AI_PILOT_ALT_TOLERANCE_M` when omitted, so every takeover-correction call
+  site -- `ai_pilot_begin_hold_phase`'s two directions, `ai_pilot_decide_correction`, `ai_pilot_
+  check_hold_convergence`, the quick-path second-pulse re-check -- is unchanged and keeps the 20 m
+  "flown value matches the handover snapshot" band).
+- A new constant, `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M = 0.5`, is passed explicitly at the one
+  call site that is the altitude **goal**'s own stop condition (`ai_pilot_goal_tick_altitude`).
+- `AI_PILOT_HEADING_TOLERANCE_DEG` (the heading goal's only caller) is tightened in place from
+  `5.0` to `0.5` -- no parameterization needed since, unlike altitude, heading has no second,
+  wider-banded caller to preserve.
+- Both new/changed constants are declared with no `tuning.py` equivalent (aircraft-layer has no
+  tuning-loader mechanism; root `CLAUDE.md`, "Outside body-layer the loader does not exist") and
+  documented as such.
+
+**Mode 1**: no code change. Confirmed exact end to end (see Evidence); the user's rule was already
+satisfied there.
+
+**Body-layer** (`body-layer/src/belief/ai_pilot_wheel.py`): `AI_PILOT_ALTITUDE_TOLERANCE_M`'s and
+`AI_PILOT_HEADING_TOLERANCE_DEG`'s docstrings corrected -- both are declared tunables with **no
+code consumer anywhere in `body-layer/src/`** (confirmed by grep before editing), so their default
+values (20.0/5.0) are unchanged, but the docstrings previously claimed (heading) or implied
+(altitude) that Stage P2's goal tick would use them; that was never wired up, and is now actively
+false for altitude (the goal tick uses its own, different, Lua-only constant) and stale for
+heading (the Lua side's own identically-named constant just changed value while this one did not).
+Regenerated `body-layer/config/defaults.toml` via `tools/generate_defaults.py --write` since the
+rendered first-sentence description changed for both keys.
+
+### Verification
+
+- New/changed tests in `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`:
+  - `TestAiPilotCorrectionDirection.test_explicit_tolerance_overrides_the_default_band` -- the new
+    third parameter.
+  - `TestAiPilotGoalHeadingDirection`: `test_within_tolerance_needs_no_correction` tightened to
+    0.3°; new `test_outside_the_tightened_tolerance_still_corrects` covers the old 5° band's own
+    2° example, which now must still correct.
+  - `TestAiPilotGoalTick.test_heading_goal_holds_then_settles`: extended with a 1°-short reading
+    (89 vs. target 90) that must keep pressing before the exact 90 settles -- fails on the
+    pre-fix 5° band (would have settled at 89), passes after.
+  - `TestAiPilotGoalTick.test_altitude_goal_does_not_settle_short_of_the_exact_target` (new) --
+    reproduces the exact sortie numbers (150 -> 116 -> 100 against a target of 100): fails on the
+    pre-fix code (116 settles, 16 m inside the old 20 m band) and passes after. Verified the failure
+    is the stated one by running it against the pre-fix source before applying the Lua change.
+  - Both new constants added to the three `_*_CONSTANTS` extraction tuples the harness uses
+    (`_AI_PILOT_WHEEL_CONSTANTS`/`_AI_PILOT_WHEEL_INTEGRATION_CONSTANTS`/`_GOAL_INTEGRATION_
+    CONSTANTS`) -- missing this is a silent-fallback-to-default-tolerance failure mode, caught by
+    first running the new altitude regression test before adding
+    `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M` to `_GOAL_INTEGRATION_CONSTANTS` and observing it fail
+    for exactly that reason (`hold_cmd_116` read `nil`, i.e. the 20 m default had silently applied).
+- `pytest aircraft-layer/tests/test_ai_pilot_wheel_lua.py -q`: 94 passed (was 91; +3 new tests,
+  2 existing tests' fixture values changed to match the tightened bands).
+- `pytest aircraft-layer/tests -q` (full subproject suite): 1007 passed, no regressions.
+- `ruff format --check`/`ruff check` (`aircraft-layer/src aircraft-layer/tests`): clean.
+- `cd aircraft-layer && .venv/bin/mypy src`: Success, no issues found in 28 source files.
+- `luac5.1 -p` on `ai_pilot_wheel.lua`: passes. GETGLOBAL sweep: unchanged from before this fix
+  (`client`, `debug_log`, `extract_json_number_field`, `extract_json_string_field`,
+  `fmt_int_or_null`, `fmt_num_or_null`, `GetDevice`, `json_escape_string`, four `LoGet*` DCS APIs,
+  `safe_call`, Lua stdlib (`math`/`string`/`tonumber`/`tostring`/`type`), `WHEEL_CENTER_BUTTON`,
+  `WHEEL_MENU_BUTTON`) -- no new stray global; both new locals (`AI_PILOT_GOAL_ALT_EXACT_
+  TOLERANCE_M`, and the tightened `AI_PILOT_HEADING_TOLERANCE_DEG`) are declared before use.
+- `pytest body-layer/tests/test_ai_pilot_wheel.py body-layer/tests/test_body_ai_pilot_wheel.py
+  body-layer/tests/test_crew_console_ai_pilot_wheel.py body-layer/tests/test_flight_control.py
+  body-layer/tests/test_body_flight_control.py -q`: 194 passed.
+- `pytest body-layer/tests/test_tuning_defaults_toml.py -q`: 1 passed (the regenerated
+  `defaults.toml` matches the declarations).
+- `ruff format --check`/`ruff check` (`body-layer/src body-layer/tests`): clean.
+- `cd body-layer && .venv/bin/mypy src`: Success, no issues found in 92 source files.
+- Full `pytest body-layer/tests -q` (no `-x`, after fixing the issue below): 3702 passed,
+  4 xfailed, no regressions.
+- The first full-suite run caught a real omission: `tests/test_tuning_comment_renders.py`
+  (`X-T26`'s guard against a cross-key constraint stated after a `#:` block's first sentence,
+  which the generator never renders) failed because `AI_PILOT_HEADING_TOLERANCE_DEG`'s docstring
+  named `AI_PILOT_ALTITUDE_TOLERANCE_M` only in its second sentence. Not a real coupling between
+  the two tunables (neither constrains the other's value) -- reworded to drop the cross-reference
+  by name rather than add it to the first sentence; `test_tuning_comment_renders.py` and
+  `test_tuning_defaults_toml.py` pass after. This is the exact trap root `CLAUDE.md`'s own
+  "Behaviour-affecting constants are tunable" section warns about, caught mechanically rather than
+  by a reader.

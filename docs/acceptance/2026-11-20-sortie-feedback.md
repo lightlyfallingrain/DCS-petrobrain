@@ -106,3 +106,64 @@ at once, ending any remaining break press (including break away's second press).
   the decision above).
 - One mission-wide running number for every command channel: BL-16 work, recorded on
   `body-layer/ROADMAP/BL-16.md`, not this batch.
+
+## Desired value must be exact; flying may be imprecise (user, verbatim)
+
+> desired values: I've said that a certain band is acceptable, holding a value need not be exact.
+> However, the value *set* as desired must still be what player commanded. Actual flight is then
+> allowed to deviate from it a bit, but the desired value must be correct.
+>
+> Now oberver "altitude 100 radar" -> alt set to 116 R. should set to 100. This was mode 2, but
+> just as well the desired value must be correctly set in mode 1. Flying itself is allowed to be a
+> bit imprecice.
+
+Main-loop reading: `ai_pilot_wheel.lua` stops pressing once the overlay's *set* value is within
+`AI_PILOT_ALT_TOLERANCE_M` (20 m) of the target, and within `AI_PILOT_HEADING_TOLERANCE_DEG` (5°)
+for heading. The "acceptable band" is applied to setting the value, not to flying it. Expected:
+the set value lands exactly on what was commanded (or the nearest value the wheel can show), and
+only the flown value may deviate. Same for mode 1's goal values.
+
+## Mode 1 flight, `main` @ `a8b21de0` (user, verbatim)
+
+> In mode 1: "turn right 50" -> turns but does not use pedals at all. Use pedals. All the axis are
+> interdependent in helicopter flight. Use then all to maintain desired state.
+>
+> There is a slight bank when taking controls, but it nicely stabilizes to ~0 now.
+>
+> Mode 1 break turn banks steep, good.
+> then too slowly pulls cyclic back -> do it faster.
+> but pulls too much cyclic and speed drops fast-> less cyclic back.
+
+- Take: the pedal-drift fix works (slight bank, settles to ~0).
+- Break: bank good; the back-cyclic comes in too slowly, then too much, and speed bleeds off.
+- Turns: no pedal at all. The pedal law has no slip-ball term (never probed) and no
+  turn-coordination term; the only pedal inputs are the collective feedforward (now gated off,
+  collective disabled) and the break bias.
+
+Decisions (asked: enable collective; pedal into the turn plus a later slip-ball probe; tune the
+pitch response via an M0-E probe or by feel), verbatim:
+
+> 1 - absolutely yes. Now.
+> 2 - yes
+> 3 - cancel, add collective control first, then I'll retest
+
+- Collective is written in mode 1 (`FC_AXES_ENABLED.collective = true`), in this batch.
+- Turns get a pedal coordination term proportional to turn rate, in this batch; a slip-ball probe
+  flight comes later so the ball can be centred properly.
+- No pitch-loop tuning now: the user retests the break with collective on first.
+
+> we need a to read the slip ball as one of the important values since it guides pedal adjustmens.
+
+Slip ball moves from "later probe" to now: read it, report it on the flight-control status line
+so a flight can calibrate its sign/units, then use it for pedal (ball-centring) feedback.
+
+## Mode 2 → mode 1 handover crash, `main` @ `a8b21de0` (user, verbatim)
+
+> In mode 2 I commanded from speed 0 to 200, AI accelerated.
+> I changed to mode 1 -> controls fixed at what they were, no corrective movement -> crash as bank
+> kept increasing.
+> On change to mode 1, mode 1 must keep flying the set targets from mode 2 (heading, speed, alt).
+
+Expected: on the unpark take, mode 1 actively flies (the control law runs from the first frame,
+corrects attitude), with its heading/speed/altitude goals seeded from mode 2's set targets (the
+overlay's set course/speed/alt), not from whatever the aircraft happened to be doing.
