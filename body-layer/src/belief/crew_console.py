@@ -149,6 +149,7 @@ from belief.escalation import (
     DebugPrintBrainClient,
     handle_player_utterance,
 )
+from belief.flight_authority import FlightAuthorityDecision, FlightAuthorityState
 from belief.flight_control import (
     MAX_IAS_KMH,
     MIN_IAS_KMH,
@@ -2056,6 +2057,17 @@ class CrewConsole:
         default_factory=FlightControlState, repr=False
     )
 
+    #: BL-16 Stages 1-2 (`plans/flight-desired-state/plan.md`) -- the
+    #: one mode-authority/desired-state mirror, refreshed every poll by
+    #: `body._apply_flight_control` (`advance_flight_authority`, never
+    #: mutated here). `flight_mode()`/`current_crew_state()`'s `has_
+    #: controls`/`held_*` read this field now, not `parked_flight_
+    #: state.parked_active`/`flight_control_state.phase` -- Lua is the
+    #: one mode authority (section 2 of the plan).
+    flight_authority_state: FlightAuthorityState = field(
+        default_factory=FlightAuthorityState, repr=False
+    )
+
     #: `take_controls`'s own `TOO_SLOW` refusal (Decision 22) needs live
     #: IAS, which no existing field on this class carries (`on_ground`
     #: is the nearest precedent: refreshed every poll by `body.py` from
@@ -3335,88 +3347,65 @@ class CrewConsole:
             self.rule_categories = dict(categories)
 
     def flight_mode(self) -> Literal["overlay", "axes"] | None:
-        """BL-16 mode 1 Decision 21/25 -- the **one** place that decides
-        which mode is live, read by `rules.actions._by_mode` for every
-        one of the 16 shipped flight actions it wraps. `"overlay"`
-        whenever `parked_active` (mode 2 flying, or armed-and-waiting
-        for an unpark); `"axes"` whenever mode 1's own phase is `TAKING`
-        or `ACTIVE`; `None` otherwise (nobody flying -- the player has
-        the stick). If both were somehow true at once, overlay wins
-        (the park row, U5, keeps that overlap to a single poll).
+        """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`) -- the
+        **one** place that decides which mode is live, read by `rules.
+        actions._by_mode` for every one of the 16 shipped flight actions
+        it wraps. Reads `flight_authority_state.fd_mode` alone now --
+        `Export.lua`'s `flight_desired` module is the one mode
+        authority (section 2 of the plan: "Lua derives the mode every
+        frame; nothing sets it directly"). `"overlay"` for `fd_mode ==
+        "m2"`; `"axes"` for `fd_mode == "m1"`; `None` otherwise (`"off"`/
+        `"taking"`/no sample yet -- nobody flying through either
+        mechanism, or still mid-capture).
 
-        **Reads no seat** (Decision 25: "mode 1 is never gated on
-        seat") -- `parked_active` already encodes "ED's AI is not
-        flying" correctly from either seat (`ParkedFlightState.parked_
-        active`'s own docstring on why 852 alone would be wrong)."""
-        if self.parked_flight_state.parked_active:
+        **Never returns `"overlay"` unless the mirror says `m2`** (the
+        plan's own "The mode-2 seam": `fd_has_m2=false` on an aircraft
+        without mode 2 means `fd_mode` is never `"m2"` either, so this
+        falls through to `None`/`"axes"` with no aircraft-type check
+        needed here)."""
+        fd_mode = self.flight_authority_state.fd_mode
+        if fd_mode == "m2":
             return "overlay"
-        if self.flight_control_state.phase in ("TAKING", "ACTIVE"):
+        if fd_mode == "m1":
             return "axes"
         return None
 
     def current_crew_state(self) -> CrewState:
-        """`[[BL-17]]` D16/D17 -- built fresh from `self.parked_flight_
-        state`/`self.flight_control_state` on every call, never cached:
-        the category gate (`_handle_rule`/`drain_pending_rule_dispatch`)
-        and (Stage 3c) the decision to push `PUT /crew_state` must read
-        the same computed value within one poll (plan's "Co-moving
-        Fields" table). `seat`/`hands_free`/`eyes_free` are named stubs
-        pending `[[BL-B123]]` -- see `CrewState`'s own docstring for why.
+        """`[[BL-17]]` D16/D17 -- built fresh from `self.flight_
+        authority_state` on every call, never cached: the category gate
+        (`_handle_rule`/`drain_pending_rule_dispatch`) and (Stage 3c)
+        the decision to push `PUT /crew_state` must read the same
+        computed value within one poll (plan's "Co-moving Fields"
+        table). `seat`/`hands_free`/`eyes_free` are named stubs pending
+        `[[BL-B123]]` -- see `CrewState`'s own docstring for why.
 
-        **Widened for BL-16 mode 1 (Decision 22's Co-moving row):**
-        `has_controls = parked_active or flight_control_state.phase in
-        (TAKING, ACTIVE)` -- Petrovich flying through either mechanism
-        counts, and `has_controls` stays `True` continuously across a
-        park/unpark while he flies (Decision 24: the `OVERLAY` phase is
-        reached from `TAKING`/`ACTIVE`, never from a bare release, so
-        this disjunction is `True` through the whole park->unpark
-        window too, from whichever side is live at the instant).
-        `held_heading`/`held_altitude`/`held_speed` are mode-2's own
-        `parked_flight_state` mirrors whenever he flies through the
-        overlay, and mode 1's own `flight_control_state.held_*` --
-        falling back to `flight_control_state.measured_*` whenever the
-        commanded value is still `None` (no goal set yet this
-        activation; `measured_*` is plain telemetry, always known once
-        Lua is active) -- whenever he flies on the axes. **This fallback
-        is what keeps the gates' "HOLD until held_* is known" rule from
-        freezing the very first turn/heading/altitude/speed command
-        after a fresh take**, since mode 1 has no AI pilot reporting a
-        pre-existing held value the way mode 2's overlay readback
-        does (`belief.flight_control`'s own module docstring).
+        **BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `has_
+        controls`/`held_*` read the one `flight_authority_state` mirror
+        now, not `parked_flight_state`/`flight_control_state`** --
+        `has_controls` is true for `fd_mode` in `("taking", "m1",
+        "m2")` (mid-capture counts: Decision 13's recovery phrase must
+        always act, and a command given the instant a voice take lands
+        should not be refused for a poll it was in flight). `held_
+        heading`/`held_altitude`/`held_speed` are `flight_authority_
+        state.heading_deg`/`alt_m`/`ias_kmh` directly -- `Export.lua`'s
+        own edge handler already seeds these from the measured aircraft
+        state at a take and from the overlay's set values at a park
+        (`flight_desired.lua`'s `reseed_from_measured`/`reseed_from_
+        overlay`), so the "fall back to measured when nothing commanded
+        yet" merge this method used to do by hand is now Lua's own job.
 
         **`commands_ready` (BL-16 fail-loud, 2026-11-20)** is passed
         straight through from `self.commands_ready` -- a plain field
         `body.py`'s poll loop refreshes, not a derivation this method
         computes, since it names a fact about this process's reset
-        channel, not about `parked_flight_state`/`flight_control_
-        state`."""
-        parked = self.parked_flight_state
-        axes = self.flight_control_state
-        flying_axes = axes.phase in ("TAKING", "ACTIVE")
-        has_controls = parked.parked_active or flying_axes
-        if flying_axes:
-            held_heading = (
-                axes.held_heading
-                if axes.held_heading is not None
-                else axes.measured_heading
-            )
-            held_altitude = (
-                axes.held_altitude
-                if axes.held_altitude is not None
-                else axes.measured_altitude
-            )
-            held_speed = (
-                axes.held_speed if axes.held_speed is not None else axes.measured_speed
-            )
-        else:
-            held_heading = parked.held_heading
-            held_altitude = parked.held_altitude
-            held_speed = parked.held_speed
+        channel, not about `flight_authority_state`."""
+        authority = self.flight_authority_state
+        has_controls = authority.fd_mode in ("taking", "m1", "m2")
         return CrewState(
             has_controls=has_controls,
-            held_heading=held_heading,
-            held_altitude=held_altitude,
-            held_speed=held_speed,
+            held_heading=authority.heading_deg,
+            held_altitude=authority.alt_m,
+            held_speed=authority.ias_kmh,
             seat="copilot",
             hands_free=not has_controls,
             eyes_free=True,
@@ -5683,7 +5672,13 @@ class CrewConsole:
         )
         return {"ok": True, "reason": None}
 
-    def drain_flight_control(self, now_sim: float, *, parked_active: bool) -> list[str]:
+    def drain_flight_control(
+        self,
+        now_sim: float,
+        *,
+        parked_active: bool,
+        unparked_from_overlay: bool = False,
+    ) -> list[str]:
         """BL-16 mode 1 -- runs `belief.flight_control.decide_flight_
         control` once per poll (the one "when" apart from `take_
         controls`/`release_controls`, root `CLAUDE.md`'s "Behaviour as
@@ -5692,27 +5687,34 @@ class CrewConsole:
         state` has refreshed `self.flight_control_state` this poll --
         same spot `drain_ai_pilot_wheel_speech` is called from.
 
-        `urgent=True` lines (the self-release/forced-handover lines)
-        bypass the gate via `_print`'s own `bypass_gate`, same posture
-        D19 already gives every other urgent flight-control line.
+        `urgent=True` lines bypass the gate via `_print`'s own `bypass_
+        gate`, same posture D19 already gives every other urgent
+        flight-control line. **BL-16 Stage 2 (`plans/
+        flight-desired-state/plan.md`): `decide_flight_control` no
+        longer makes the `OVERLAY` -> `ACTIVE` (unpark) transition
+        itself** -- `fd_mode` (`self.flight_authority_state`) is the one
+        mode authority now, and the forced-handover urgent lines moved
+        to `belief.flight_authority.decide_flight_speech` (`body.py`'s
+        own call site). Only the voice-take ack-timeout/confirmation
+        handshake remains here.
 
-        **Mode-1 batch, Decision 32**: an unpark-take is exactly the
-        `OVERLAY` -> `ACTIVE` transition (the only place `decide_
-        flight_control` makes it) -- checked here, right after the
-        call, rather than inside that pure function, which has no
-        access to `self.parked_flight_state`'s own `cbtm_action_sent`/
-        `cbtm_break_entry_heading_deg`. When a mode-2 break was active
-        at that instant, the heading goal is seeded with the break's
-        own target (`cbtm_break_target_heading_deg`) rather than left
-        to `law_init_at_take`'s own bank-based pick, which would
-        otherwise continue the measured turn rate forever -- "not the
-        inherited continuous turn." Only `heading_deg` is set
-        (`turn_rate_deg_s` omitted -- the plan names no rate for this
-        case, only the target); altitude/speed goals are untouched,
-        same as an ordinary take. Queued the same one-shot way every
-        other `axes_*` action sets this field -- `_apply_flight_
-        control` sends it on a later poll, once Lua has already
-        reported `active` (it just did, this poll)."""
+        **`unparked_from_overlay`** (Mode-1 batch, Decision 32) is
+        `body.py`'s own report of this poll's `flight_authority_state`
+        edge (`fd_mode` `"m2"` -> `"m1"`) -- the successful-unpark case
+        `decide_flight_control` used to detect itself via `phase ==
+        "OVERLAY" -> "ACTIVE"`, now detected from the one mode
+        authority instead so this still fires even though that phase
+        transition is gone. When a mode-2 break was active at that
+        instant, the heading goal is seeded with the break's own target
+        (`cbtm_break_target_heading_deg`) rather than left to `law_
+        init_at_take`'s own bank-based pick, which would otherwise
+        continue the measured turn rate forever -- "not the inherited
+        continuous turn." Only `heading_deg` is set (`turn_rate_deg_s`
+        omitted -- the plan names no rate for this case, only the
+        target); altitude/speed goals are untouched, same as an
+        ordinary take. Queued the same one-shot way every other `axes_*`
+        action sets this field -- `_apply_flight_control` sends it on a
+        later poll, once Lua has already reported `active`."""
         old_phase = self.flight_control_state.phase
         new_state, decision = decide_flight_control(
             self.flight_control_state, now_sim, parked_active=parked_active
@@ -5733,7 +5735,7 @@ class CrewConsole:
             # transition`, so belief and the aircraft never disagree
             # about who flies for long.
             self.flight_control_system_release_pending = True
-        if old_phase == "OVERLAY" and new_state.phase == "ACTIVE":
+        if unparked_from_overlay:
             break_action = self.parked_flight_state.cbtm_action_sent
             entry_heading = self.parked_flight_state.cbtm_break_entry_heading_deg
             if (
@@ -5747,6 +5749,22 @@ class CrewConsole:
         self.flight_control_state = new_state
         if decision is None:
             return []
+        lines = [decision.says]
+        self._print(lines, now_sim, bypass_gate=decision.urgent)
+        return lines
+
+    def speak_flight_authority_decision(
+        self, decision: FlightAuthorityDecision, now_sim: float
+    ) -> list[str]:
+        """BL-16 Stages 1-2 (`plans/flight-desired-state/plan.md`) --
+        speaks `belief.flight_authority.decide_flight_speech`'s own
+        decision. `body.py` calls `decide_flight_speech` directly
+        (comparing the authority mirror's state before/after this
+        poll's refresh, the same "capture previous, then compare" idiom
+        it already uses for `parked_flight_state.player_seat`/
+        `payload_station_counts_last_seen`) and this method is the one
+        place that actually speaks the result, same division of labour
+        as every other `drain_*` method on this class."""
         lines = [decision.says]
         self._print(lines, now_sim, bypass_gate=decision.urgent)
         return lines

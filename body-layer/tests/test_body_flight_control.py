@@ -23,6 +23,7 @@ from body import _apply_flight_control
 class _FakeAircraftClient:
     def __init__(self, *, raise_on_write: bool = False) -> None:
         self.flight_control_calls: list[tuple[Any, ...]] = []
+        self.flight_lease_calls: list[tuple[Any, ...]] = []
         self.raise_on_write = raise_on_write
 
     def write_flight_control(self, *args: Any) -> None:
@@ -30,10 +31,22 @@ class _FakeAircraftClient:
             raise AircraftLayerError("simulated send failure")
         self.flight_control_calls.append(args)
 
+    def write_flight_lease(self, *args: Any) -> None:
+        if self.raise_on_write:
+            raise AircraftLayerError("simulated send failure")
+        self.flight_lease_calls.append(args)
 
-def _console(state: FlightControlState) -> CrewConsole:
+
+def _console(state: FlightControlState, *, overlay: bool = False) -> CrewConsole:
+    """`overlay=True` (BL-16 Stage 2) sets `flight_authority_state.
+    fd_mode = "m2"` -- `_apply_flight_control`'s own stale-transition
+    guard reads `CrewConsole.flight_mode()` now, not `state.phase`."""
     console = CrewConsole(store=None)  # type: ignore[arg-type]
     console.flight_control_state = state
+    if overlay:
+        console.flight_authority_state = replace(
+            console.flight_authority_state, fd_mode="m2"
+        )
     return console
 
 
@@ -43,7 +56,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(wire_seq=0))
         console.flight_control_transition = "take"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert console.flight_control_transition is None
         assert len(client.flight_control_calls) == 1
@@ -73,7 +86,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(phase="TAKING", take_seq=6, wire_seq=2))
         console.flight_control_transition = "take"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         seq, cmd, _limits, _goal = client.flight_control_calls[0]
         assert seq == 3
@@ -85,7 +98,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(wire_seq=5))
         console.flight_control_transition = "release"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert console.flight_control_transition is None
         seq, cmd, _limits, _goal = client.flight_control_calls[0]
@@ -99,7 +112,7 @@ class TestApplyFlightControl:
             heading_deg=270.0
         )
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert console.flight_control_goal_transition is None
         seq, cmd, _limits, goal = client.flight_control_calls[0]
@@ -116,7 +129,7 @@ class TestApplyFlightControl:
         console.flight_control_transition = "take"
         console.flight_control_goal_transition = FlightControlGoalRequest(turn=1)
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert len(client.flight_control_calls) == 2
         seqs = [call[0] for call in client.flight_control_calls]
@@ -140,7 +153,7 @@ class TestApplyFlightControl:
         console.flight_control_transition = "take"
         console.flight_control_system_release_pending = True
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert len(client.flight_control_calls) == 1
         seq, cmd, _limits, goal = client.flight_control_calls[0]
@@ -153,7 +166,7 @@ class TestApplyFlightControl:
         # it is still here, to be sent on the very next poll.
         assert console.flight_control_transition == "take"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert len(client.flight_control_calls) == 2
         seq, cmd, _limits, goal = client.flight_control_calls[1]
@@ -178,7 +191,7 @@ class TestApplyFlightControl:
             heading_deg=315.0
         )
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert client.flight_control_calls == []
         assert console.flight_control_goal_transition == FlightControlGoalRequest(
@@ -195,13 +208,13 @@ class TestApplyFlightControl:
         console.flight_control_goal_transition = FlightControlGoalRequest(
             heading_deg=315.0
         )
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
         assert client.flight_control_calls == []
 
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert console.flight_control_goal_transition is None
         assert len(client.flight_control_calls) == 1
@@ -222,36 +235,27 @@ class TestApplyFlightControl:
             heading_deg=315.0
         )
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert client.flight_control_calls == []
         assert console.flight_control_goal_transition is None
         assert console.flight_control_state.wire_seq == 3
 
-    def test_the_arm_lease_resends_every_poll_while_overlay_and_unpark_take(
-        self,
-    ) -> None:
+    def test_the_lease_resends_every_poll_regardless_of_phase(self) -> None:
+        """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`,
+        refinement 3): the lease is no longer conditioned on `phase`/
+        `unpark_take` (both gone from this check) -- it is sent every
+        poll this function runs, on its own channel, carrying the given
+        epoch and the `limits` bundle."""
         client = _FakeAircraftClient()
-        console = _console(
-            FlightControlState(phase="OVERLAY", unpark_take=True, wire_seq=0)
-        )
+        console = _console(FlightControlState(wire_seq=0))
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 7)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 7)  # type: ignore[arg-type]
 
-        assert len(client.flight_control_calls) == 2
-        for seq, cmd, _limits, goal in client.flight_control_calls:
-            assert cmd == "arm"
-            assert goal is None
-        assert console.flight_control_state.wire_seq == 2
-
-    def test_no_arm_is_sent_while_overlay_without_unpark_take(self) -> None:
-        client = _FakeAircraftClient()
-        console = _console(FlightControlState(phase="OVERLAY", unpark_take=False))
-
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
-
-        assert client.flight_control_calls == []
+        assert len(client.flight_lease_calls) == 2
+        for epoch, _limits in client.flight_lease_calls:
+            assert epoch == 7
 
     def test_row_11_other_direction_a_stale_transition_is_discarded_while_overlay(
         self,
@@ -259,19 +263,19 @@ class TestApplyFlightControl:
         """BL-16 mode 1's Co-moving row 11, the direction that is
         specific to `_apply_flight_control` itself (the ai_pilot_*
         direction is `test_body_ai_pilot_wheel.py`'s own test): an
-        `axes_*` goal action spoken just before a park races `decide_
-        flight_control`'s park-edge transition to `OVERLAY`. Both
-        one-shots must be discarded unsent, with no `wire_seq` bump --
-        sending a stale axes request to Lua while he now flies through
-        the overlay would be meaningless at best."""
+        `axes_*` goal action spoken just before a park. **BL-16 Stage
+        2**: the guard reads `flight_mode() == "overlay"` now (`fd_mode`
+        via `flight_authority_state`), not `state.phase == "OVERLAY"`
+        -- both one-shots must still be discarded unsent, with no
+        `wire_seq` bump, whenever the mirror says mode 2 is flying."""
         client = _FakeAircraftClient()
-        console = _console(FlightControlState(phase="OVERLAY", wire_seq=3))
+        console = _console(FlightControlState(wire_seq=3), overlay=True)
         console.flight_control_transition = "take"
         console.flight_control_goal_transition = FlightControlGoalRequest(
             heading_deg=10.0
         )
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         assert console.flight_control_transition is None
         assert console.flight_control_goal_transition is None
@@ -283,7 +287,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(wire_seq=0))
         console.flight_control_transition = "take"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]  # must not raise
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]  # must not raise
 
         assert console.flight_control_transition is None
 
@@ -303,7 +307,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(wire_seq=0, lua_last_cmd_seq=47))
         console.flight_control_transition = "take"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         seq, cmd, _limits, _goal = client.flight_control_calls[0]
         assert seq == 48
@@ -323,7 +327,7 @@ class TestApplyFlightControl:
         console = _console(FlightControlState(wire_seq=10, lua_last_cmd_seq=3))
         console.flight_control_transition = "release"
 
-        _apply_flight_control(console, client)  # type: ignore[arg-type]
+        _apply_flight_control(console, client, 1)  # type: ignore[arg-type]
 
         seq, _cmd, _limits, _goal = client.flight_control_calls[0]
         assert seq == 11

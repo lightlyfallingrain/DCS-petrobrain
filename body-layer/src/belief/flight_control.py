@@ -592,8 +592,11 @@ class FlightControlDecision:
     """What `decide_flight_control` found this poll, for `CrewConsole`'s
     own drain to speak -- `None` when nothing happened. `says` carries
     the exact text (the one-shot `pending_take_says` for a confirmed
-    voice take, or the fixed urgent lines for the other three kinds);
-    `urgent` is threaded straight to `_print`'s `bypass_gate`."""
+    voice take, or "Unable, not ready." on an ack timeout); `urgent` is
+    threaded straight to `_print`'s `bypass_gate`. The forced-handover
+    urgent lines this dataclass used to also carry (park/unpark/self-
+    release) now come from `belief.flight_authority.FlightAuthority
+    Decision` instead (Stage 2, `plans/flight-desired-state/plan.md`)."""
 
     says: str
     urgent: bool
@@ -603,79 +606,44 @@ def decide_flight_control(
     state: FlightControlState, now_sim: float, *, parked_active: bool
 ) -> tuple[FlightControlState, FlightControlDecision | None]:
     """The one "when" apart from `take_controls`/`release_controls`
-    (root `CLAUDE.md`, "Behaviour as actions and params") -- everything
-    that happens because of what `Export.lua`, ED's AI, or the clock did
-    this poll, read from the mirrors `advance_flight_control_state` just
-    refreshed and `parked_active` (mode 2's own freshly-refreshed
-    `ParkedFlightState.parked_active`, read here rather than imported,
-    the same "two co-moving fields, one caller reads both" shape `body.
-    py`'s existing call sites already use).
+    (root `CLAUDE.md`, "Behaviour as actions and params") -- now narrowed
+    to the voice-take handshake only (`plans/flight-desired-state/
+    plan.md`, Stage 2).
+
+    **The park/unpark/self-release branches this function used to carry
+    are deleted**, per the plan's own Stage 2 bullet -- `fd_mode`
+    (`belief.flight_authority.FlightAuthorityState`, derived in
+    `Export.lua`) is now the one mode authority, and `decide_flight_
+    speech` (same module) is the one place that turns a forced-handover
+    `fd_mode` edge into the urgent "You have controls!" line. This
+    function no longer moves `phase` to/from `OVERLAY` at all -- `phase`
+    may read stale (`ACTIVE`) while he actually flies mode 2, which is
+    harmless: `flight_mode()`/`current_crew_state()`'s `has_controls`/
+    `held_*` read `flight_authority_state` now, never this `phase`
+    field, and `take_controls`/`release_controls` already decide `acted`
+    from `overlay_flying` (itself `flight_mode() == "overlay"`, i.e. the
+    fd mirror) before `phase` is ever consulted. **The literal deletion
+    of `FlightControlPhase`/`phase`/`unpark_take`/`took_at_sim` off
+    `FlightControlState` is deferred to Stage 3** -- the branch below
+    still depends on them for the voice-take ack-timeout/confirmation
+    handshake, which Stage 3's own one channel (`epoch`/`seq`/acks)
+    replaces, not Stage 2 (see `plans/flight-desired-state/
+    implementation.md`).
 
     Checked in this order, each one `return`s immediately so at most one
-    fires per poll (the events are mutually exclusive by construction --
-    a poll can only observe one of them):
+    fires per poll:
 
-    1. **Park edge while flying** (Decision 24, Co-moving rows 8/8b):
-       `parked_active` just became true while `phase` was `TAKING`/
-       `ACTIVE`/`PILOT`. `TAKING`/`ACTIVE` -> `Export.lua` already self-
-       armed (its own park-edge branch); `PILOT` -> nothing to arm yet
-       (he was not flying mode 1), so this is a no-op for `PILOT` -- only
-       `TAKING`/`ACTIVE` move to `OVERLAY`. Silent either way.
-    2. **Unpark while OVERLAY/armed, Lua confirms active from the unpark
-       origin** (row 9): silent, `take_seq` adopts Lua's own.
-    3. **Unpark while OVERLAY/armed, Lua refuses** (row 9a): urgent
-       "You have controls!" -- a forced handover, not a player command.
-    4. **Lua's own self-release while ACTIVE** (row 7): urgent "You have
-       controls!".
-    5. **Ack timeout while TAKING** (row 5): "Unable, not ready.",
+    1. **Ack timeout while TAKING** (row 5): "Unable, not ready.",
        `pending_take_says` discarded unspoken.
-    6. **Lua confirms active for a voice take while TAKING** (row 4):
+    2. **Lua confirms active for a voice take while TAKING** (row 4):
        `pending_take_says` spoken once, then cleared.
 
-    A no-op (`state` unchanged, `None`) covers every other poll."""
-    if parked_active and state.phase in ("TAKING", "ACTIVE"):
-        new_state = replace(
-            state,
-            phase="OVERLAY",
-            unpark_take=True,
-            pending_take_says=None,
-            took_at_sim=None,
-        )
-        return new_state, None
-
-    if state.phase == "OVERLAY" and not parked_active:
-        if state.lua_mode == "active" and state.lua_take_origin == "unpark":
-            new_state = replace(
-                state,
-                phase="ACTIVE",
-                take_seq=(
-                    state.lua_take_seq
-                    if state.lua_take_seq is not None
-                    else state.take_seq
-                ),
-                unpark_take=True,
-            )
-            return new_state, None
-        if state.lua_mode == "off" and state.lua_release_reason == "refused":
-            new_state = replace(state, phase="PILOT", unpark_take=False)
-            return new_state, FlightControlDecision(
-                says="You have controls!", urgent=True
-            )
-        # Still waiting for Lua to report the unpark's own outcome.
-        return state, None
-
-    if (
-        state.phase == "ACTIVE"
-        and state.lua_mode == "off"
-        and state.lua_release_reason
-        in (
-            "envelope",
-            "nan",
-            "dead",
-        )
-    ):
-        new_state = replace(state, phase="PILOT", pending_take_says=None)
-        return new_state, FlightControlDecision(says="You have controls!", urgent=True)
+    A no-op (`state` unchanged, `None`) covers every other poll.
+    `parked_active` is accepted but no longer read -- kept as a
+    parameter so call sites built against this function's prior shape
+    do not need an unrelated signature edit in the same change; a future
+    stage may drop it."""
+    del parked_active
 
     if state.phase == "TAKING":
         if state.lua_mode == "active" and state.lua_take_seq == state.take_seq:

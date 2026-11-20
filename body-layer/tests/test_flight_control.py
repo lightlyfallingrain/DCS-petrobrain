@@ -325,74 +325,33 @@ class TestReleaseControls:
 
 
 class TestDecideFlightControl:
-    def test_park_edge_while_active_moves_to_overlay_silently(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(phase="ACTIVE", take_seq=1),
-            10.0,
-            parked_active=True,
-        )
-        assert state.phase == "OVERLAY"
-        assert state.unpark_take is True
-        assert decision is None
+    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`) deleted
+    `decide_flight_control`'s own park/unpark/self-release branches --
+    `fd_mode` (`belief.flight_authority`) is the one mode authority now,
+    and the forced-handover urgent line moved to `decide_flight_speech`
+    (`tests/test_flight_authority.py`). The two tests below that this
+    function's remaining branches still cover verbatim (an `OVERLAY`/
+    `PILOT` phase with no take in flight is simply left alone, since
+    there is no park/unpark logic left here to touch it) are kept as
+    differential pins against that deletion; `test_unpark_refused_*`/
+    `test_park_edge_*`/`test_lua_self_release_*`/`test_unpark_
+    confirmed_*` (the branches themselves) are removed."""
 
-    def test_park_edge_while_taking_moves_to_overlay_silently(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(phase="TAKING", took_at_sim=9.0),
-            10.0,
-            parked_active=True,
-        )
-        assert state.phase == "OVERLAY"
-        assert state.took_at_sim is None
-        assert decision is None
-
-    def test_park_while_pilot_is_a_no_op_here(self) -> None:
-        """Nothing to arm yet (he was not flying mode 1) -- `body.py`'s
-        own 2026-11-17-handover `arm` send is a separate concern from
-        this function (the plan's Co-moving row 8b)."""
+    def test_park_while_pilot_is_untouched(self) -> None:
+        """`parked_active` is accepted but no longer read at all --
+        `phase` is simply left alone, whatever it was."""
         state, decision = decide_flight_control(
             FlightControlState(phase="PILOT"), 10.0, parked_active=True
         )
         assert state.phase == "PILOT"
         assert decision is None
 
-    def test_unpark_confirmed_adopts_lua_take_seq_silently(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="OVERLAY",
-                take_seq=1,
-                unpark_take=True,
-                lua_mode="active",
-                lua_take_origin="unpark",
-                lua_take_seq=9,
-            ),
-            10.0,
-            parked_active=False,
-        )
-        assert state.phase == "ACTIVE"
-        assert state.take_seq == 9
-        assert decision is None
-
-    def test_unpark_refused_hands_back_with_an_urgent_line(self) -> None:
-        state, decision = decide_flight_control(
-            FlightControlState(
-                phase="OVERLAY",
-                unpark_take=True,
-                lua_mode="off",
-                lua_release_reason="refused",
-                lua_refuse_cause="disabled",
-            ),
-            10.0,
-            parked_active=False,
-        )
-        assert state.phase == "PILOT"
-        assert state.unpark_take is False
-        assert decision is not None
-        assert decision.says == "You have controls!"
-        assert decision.urgent is True
-
-    def test_unpark_still_pending_is_a_no_op(self) -> None:
-        """Lua has not reported an outcome for this unpark yet (neither
-        `active`+`unpark` nor `off`+`refused`) -- nothing decided."""
+    def test_overlay_with_no_take_in_flight_is_untouched(self) -> None:
+        """`phase == "OVERLAY"` no longer means anything to this
+        function (Stage 3's own one channel replaces the unpark-
+        confirmation handshake this phase used to drive) -- it is
+        simply not `"TAKING"`, so the one remaining branch below does
+        not fire either."""
         state, decision = decide_flight_control(
             FlightControlState(phase="OVERLAY", unpark_take=True, lua_mode="armed"),
             10.0,
@@ -400,24 +359,6 @@ class TestDecideFlightControl:
         )
         assert state.phase == "OVERLAY"
         assert decision is None
-
-    def test_lua_self_release_while_active_speaks_urgently(self) -> None:
-        for reason in ("envelope", "nan", "dead"):
-            state, decision = decide_flight_control(
-                FlightControlState(
-                    phase="ACTIVE",
-                    pending_take_says="stale",
-                    lua_mode="off",
-                    lua_release_reason=reason,
-                ),
-                10.0,
-                parked_active=False,
-            )
-            assert state.phase == "PILOT", reason
-            assert state.pending_take_says is None, reason
-            assert decision is not None, reason
-            assert decision.says == "You have controls!", reason
-            assert decision.urgent is True, reason
 
     def test_says_spoken_exactly_once_for_the_matching_take_seq(self) -> None:
         state, decision = decide_flight_control(
@@ -591,22 +532,19 @@ class TestDrainFlightControlSeedsTheBreakTarget:
     """Mode-1 batch, Decision 32 (`plans/flight-control/plan.md`,
     main-loop amendment 2026-11-19) -- `CrewConsole.drain_flight_
     control`'s own seeding logic for an unpark-take that lands while a
-    mode-2 break was active. The `OVERLAY` -> `ACTIVE` transition
-    itself is `decide_flight_control`'s own tested surface (`TestDecide
-    FlightControl` above); these tests exercise only what `drain_
-    flight_control` adds on top of it."""
+    mode-2 break was active. **BL-16 Stage 2**: the `OVERLAY` ->
+    `ACTIVE` transition itself is gone from `decide_flight_control`
+    (`fd_mode` is the one mode authority now) -- `drain_flight_control`'s
+    own `unparked_from_overlay` parameter is `body.py`'s report of that
+    same edge, read from `flight_authority_state` instead, so these
+    tests pass it directly rather than relying on a phase transition to
+    trigger it."""
 
     def _console(
         self, *, cbtm_action_sent: str | None, entry_heading: float | None
     ) -> CrewConsole:
         console = CrewConsole(store=ContactStore())
-        console.flight_control_state = FlightControlState(
-            phase="OVERLAY",
-            unpark_take=True,
-            lua_mode="active",
-            lua_take_origin="unpark",
-            lua_take_seq=9,
-        )
+        console.flight_control_state = FlightControlState(phase="ACTIVE", take_seq=9)
         console.parked_flight_state = ParkedFlightState(
             cbtm_action_sent=cbtm_action_sent,  # type: ignore[arg-type]
             cbtm_break_entry_heading_deg=entry_heading,
@@ -616,7 +554,9 @@ class TestDrainFlightControlSeedsTheBreakTarget:
     def test_unpark_take_during_a_break_seeds_the_break_target(self) -> None:
         console = self._console(cbtm_action_sent="break_left", entry_heading=100.0)
 
-        console.drain_flight_control(10.0, parked_active=False)
+        console.drain_flight_control(
+            10.0, parked_active=False, unparked_from_overlay=True
+        )
 
         assert console.flight_control_state.phase == "ACTIVE"
         request = console.flight_control_goal_transition
@@ -627,7 +567,9 @@ class TestDrainFlightControlSeedsTheBreakTarget:
     def test_unpark_take_with_no_break_active_is_unchanged(self) -> None:
         console = self._console(cbtm_action_sent=None, entry_heading=None)
 
-        console.drain_flight_control(10.0, parked_active=False)
+        console.drain_flight_control(
+            10.0, parked_active=False, unparked_from_overlay=True
+        )
 
         assert console.flight_control_state.phase == "ACTIVE"
         assert console.flight_control_goal_transition is None
@@ -640,13 +582,16 @@ class TestDrainFlightControlSeedsTheBreakTarget:
         captured entry heading must not seed a bogus goal."""
         console = self._console(cbtm_action_sent="break_right", entry_heading=None)
 
-        console.drain_flight_control(10.0, parked_active=False)
+        console.drain_flight_control(
+            10.0, parked_active=False, unparked_from_overlay=True
+        )
 
         assert console.flight_control_goal_transition is None
 
     def test_an_ordinary_take_confirmation_does_not_seed_anything(self) -> None:
-        """An ordinary voice take (`TAKING` -> `ACTIVE`, not `OVERLAY`
-        -> `ACTIVE`) never goes through this path at all."""
+        """An ordinary voice take (`unparked_from_overlay=False`) never
+        goes through this path at all, even with a break still recorded
+        on `parked_flight_state` from a previous session."""
         console = CrewConsole(store=ContactStore())
         console.flight_control_state = FlightControlState(
             phase="TAKING",
@@ -660,7 +605,9 @@ class TestDrainFlightControlSeedsTheBreakTarget:
             cbtm_action_sent="break_left", cbtm_break_entry_heading_deg=100.0
         )
 
-        console.drain_flight_control(10.0, parked_active=False)
+        console.drain_flight_control(
+            10.0, parked_active=False, unparked_from_overlay=False
+        )
 
         assert console.flight_control_state.phase == "ACTIVE"
         assert console.flight_control_goal_transition is None

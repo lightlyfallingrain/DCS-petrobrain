@@ -50,7 +50,39 @@ from rules.sandbox import RuleSandbox
 def _console(**state_fields: object) -> CrewConsole:
     console = CrewConsole(store=ContactStore())
     console.parked_flight_state = replace(ParkedFlightState(), **state_fields)
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `flight_
+    # mode()`/`current_crew_state()` read `flight_authority_state` now,
+    # not `parked_flight_state` -- mirror `parked_active`/`held_*` onto
+    # it too, so every existing `parked_active=True` fixture here still
+    # reads as "flying through the overlay" to the gate/dispatch path.
+    if state_fields.get("parked_active"):
+        held_heading = state_fields.get("held_heading")
+        console.flight_authority_state = replace(
+            console.flight_authority_state,
+            fd_mode="m2",
+            hdg_mode="heading" if held_heading is not None else None,
+            heading_deg=held_heading,  # type: ignore[arg-type]
+            alt_m=state_fields.get("held_altitude"),  # type: ignore[arg-type]
+            alt_ref=state_fields.get("held_altitude_ref"),  # type: ignore[arg-type]
+            ias_kmh=state_fields.get("held_speed"),  # type: ignore[arg-type]
+        )
     return console
+
+
+def _set_mode1_active(
+    console: CrewConsole, *, measured_heading: float | None = None
+) -> None:
+    """Companion to `_console`'s own `parked_active` mapping, for the
+    mode-1 call sites below that set `console.flight_control_state =
+    replace(..., phase="ACTIVE", ...)` directly -- same reasoning,
+    `flight_mode()`/`current_crew_state()` need `flight_authority_
+    state.fd_mode == "m1"` now, not `flight_control_state.phase`."""
+    console.flight_authority_state = replace(
+        console.flight_authority_state,
+        fd_mode="m1",
+        hdg_mode="heading" if measured_heading is not None else None,
+        heading_deg=measured_heading,
+    )
 
 
 def _dispatching_console(
@@ -282,6 +314,11 @@ def test_gate_holds_then_flies_once_settling_resolves() -> None:
     console.parked_flight_state = replace(
         console.parked_flight_state, held_heading=10.0
     )
+    # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+    # state` now, not `parked_flight_state` -- mirror the same settle.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, hdg_mode="heading", heading_deg=10.0
+    )
     lines = console.drain_pending_rule_dispatch(now_sim=1.0)
     assert lines == ["20 left."]
     assert console.pending_rule_dispatch is None
@@ -441,6 +478,11 @@ class TestSpeedStep:
         assert console.pending_rule_dispatch is not None
         console.parked_flight_state = replace(
             console.parked_flight_state, held_speed=120.0
+        )
+        # BL-16 Stage 2: `current_crew_state()` reads `flight_authority_
+        # state` now, not `parked_flight_state` -- mirror the same settle.
+        console.flight_authority_state = replace(
+            console.flight_authority_state, ias_kmh=120.0
         )
         lines = console.drain_pending_rule_dispatch(now_sim=1.0)
         assert lines == ["Speed 1 5 0."]
@@ -639,6 +681,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_align", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
         assert console.ai_pilot_cbtm_transition is None
@@ -648,6 +691,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_align_for_launch", now_sim=0.0)
         assert lines == [render_unable("AI_OVERLAY").text]
         assert console.ai_pilot_cbtm_transition is None
@@ -663,6 +707,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(console)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
         )
@@ -674,6 +719,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(console)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == [render_unable("NOT_READY").text]
         assert console.flight_control_goal_transition is None
@@ -687,6 +733,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE", measured_heading=100.0
         )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "left"}
         )
@@ -701,6 +748,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE", measured_heading=100.0
         )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command(
             "cbtm_break", now_sim=0.0, slots={"direction": "right"}
         )
@@ -717,6 +765,7 @@ class TestCbtmActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE", measured_heading=100.0
         )
+        _set_mode1_active(console, measured_heading=100.0)
         lines = console.handle_command("cbtm_break_away", now_sim=0.0)
         assert lines == ["Breaking away."]
         request = console.flight_control_goal_transition
@@ -892,6 +941,7 @@ class TestHandoverActions:
         console.flight_control_state = replace(
             console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(console)
         lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == ["You have controls."]
         assert console.flight_control_state.phase == "PILOT"
@@ -919,6 +969,7 @@ class TestSeatNeverGatesMode1:
         flying_console.flight_control_state = replace(
             flying_console.flight_control_state, phase="ACTIVE"
         )
+        _set_mode1_active(flying_console)
         assert flying_console.flight_mode() == "axes"
 
         overlay_console = _dispatching_console(parked_active=True, player_seat=seat)

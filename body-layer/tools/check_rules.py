@@ -58,6 +58,7 @@ from belief.effector_registry import (
     aircraft_dir_name,
     load_registries_by_aircraft,
 )
+from belief.flight_authority import FlightAuthorityState
 from belief.flight_control import FlightControlState
 from rules.actions import ACTION_NAMESPACES, Action, ActionContext
 from rules.engine import (
@@ -102,6 +103,37 @@ _AXES_FLYING = FlightControlState(
     measured_altitude=300.0,
     measured_speed=150.0,
 )
+
+
+def _authority_for(
+    state: ParkedFlightState, axes_state: FlightControlState
+) -> FlightAuthorityState:
+    """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `Crew
+    Console.flight_mode()`/`current_crew_state()` read `flight_
+    authority_state` now, not `parked_flight_state`/`flight_control_
+    state.phase` directly -- mirror the same scenario onto it so a dry
+    run still reaches the real action bodies, not just the gate."""
+    if state.parked_active:
+        return FlightAuthorityState(
+            fd_mode="m2",
+            hdg_mode="heading" if state.held_heading is not None else None,
+            heading_deg=state.held_heading,
+            alt_m=state.held_altitude,
+            alt_ref=state.held_altitude_ref,
+            ias_kmh=state.held_speed,
+        )
+    if axes_state.phase == "ACTIVE":
+        return FlightAuthorityState(
+            fd_mode="m1",
+            hdg_mode="heading" if axes_state.held_heading is not None else None,
+            heading_deg=axes_state.held_heading,
+            alt_m=axes_state.held_altitude,
+            alt_ref=axes_state.held_altitude_ref,
+            ias_kmh=axes_state.held_speed,
+        )
+    return FlightAuthorityState()
+
+
 _SCENARIOS: tuple[tuple[str, ParkedFlightState, FlightControlState, bool], ...] = (
     ("flying", _FLYING, FlightControlState(), False),
     ("hovering", replace(_FLYING, ai_mode="HVRT"), FlightControlState(), False),
@@ -234,6 +266,7 @@ def _dry_run(
             for utterance, slots in _slot_sets(rule, samples):
                 console.parked_flight_state = state
                 console.flight_control_state = axes_state
+                console.flight_authority_state = _authority_for(state, axes_state)
                 sink.lines = []
                 try:
                     lua_slots = sandbox.table_from(slots) if slots else sandbox.table()

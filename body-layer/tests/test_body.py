@@ -617,6 +617,14 @@ class FakeConsoleAircraftClient:
         self.flight_control_writes: list[
             tuple[int, str, dict[str, float], dict[str, object] | None]
         ] = []
+        #: BL-16 (`plans/flight-desired-state/plan.md`, Stages 1-2) --
+        #: `None` (the default) means no `GET /flight_desired/latest`
+        #: sample has arrived yet, same "not an error" posture as
+        #: `flight_control_state` above. `flight_lease_writes` is every
+        #: `write_flight_lease` call this fake has recorded, oldest
+        #: first, same shape as `flight_control_writes`.
+        self.flight_desired_state: dict[str, Any] | None = None
+        self.flight_lease_writes: list[tuple[int, dict[str, float]]] = []
         #: BL-16 sortie 2026-11-20 (`docs/acceptance/
         #: 2026-11-20-sortie-feedback.md`) -- every `write_reset` call
         #: this fake has recorded, oldest first. No test here exercises
@@ -746,6 +754,14 @@ class FakeConsoleAircraftClient:
     def get_flight_control_latest(self) -> dict[str, Any] | None:
         return self.flight_control_state
 
+    def get_flight_desired_latest(self) -> dict[str, Any] | None:
+        # BL-16 (`plans/flight-desired-state/plan.md`, Stages 1-2) --
+        # `None` (the default) means no `GET /flight_desired/latest`
+        # sample has arrived yet, same "not an error" posture as
+        # `flight_control_state` above. No test in this file sets this
+        # or asserts on `flight_lease_writes`.
+        return self.flight_desired_state
+
     def get_payload_latest(self) -> dict[str, Any] | None:
         # `plans/flight-control/plan.md`, BL-16 mode 2, P3+P4 -- `None`
         # (the default) means no `GET /payload/latest` sample has
@@ -761,6 +777,9 @@ class FakeConsoleAircraftClient:
         goal: dict[str, object] | None,
     ) -> None:
         self.flight_control_writes.append((seq, cmd, limits, goal))
+
+    def write_flight_lease(self, epoch: int, limits: dict[str, float]) -> None:
+        self.flight_lease_writes.append((epoch, limits))
 
     def write_reset(self, epoch: int) -> None:
         self.reset_writes.append(epoch)
@@ -3223,6 +3242,11 @@ def test_poll_transcripts_drives_a_real_speed_two_hundred_wire_item_to_set_speed
     precedent for that in this subproject)."""
     console = CrewConsole(store=ContactStore())
     console.parked_flight_state = replace(ParkedFlightState(), parked_active=True)
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`): `flight_
+    # mode()`/`current_crew_state()` read `flight_authority_state` now.
+    console.flight_authority_state = replace(
+        console.flight_authority_state, fd_mode="m2"
+    )
     sandbox = RuleSandbox()
     ctx = ActionContext(console=console)
     rule_set = RuleSet.load(DEFAULT_RULES_DIR, sandbox, ACTION_NAMESPACES, ctx)

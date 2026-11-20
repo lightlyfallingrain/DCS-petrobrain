@@ -567,10 +567,40 @@ class AircraftLayerClient:
             )
         return result
 
+    def get_flight_desired_latest(self) -> dict[str, Any] | None:
+        """`GET /flight_desired/latest` -> the most recent flight-
+        desired/mode-authority status (see `aircraft-layer/src/schema/
+        flight_desired.py`'s `FlightDesiredState.to_api_dict`), or
+        `None` if nothing has been received yet -- same "not an error"
+        posture as `get_flight_control_latest` (`plans/
+        flight-desired-state/plan.md`, BL-16 Stages 1-2). `belief.
+        flight_authority.advance_flight_authority` is the one caller;
+        this client does no interpretation."""
+        result = self._get_json("/flight_desired/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                "expected a JSON object or null from /flight_desired/latest, "
+                f"got {type(result).__name__}"
+            )
+        return result
+
+    def write_flight_lease(self, epoch: int, limits: dict[str, float]) -> None:
+        """`POST /command/flight_lease` -> BL-16 Stage 2's own unnumbered
+        lease (`plans/flight-desired-state/plan.md`, refinement 3) --
+        replaces the old `write_flight_control(..., "arm", ...)` send.
+        Sent every poll while the aircraft layer is up (`body.py`'s own
+        `_apply_flight_control`), so `Export.lua` can self-arm on a park
+        edge without body-layer ever stating the mode. Raises
+        `AircraftLayerError` on any failure, mirroring `write_flight_
+        control` -- see the module docstring for why."""
+        self._post_json("/command/flight_lease", {"epoch": epoch, "limits": limits})
+
     def write_flight_control(
         self,
         seq: int,
-        cmd: Literal["take", "release", "goal", "arm"],
+        cmd: Literal["take", "release", "goal"],
         limits: dict[str, float],
         goal: dict[str, object] | None,
     ) -> None:

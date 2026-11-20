@@ -195,6 +195,7 @@ from belief.expected_area import (
     relocation_warranted,
     resolve_checks,
 )
+from belief.flight_authority import advance_flight_authority, decide_flight_speech
 from belief.flight_control import (
     advance_flight_control_state,
     flight_control_limits,
@@ -3848,7 +3849,7 @@ def _apply_ai_pilot_wheel_goal(
 
 
 def _apply_flight_control(
-    crew_console: CrewConsole, aircraft_client: AircraftLayerClient
+    crew_console: CrewConsole, aircraft_client: AircraftLayerClient, epoch: int
 ) -> None:
     """BL-16 mode 1 Stage M1 -- sends `crew_console.flight_control_
     transition` (a pending "take"/"release", set synchronously by
@@ -3882,11 +3883,12 @@ def _apply_flight_control(
     release after it would then hand the controls back. One poll's gap
     rules that out.
 
-    **The arm lease (U10)**: while `OVERLAY` and `unpark_take`, `arm` is
-    re-sent every poll regardless of either one-shot transition above --
-    this is the lease Lua's own unpark-take precondition checks against
-    (`ARM_LEASE_S`), and it must keep moving for as long as body-layer is
-    alive, independent of whatever else this poll's dispatch did.
+    **The lease (U10, BL-16 Stage 2)**: sent every poll this function
+    runs, regardless of either one-shot transition above -- `Export.
+    lua`'s own park-edge self-arm checks against it (`ARM_LEASE_S`), and
+    it must keep moving for as long as body-layer is alive, independent
+    of whatever else this poll's dispatch did. No longer conditioned on
+    `phase`/`unpark_take` (`write_flight_lease`'s own docstring).
 
     **Co-moving row 11's other direction**: an `axes_*` goal action
     spoken just before a park races `decide_flight_control`'s own park-
@@ -3933,7 +3935,11 @@ def _apply_flight_control(
         state = crew_console.flight_control_state
     limits = flight_control_limits(ON_GROUND_AGL_THRESHOLD_M)
 
-    if state.phase == "OVERLAY":
+    # BL-16 Stage 2: `fd_mode`/`flight_mode()` is the one mode
+    # authority now (`state.phase` no longer moves to `"OVERLAY"` --
+    # `decide_flight_control`'s own docstring), so this guard reads
+    # that instead of the now-stale `phase` field.
+    if crew_console.flight_mode() == "overlay":
         crew_console.flight_control_transition = None
         crew_console.flight_control_goal_transition = None
         crew_console.flight_control_system_release_pending = False
@@ -4009,15 +4015,19 @@ def _apply_flight_control(
         # PILOT before this poll ran -- OVERLAY was already cleared,
         # above) -- dropped, there is nothing left to apply it to.
 
-    if state.phase == "OVERLAY" and state.unpark_take:
-        next_seq = state.wire_seq + 1
-        crew_console.flight_control_state = replace(state, wire_seq=next_seq)
-        try:
-            aircraft_client.write_flight_control(next_seq, "arm", limits, None)
-        except AircraftLayerError:
-            logger.warning(
-                "flight-control arm write failed (continuing)", exc_info=True
-            )
+    # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
+    # 3) -- the lease, replacing the old `state.phase == "OVERLAY" and
+    # state.unpark_take` -> `write_flight_control(..., "arm", ...)`
+    # send. Sent every poll this function runs (not conditioned on
+    # `phase`/`unpark_take` any more, both gone from this check): `Lua`
+    # now self-arms itself on a park edge whenever this lease is fresh,
+    # whether he was already flying mode 1 or the player was flying
+    # (section 2's second self-arm clause). Carries no `seq` (`write_
+    # flight_lease`'s own docstring).
+    try:
+        aircraft_client.write_flight_lease(epoch, limits)
+    except AircraftLayerError:
+        logger.warning("flight-lease write failed (continuing)", exc_info=True)
 
 
 def _check_for_new_mission(
@@ -5496,14 +5506,54 @@ def _run_crew_text_poll_loop(
                             logger.debug(
                                 "flight-control readback failed", exc_info=True
                             )
+                        # BL-16 (`plans/flight-desired-state/plan.md`,
+                        # Stages 1-2) -- the one mode-authority/desired-
+                        # state mirror, refreshed every poll regardless
+                        # of the reset gate below (it carries no `seq`
+                        # yet in Stages 1-2). `previous_flight_
+                        # authority` is captured first, same "capture
+                        # previous, then compare" idiom as `previous_
+                        # seat`/`previous_payload_counts` above, so
+                        # `decide_flight_speech` and the Decision-32
+                        # break-seed check below both see this poll's
+                        # own edge rather than one already overwritten.
+                        previous_flight_authority = crew_console.flight_authority_state
+                        try:
+                            crew_console.flight_authority_state = (
+                                advance_flight_authority(
+                                    crew_console.flight_authority_state,
+                                    aircraft_client,
+                                )
+                            )
+                        except AircraftLayerError:
+                            logger.debug(
+                                "flight-desired readback failed", exc_info=True
+                            )
+                        authority_decision = decide_flight_speech(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        )
+                        if authority_decision is not None:
+                            crew_console.speak_flight_authority_decision(
+                                authority_decision, runner.last_t_sim
+                            )
                         # Same hold as mode 2's own gate above --
                         # `fc_last_cmd_seq` must never see a send from
                         # this process before Lua's own reset confirms.
                         if runner.command_reset_confirmed:
-                            _apply_flight_control(crew_console, aircraft_client)
+                            _apply_flight_control(
+                                crew_console,
+                                aircraft_client,
+                                runner.command_reset_epoch,
+                            )
                             crew_console.drain_flight_control(
                                 runner.last_t_sim,
                                 parked_active=runner.parked_flight_state.parked_active,
+                                unparked_from_overlay=(
+                                    previous_flight_authority.fd_mode == "m2"
+                                    and crew_console.flight_authority_state.fd_mode
+                                    == "m1"
+                                ),
                             )
                         # `[[BL-17]]` D16 -- same spot, after `parked_
                         # flight_state` has been refreshed this poll
