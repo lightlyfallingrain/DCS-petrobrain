@@ -13,10 +13,12 @@ keep the ball centred. Petrovich does not use the reading yet: **you fly this on
 
 Air start, the seat you normally fly from, straight and level, about 150 km/h, safe height.
 
-Readout, from the Mac terminal running this session (one line every half second; Ctrl-C to stop):
+Readout, from the Mac terminal running this session (one line every half second; Ctrl-C to stop).
+`<collector-host>` is the Windows box's LAN IP (OMEN=192.168.0.85 in recent sorties — confirm it's
+still current before running this):
 
 ```sh
-! while true; do curl -s http://192.168.1.50:7791/flight_control/latest | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; print(d.get('t'), d.get('fc_slip_ball_pilot_raw'), d.get('fc_slip_ball_operator_raw'), d.get('fc_slip_ball_lo_api'))"; sleep 0.5; done
+while true; do curl -s http://<collector-host>:7791/flight_control/latest | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; print(d.get('t'), d.get('fc_slip_ball_pilot_raw'), d.get('fc_slip_ball_operator_raw'), d.get('fc_slip_ball_lo_api'))"; sleep 0.5; done
 ```
 
 Columns: sim time, pilot ball (arg 943), operator ball (arg 784), DCS's own `LoGetSlipBallPosition`.

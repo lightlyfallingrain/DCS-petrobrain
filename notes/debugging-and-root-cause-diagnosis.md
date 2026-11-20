@@ -78,3 +78,17 @@
   sync, or whether the test is only allowed to assume it (`plans/flight-control/debug.md`, first
   bug; `plans/flight-control/review-handover-ack.md` confirms the same tests "hid the bug by
   construction").
+
+- **A duck-typed test fake missing one method on a code path that is called unconditionally can
+  silently kill a background thread rather than fail a test outright — look for a stuck thread's
+  CPU time still climbing, not assume it is hanging.** `tests/test_body.py`'s
+  `FakeConsoleAircraftClient` had no `write_reset` method; once `_resolve_command_reset` started
+  calling `aircraft_client.write_reset(...)` unconditionally once per poll, every test driving the
+  real poll loop on a background thread hit an uncaught `AttributeError` that killed the thread on
+  its very first poll, with nothing in the test harness surfacing it as a crash. The only visible
+  symptom was the whole file running ~40x slower (minutes instead of ~8s), as each test's own
+  `join(timeout=...)` burned its full wait for a thread that had already died. Found by noticing
+  the stuck run's CPU time kept climbing rather than sitting idle — a real hang would idle; a dead
+  thread leaves the rest of the process free to keep working, which still shows up as CPU activity
+  elsewhere in the run (BL-16 sortie-1120 batch, body-layer process-start reset,
+  `plans/flight-control/implementation.md`, "Notable Discoveries").
