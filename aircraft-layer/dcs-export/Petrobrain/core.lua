@@ -134,13 +134,16 @@ end
 -- then rejects the entire line (`plans/flight-control/debug.md`,
 -- "Common root cause, both modes", 2026-11-19: `fc_take_seq`/
 -- `fc_goal_seq`/`fc_last_cmd_seq`, `apw_goal_seq`/`apw_cbtm_seq`).
--- `math.floor` before `%d` since these counters are already
--- integer-valued Lua numbers; `v` itself is never fractional.
+-- `%.0f`, not `%d`: Lua 5.1's `%d` goes through C `long`, which is
+-- 32-bit on Windows, so a value past 2^31 (the millisecond reset epoch,
+-- `fc_reset_epoch`/`apw_reset_epoch`, ~1.8e12) would wrap. `%.0f` prints
+-- any integer-valued double exactly up to 2^53. `math.floor` first, so a
+-- stray fraction can never print as a decimal.
 local function fmt_int_or_null(v)
     if not is_finite_number(v) then
         return "null"
     end
-    return string.format("%d", math.floor(v))
+    return string.format("%.0f", math.floor(v))
 end
 
 -- Shared, mutable, cross-module: every `push_*` function in every other
