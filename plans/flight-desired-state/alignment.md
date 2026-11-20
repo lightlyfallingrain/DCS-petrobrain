@@ -239,3 +239,57 @@ That case is part of Q1.
 - **Q6** — After a body-layer restart with the aircraft parked, and then an unpark: should you get
   the stick ("You have controls!"), or should Petrovich take it in mode 1 as normal? Recommend the
   stick, because that is your "let go" and the restart was a fault.
+
+## Plan check — 2026-11-20
+
+**Verdict:** ALIGNED.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 (acked or refused aloud) | §3 (ack ring, refusal/timeout speech) | met |
+| E2 (set value = commanded value) | §1 (`alt_m`/`ias_kmh` exact, stamped) | met |
+| E3 (latest command wins) | §3/§4 (`stamp` priority, `manoeuvre_seq`) | met |
+| E4 (mode change keeps flying last command, incl. mid-ramp unpark) | Stage 3 (unpark seed = desired, not the wheel's display) | met |
+| E5 (take holds current state, no stale target) | C1 rule, handover table (`law_init_at_take` reseed) | met |
+| E6 (evasion not undone by an older target, incl. across a mode change) | §4 (break write replaces every older heading; Q4 finishes the break) | met |
+| E7 (Petrovich always knows the mode, acts in it) | §2 (`fd_mode` derived, nothing sets it directly); Stage 2 card names the "unable, not ready while holding" case | met |
+| E8 (cockpit mode changes silent, losing the stick is urgent) | `decide_flight_speech` (urgent only on a change into off whose cause ≠ release/stop/reset) | met |
+| E9 (mode 2's approximations are spoken) | §3 (`m2_flown` readback) | met, contingent on U2 → [[U2]] (same plan, open) |
+| E10 (restart leaves a known state) | handover table, "body-layer reset" row | met |
+| C1 (take/hand-back reseeds, m1↔m2 carries) | "The rule underneath (C1)" + handover table | met |
+| C3 (break replaces the older heading) | §4 break row ("replaces every older heading (F-P7 automatically)") | met |
+| Q1a (readback what will fly; exact value stays desired) | §3 | met |
+| Q2 (unable → dropped, nothing written) | §3, §4 refusal rows | met |
+| Q3 (AGL default both modes, baro only if spoken) | §1 `alt_ref`, Stage 4 | met |
+| Q4 (unpark mid-break finishes it, then holds) | §4 "Unpark during a manoeuvre: break" | met |
+| Q5 (pilot-seat swap always unparks; copilot seat does not self-switch) | handover table, both seat-swap rows | met |
+| Q6 (restart while parked → unpark gives the stick) | `armed` cleared by reset, handover table "unpark, refused/unarmed" | met |
+| mode-2-is-Mi-24-only, isolable | §6 "The mode-2 seam" (nil-check, `fd_has_m2`, `flight_mode()` gate) | met |
+| crash: fixed controls at mode-2's half-way value | Stage 3 (desired, not overlay display, seeds the unpark) | met |
+| crash: AI wheel shows wrong mid-adjustment value | Stage 3, same mechanism | met |
+| ack'd command never flown (F-P7 over-reach) | §4 "Latest wins" (`command_order_seq`/F-P7 deleted), Stage 4 card | met |
+| set ≠ commanded (116 vs 100) | §1 exact fields; §3 exact-set tolerances | met |
+| take/ack mismatch ("unable, not ready" while holding) | Stage 2 ("there is no phase left to disagree") | met |
+| stale Lua / stale deployment | §5 epoch re-handshake; Risks, "stale deployment" | met |
+
+### Findings
+
+None that change the verdict. The plan's own "Expectation trace" section independently restates
+E1–E10 against the same stages, and the two traces agree.
+
+1. **E9's "he is told" half rides on U2, which is still open.** Lens: the non-obvious case.
+   - Assumption: none — the plan names this itself ("E9 → `m2_flown` readback, plus U2").
+   - In the sim: a value carried from mode 2 into mode 1 that mode 1 clamps (mode 2's "speed 0"
+     landing at `MIN_IAS_KMH` in mode 1) is flown correctly either way; only whether Petrovich
+     *says* so is undecided.
+   - The pilot would see: nothing different if U2 is answered "no" instead of the plan's
+     recommended "yes" — E9 would then read `contradicted`, not `met`, for exactly this case.
+   - Suggests: ask U2 before Stage 3 ships (it is the stage that carries values across a mode
+     change), not deferred to Stage 4 — the plan's own stage split does not gate it there, so this
+     is a scheduling note, not a plan defect.
+
+### Questions for the user
+
+- U1, U2, U3, U4 as the plan states them (reproduced there, not repeated here). U2 is the one with
+  behavioural weight for E9: whether Petrovich must say, once and unprompted, the value mode 1 is
+  actually holding after it carried a value mode 1 cannot fly exactly.
