@@ -122,3 +122,20 @@ Main-loop reading: `ai_pilot_wheel.lua` stops pressing once the overlay's *set* 
 for heading. The "acceptable band" is applied to setting the value, not to flying it. Expected:
 the set value lands exactly on what was commanded (or the nearest value the wheel can show), and
 only the flown value may deviate. Same for mode 1's goal values.
+
+## Mode 1 flight, `main` @ `a8b21de0` (user, verbatim)
+
+> In mode 1: "turn right 50" -> turns but does not use pedals at all. Use pedals. All the axis are
+> interdependent in helicopter flight. Use then all to maintain desired state.
+>
+> There is a slight bank when taking controls, but it nicely stabilizes to ~0 now.
+>
+> Mode 1 break turn banks steep, good.
+> then too slowly pulls cyclic back -> do it faster.
+> but pulls too much cyclic and speed drops fast-> less cyclic back.
+
+- Take: the pedal-drift fix works (slight bank, settles to ~0).
+- Break: bank good; the back-cyclic comes in too slowly, then too much, and speed bleeds off.
+- Turns: no pedal at all. The pedal law has no slip-ball term (never probed) and no
+  turn-coordination term; the only pedal inputs are the collective feedforward (now gated off,
+  collective disabled) and the break bias.
