@@ -21,8 +21,9 @@ Architect pass, 2026-11-20. Branch `feature/bl16-desired-state`, base `e4792254`
   Both answered since; see the end of "Open Decisions".
 - **Constraint added by the main loop from the user's direction (2026-11-20), not the architect's
   text:** mode 1's control logic is common to all helicopters, its values are not. Any mode 1 code
-  these stages touch keeps gains, limits, axis signs/args and curve shapes in one per-aircraft
-  profile table (only the Mi-24P's for now), selected once at mission start by aircraft type, not as
+  these stages touch keeps gains, limits, curve shapes and the rotor rotation direction (it flips
+  the torque-countering pedal; axis signs themselves do not change between helicopters, user) in
+  one per-aircraft profile table (only the Mi-24P's for now), selected once at mission start by aircraft type, not as
   scattered module constants. No profile mechanism is built in this plan; the code is just shaped so
   adding one later is a table swap. User's words: `body-layer/ROADMAP/BL-16.md`, lift-vector item.
 
