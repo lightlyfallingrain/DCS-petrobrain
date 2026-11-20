@@ -315,8 +315,9 @@ be a running average to filter out vibration"*).
   law's outer loops on the next, inner loops and output target on the third), so no single frame
   carries all of it. The **output stage still writes every frame**, repeating the latest target
   (with the existing rate limit and wobble), because the axis override is per-frame
-  (`LuaExportBeforeNextFrame`); LV-0 confirms whether a skipped write releases the axis, and if not,
-  the write can drop to the law rate too. Every `dt` in the law becomes the time since that
+  (`LuaExportBeforeNextFrame`). Confirmed by the user (2026-11-20, verbatim): *"the axis write itself
+  may have to stay every frame -> this is true."* So the write stays every frame; no LV-0 check
+  needed. Every `dt` in the law becomes the time since that
   calculation last ran, never a frame `dt`.
 - **Acceleration**, including **vertical acceleration**: `a = dv/dt` as the least-squares slope of
   `v` over `W_A` (first cut 0.2 s), then one more running mean over `W_A2` (first cut 0.1 s). The
