@@ -162,6 +162,17 @@ sequence. Do not assume the cadence you last saw still stands.
 
 *Explore* precedes Architect on consequential work only — a conversation with the user, not a role.
 
+**Diagram review after Architect, complex features only** (user direction, 2026-11-20): *"When
+planning complex features/changes, like BL-16, architecht's plan should include mermaid (or some
+other) diagrams about how the planned logic works/flows and what services are responsible of what
+data/behaviour. Not detailed code, but overview that I can review. ... After architect, bring the
+diagrams for user review and get user's approval or comments to amend the plan. An artifact is
+probably the easiest for me to review them. The artefact can be throw away, we don't need to keep
+it, the mermaid is in the plan anyhow. For small or straightforward features, this is not
+necessary."* So, for complex work: Architect writes a "Design Overview (diagrams)" section →
+the main loop publishes those diagrams as a throwaway artifact → the user approves or comments →
+the plan is amended → Plan Aligner. The diagrams live in `plan.md`; the artifact need not be kept.
+
 ### Behaviour alignment — before and after Architect
 
 **User direction, 2026-10-30.** High-level goals — *"scanning must find contacts"*, *"9K113 slew to
