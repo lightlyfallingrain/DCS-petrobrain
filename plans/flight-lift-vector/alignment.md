@@ -222,3 +222,103 @@ is Q1's answer; today it is MIN_IAS 80 to MAX_IAS 280 km/h.
    the desired value exact.)
 6. In a break you said "pedal to direction of turn". Is that the pedal it takes to keep the ball
    centred, or a deliberate extra yaw into the turn, ball off centre, to tighten it?
+
+## Plan check — 2026-11-20
+
+**Verdict:** CONCERNS
+
+Plan: `plans/flight-lift-vector/plan.md`, architect pass + same-day amendment for U1–U7, branch
+`feature/bl16-lift-vector-law` tip `2c42e2f9`. All six goal-check questions were answered by the
+user and traced below; U5's extra pedal, the felt-load collective loop, and the Q6 ball-offset
+target were checked against the full plan text (grep, not just the amendment header) and found
+nowhere left as live design — fully superseded. U8 ("no floor") is a different story: see Finding 1.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 — take without upset | I, LV-0 card | met |
+| E2 — heading hold, wings level, ball centred | D, F; LV-1 | met |
+| E3 — coordinated turns, pedal with the turn | D, F; LV-1 | met |
+| E4 — altitude held through turns | E (feed-forward on bank); LV-1 | met |
+| E5 — break: steep, fast, measured | G (break chain), LV-2 | met |
+| E6 — speed/altitude changes coordinated | C, G (slowing-down rule); LV-1 | met |
+| E7 — gentleness scales with speed | B (schedule G(V)); LV-1 | met, undermined at the low end — Finding 1 |
+| E8 — envelope first, silent | G (priority chains); LV-1/LV-2 | met |
+| E9 — same across the envelope, any speed (Q1) | LV-1 (forward scope) → deferred → LV-3 (λ blend, ground-speed ref, pedal yaw loop) | met in LV-1's declared scope; the gap between that scope and Q1/U8's "any speed, no floor" is Finding 1, not closed by the LV-3 deferral |
+| E10 — nothing new to hear | U1 removes `TOO_SLOW` speech; U8 removes the clamp-readback that would have added a new line | met |
+
+Goal-check findings 1–5: all five resolved in the plan as built (no felt-load channel closes a loop,
+sect. E; pedals never run a heading loop in forward flight, sect. F; priority order travels with the
+manoeuvre, sect. G; the law is explicitly not assumed to repair the erratic take, sect. I, LV-0
+retests it alone; the slow-break vignette is now a carded LV-2 row, U6).
+
+Open assumptions (goal check): all eight settled the way that serves the why — kinematic
+acceleration for trajectory error (A, E), pedal-centres-ball with bank owning heading in forward
+flight (D, F), per-manoeuvre priority order (G), nose heading/IAS in forward flight with
+ground-speed only near hover (C, U2), the λ blend as the hover extension of the same law (diagram 5),
+speed-scheduled gains (B), unconfirmed channels logged-only and gated on LV-0 (A), and the SAU state
+the law assumes stated explicitly (off, U4). No silent assumption-filling found among these eight.
+
+### Findings
+
+1. **U8's final answer ("no floor") was never carried into the plan's own design text, and the
+   stale text describes a mitigation that no longer exists.** Lens: world truth / internal
+   consistency.
+   - **Assumption:** the plan's closing paragraph (U8) says the implementer should apply "no floor"
+     "wherever the plan above still says 'floored at 50 km/h' or 'until LV-3'" and names four places
+     (Affected Modules, the LV-1 build, the Co-moving table, the LV-1 card's low-speed rows).
+   - **In the plan:** at least three more places still say the floor protects LV-1 and were not
+     named: diagram 5 (`Blend, 25 to 50 km/h`, `λ = 1 throughout and the commanded speed floored at
+     50 km/h`), diagram 6 (`LV1[... commanded floor 50 km/h]`), the "Removed and kept" table
+     (`MIN_IAS_KMH` row: "50 km/h in LV-1, removed in LV-3"), the Tests section ("a take at 40 km/h
+     is accepted and flown to the 50 km/h floor without a jerk (LV-1)"), and — the one that matters
+     most — the Risks & Unknowns entry itself: *"LV-1 below 50 km/h is flown by the forward law with
+     gentle gains, no ground-speed reference and no pedal yaw loop. **The commanded floor keeps the
+     law from being asked to go there**; a sag below it is a gentle return, watched on the 70 km/h
+     take row."* That sentence is now false: U8 removed the floor, so a *commanded* speed below
+     50 km/h is no longer refused or clamped — the law will be asked to go there, in LV-1, with no
+     ground-speed reference and no pedal yaw loop, and the one card row that would watch this ("a
+     voice take at about 70 km/h") never goes below 50.
+   - **The pilot would see:** exactly the gap the architect's own (overruled) U8 recommendation
+     warned about — "a 'speed 20' command would be flown by the forward law with no ground-speed
+     reference and no pedal yaw loop" — except now untested and undocumented as live risk, because
+     the Risks section still reads as if the floor prevents it.
+   - **Grounded in:** `plan.md` lines 152, 229, 235–236, 260–262, 434, 470–474, 497, 517, 540,
+     593–594 (`grep -n "50 km/h\|floor" plan.md`) against the final U8 answer at lines 657–663.
+   - **Suggests:** this is the user's own informed risk ("what does not work, I will bring back and
+     we fix," Q1) and not a reason to reopen U8 — but the Implementer is working from a document
+     that still tells a different story about what protects LV-1 below 50 km/h in at least seven
+     places, three of which the amendment's own fix-list missed. The Risks entry should say plainly
+     that nothing protects LV-1 below 50 km/h except the gain schedule, and the LV-1 card should gain
+     a row near the new floor-less bottom (e.g., a voice take or a slow command at 20–30 km/h) so the
+     first time this is seen is a card, not a flight.
+
+2. **The SAU-on-at-handover rule has no stage or ID to carry it, and is explicitly excluded here.**
+   Lens: purpose / crew sense.
+   - **Assumption:** `explore-notes.md`'s "SAU in mode 1" section records a user rule independent of
+     SAU stage 2 — "whenever mode 1 hands the controls to the player (mode off), switch SAU H, K, T
+     (and B) ON" — with the effectors already named
+     (`body-layer/config/sequences/mi-24p/switch-reference.md`). The plan (line 577) says this rule
+     "is independent of this law and not part of this plan," and the card preamble (line 445–448)
+     only reacts to it conditionally ("if the separate rule is built before a card is flown...").
+   - **In fact:** I checked `body-layer/ROADMAP/BL-16.md` (the lift-vector item's own source branch),
+     `todo/todo/` and `todo/backlog/`, and grepped the graph (not indexed past 2026-11-17, so a miss
+     here is weak evidence, confirmed with grep too) — this rule exists nowhere outside
+     `explore-notes.md`'s own prose. No `[[ID]]`, no named stage, no backlog entry.
+   - **The pilot would see:** nothing wrong from this plan directly (stage 1 doesn't touch the
+     handover path), but a settled, concrete, already-specified rule (mechanism and effectors named)
+     sits in a plan's explore-notes with no destination — exactly the retro-2026-11-13 shape ("a
+     deferral with no tracked home is an expectation quietly dropped"), except here it is not even
+     labelled deferred.
+   - **Grounded in:** `explore-notes.md` "SAU in mode 1" and "Main-loop reading"; `plan.md` lines
+     445–448, 577.
+   - **Suggests:** mint a backlog ID for it now (it is small, well-specified, and independent of
+     every LV stage) rather than letting it live only in explore-notes.
+
+### Questions for the user
+
+1. Finding 1: should the Risks & Unknowns entry and the LV-1 card be corrected to reflect "no floor"
+   honestly (no mitigation below 50 km/h besides the gain schedule, and a low-speed row added), or
+   is the existing LV-1 scoping ("the card avoids flying below about 60 km/h on purpose") the answer
+   — i.e. accept the gap as untested until it is flown, per Q1's own terms?
+2. Finding 2: should the SAU-on-at-handover rule get its own backlog ID now, since it is fully
+   specified and independent of every lift-vector stage, so it does not quietly disappear?
