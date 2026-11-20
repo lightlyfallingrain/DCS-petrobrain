@@ -146,3 +146,28 @@ Settled:
 - **U4:** after Stages 1 and 2 were explained (1: Lua reports mode and desired state in shadow, a
   card checks it against the cockpit; 2: body-layer takes the mode from Lua), user, verbatim:
   *"Build both, we'll refine if something does not work."* Stages 1 and 2 ship together, one card.
+
+## Mode 1 control principles (user, 2026-11-20, verbatim)
+
+> Control principles:
+> - cyclic pitch tilts lift vector forward/backward. Bank tilt is it left/right. Collective affects
+>   lift ie lift vector length. They together determine lift force and direction -> acceleration
+>   -> speed.
+> - more collective causes more yaw force from rotor -> pedals control tail rotor yaw force ->
+>   pedals to counteract
+> - lift vector direction and lenght determine acceleration vector.
+> - pedals determine yaw force from tail rotor
+>
+> Control logic should be based on manipulating the lift vector and tail rotor force to reach
+> desired acceleration (in 3D) and through that fly to maintain the desired flight parameters.
+
+Main-loop comparison with the mode 1 law as of 2026-11-20 (`Petrobrain/flight_control.lua`
+`law_update`): it already shapes desired accelerations (`a_x_d` longitudinal, `a_z_d` vertical) and
+turns them into lift-vector changes, but **one axis at a time and incrementally**. Pitch integrates
+toward `a_x_d`, collective integrates toward `a_z_d`, and bank is set from turn kinematics. It never
+solves for one 3D lift vector, length and direction together. Gaps against the principles above:
+- no joint solve, so a bank's need for more lift (1/cos φ) is found by slow integration rather than
+  computed (consistent with "too slow, then too much back cyclic" in the break);
+- no lateral/3D acceleration demand, only longitudinal and vertical;
+- pedals are feedforward only (torque from collective rate, a turn-rate term); no tail-rotor yaw
+  force loop on yaw rate / sideslip (the slip-ball readout exists, uncalibrated).
