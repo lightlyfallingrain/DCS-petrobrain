@@ -908,6 +908,74 @@ print(sent_lines[#sent_lines])
         assert _field(status_line, "fc_in_band_heading") == "true"
 
 
+class TestVoiceTakeSetDuringTakingSurvivesTheSeed:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 2): the plan's own Stage 3 test, "a set during `taking`
+    survives the seed" (`build_take_seed`'s voice-take branch, `desired.
+    stamp_hdg/alt/spd > take_seq`) -- a command given in the same breath
+    as "you have controls." Driven by sending `set_desired` with a
+    higher `seq` *while* `fc_mode == "taking"`, i.e. after `request_
+    take` but before the `run_flight_control` call that resolves it --
+    the window no existing driver in this file exercises (every other
+    `request_take` driver either resolves in the same call or sends its
+    `set_desired` only once the take has already resolved)."""
+
+    def test_a_heading_set_during_taking_survives_the_seed(self) -> None:
+        """Measured heading stays at 123 for the whole run (the mock
+        never moves it); `law_init_at_take`'s own fallback would adopt
+        that measured value with no seed. If the seed set during
+        `taking` is adopted instead, the law's goal (45) and the
+        unmoving measured value (123) never agree, so `fc_in_band_
+        heading` stays `false` even after settling -- the same
+        differentiating assertion `TestUnparkTakeSeedsFromMode2
+        SetTargets` already uses for its own seed-adoption check."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)  -- under the 5 deg takeover threshold
+ap_seat = "pilot"
+ap_parked = false
+flight_control.request_take(1, 0.0)
+-- Sent while fc_mode == "taking" (not yet resolved) -- "you have
+-- controls, heading 045" in one breath. `seq=2 > take_seq=1`.
+set_desired(2, { heading_deg = 45.0 })
+flight_control.run_flight_control(0.1)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_in_band_heading") == "false"
+
+    def test_a_set_stamped_at_or_before_take_seq_does_not_survive(self) -> None:
+        """Control: `seq == take_seq` (not strictly after it) is the
+        pre-existing desired value at the moment of take, not a
+        same-breath command -- `build_take_seed`'s own `>` comparison
+        excludes it, so the law falls back to the measured default and
+        converges in-band."""
+        driver = """
+heading_rad = math.rad(123.0)
+bank_rad = math.rad(2.0)
+ap_seat = "pilot"
+ap_parked = false
+set_desired(1, { heading_deg = 45.0 })
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+for i = 1, 50 do
+    flight_control.run_flight_control(0.1 + i * 0.05)
+end
+flight_control.push_flight_control_state(5.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        status_line = lines[0]
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_in_band_heading") == "true"
+
+
 class TestVoiceTakeLiveSeatCapture:
     """M0-J (flight 9): the camera seat is not the live-controls seat --
     the operator set can read zero while the player sits there, before
@@ -1521,6 +1589,101 @@ print(sent_lines[#sent_lines])
         # would have started from -- heading mode is active but not yet
         # in band, since the break is still turning toward 90.
         assert _field(line, "fc_in_band_heading") == "false"
+
+
+class TestUnparkTakeSeedClampsToMode1Limits:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 1, U2): mode 1 cannot fly every value mode 2 can hold
+    -- `build_take_seed`'s unpark branch now clamps the seed to `fc_
+    limits.min_ias_kmh`/`max_ias_kmh`/`floor_agl_m`, the same bounds
+    `belief.flight_control.clamp_speed`/`clamp_altitude` enforce body-
+    side. `desired` itself is never touched, only the seed fed to `law_
+    init_at_take` -- the plan's own Q1a ("the desired state keeps the
+    exact value; what's flown is clamped")."""
+
+    def test_speed_0_in_m2_then_unpark_flies_the_minimum_not_zero(self) -> None:
+        """The plan's own worked example. Measured IAS is set to exactly
+        `min_ias_kmh` (80) so the clamped goal and the (unmoving, mocked)
+        measured value agree immediately -- an unclamped goal of 0 would
+        never agree with a measured 80, so `fc_in_band_speed` only reads
+        `true` here if the seed was actually clamped up to 80."""
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 80.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 0.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
+
+    def test_speed_above_the_ceiling_in_m2_then_unpark_flies_the_ceiling(
+        self,
+    ) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 280.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 400.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
+
+    def test_an_in_range_speed_is_carried_unclamped(self) -> None:
+        """Control: a value already inside `[min_ias_kmh, max_ias_kmh]`
+        is seeded verbatim, same as before this fix."""
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(2.0)
+ias_mps = 150.0 / 3.6
+ap_seat = "operator"
+ap_parked = true
+set_desired(1, { ias_kmh = 150.0 })
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    0.0)
+flight_control.run_flight_control(0.1)
+ap_parked = false
+flight_control.run_flight_control(0.2)
+flight_control.run_flight_control(0.3)
+flight_control.push_flight_control_state(0.3)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "active"
+        assert _field(line, "fc_in_band_speed") == "true"
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

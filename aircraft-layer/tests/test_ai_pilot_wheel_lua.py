@@ -548,6 +548,10 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     # `ai_pilot_cbtm_tick`, which closes over these.
     "LONG_PRESS_HOLD_S",
     "BREAK_AWAY_GAP_S",
+    # Review-fix round (`plans/flight-desired-state/review-s3.md`
+    # Required Fix 3) -- `run_ai_pilot_wheel_with_align_read`'s own
+    # deferred-read deadline.
+    "ALIGN_READ_DELAY_S",
 )
 
 #: `WHEEL_CENTER_BUTTON`/`WHEEL_MENU_BUTTON` are owned by `core.lua`, not
@@ -744,6 +748,20 @@ end
 local function LoGetADIPitchBankYaw()
     return 0.0, 0.0, 0.0
 end
+
+-- Review-fix round (`plans/flight-desired-state/review-s3.md` Required
+-- Fix 3) -- `run_ai_pilot_wheel_with_align_read`'s own deferred-read
+-- state and the `flight_desired` cross-module global it writes into,
+-- same bare-global convention `test_flight_control_lua.py`'s own
+-- `flight_desired` mock uses (no `local`: every `dofile`-loaded chunk
+-- shares only `_G`).
+local ai_wheel_align_read_at_t = nil
+local flight_desired_write_internal_calls = {}
+flight_desired = {
+    write_internal = function(parts)
+        table.insert(flight_desired_write_internal_calls, parts)
+    end,
+}
 """
     functions = "\n".join(
         _extract_lua_function(path, name)
@@ -786,6 +804,14 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_cbtm_tick"),
             (_AI_PILOT_WHEEL_LUA, "run_ai_pilot_wheel"),
             (_AI_PILOT_WHEEL_LUA, "update_ai_pilot_wheel_overlay"),
+            # Review-fix round (Required Fix 3) -- `held_targets` is
+            # declared after `run_ai_pilot_wheel`/`update_ai_pilot_wheel_
+            # overlay` in the real file (Lua has no hoisting, so it must
+            # stay extracted in this same relative order), and `run_ai_
+            # pilot_wheel_with_align_read` wraps `run_ai_pilot_wheel`
+            # itself to call it.
+            (_AI_PILOT_WHEEL_LUA, "held_targets"),
+            (_AI_PILOT_WHEEL_LUA, "run_ai_pilot_wheel_with_align_read"),
         )
     )
     script = constants + "\n" + preamble + "\n" + functions + "\n" + script_body
@@ -1153,6 +1179,121 @@ class TestTakeoverSequence:
         assert values["hold_cmd_after_unpark"] == "nil"
         assert values["menu_open_after_unpark"] == "false"
         assert values["presses_after_stale_tick"] == "0"
+
+
+class TestAlignReadScheduling:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 3): `ALIGN_READ_DELAY_S`/`ai_wheel_align_read_at_t`/
+    `run_ai_pilot_wheel_with_align_read` -- live today, not dormant
+    until Stage 4, since it fires off today's mode-2 "align" CBTM press
+    (`ai_pilot_cbtm.action == "align"`), independent of the new numbered
+    `flight` channel's own `kind == "align"` (still refused `wrong_mode`
+    this stage). Drives the real press through to the delayed `flight_
+    desired.write_internal` call -- the window no existing test touched
+    (the review's own finding: "no test ... drives `ai_pilot_cbtm.
+    action == "align"` through to the delayed `write_internal` call")."""
+
+    #: Same leaf-dump shape `_overlay_raw` builds, extended with
+    #: `course_text` (not one of that helper's own fields) -- the one
+    #: leaf `held_targets`'s heading read actually needs.
+    @staticmethod
+    def _raw(mode_text: str, course_text: str | None) -> str:
+        dashes = "-----------------------------------------"
+        parts = [f"{dashes}\nmode_text\n{mode_text}\nchildren are {{\n}}\n"]
+        if course_text is not None:
+            parts.append(f"{dashes}\ncourse_text\n{course_text}\nchildren are {{\n}}\n")
+        return "".join(parts)
+
+    def test_an_align_press_schedules_a_deferred_read_that_writes_the_aligned_heading(
+        self,
+    ) -> None:
+        raw_in_cbtm = json.dumps(self._raw("CBTM", None))
+        script = f"""
+-- A live CBTM align press, same as `handle_ai_pilot_goal_command`
+-- would set on `cbtm_action == "align"` -- driven directly here, the
+-- same "write the state a real dispatch would set" convention other
+-- harnesses in this file already use (e.g. `ap_held`).
+ai_pilot_parked_active = true
+ai_pilot_cbtm.action = "align"
+ai_pilot_cbtm.seq = 1
+ai_pilot_cbtm.status = "running"
+update_ai_pilot_wheel_overlay({raw_in_cbtm}, 0.0)
+print("presses_at_press=" .. #press_log)
+print("align_read_scheduled=" .. tostring(ai_wheel_align_read_at_t))
+print("writes_at_press=" .. #flight_desired_write_internal_calls)
+
+-- ED re-centres the overlay's own course to the 9K113 azimuth as a
+-- side effect of the press -- the mock stands in for that directly,
+-- same as `set_desired` does in `test_flight_control_lua.py`.
+ai_pilot_course_text = "245"
+
+run_ai_pilot_wheel_with_align_read(0.0 + ALIGN_READ_DELAY_S)
+print("writes_after_deadline=" .. #flight_desired_write_internal_calls)
+if #flight_desired_write_internal_calls > 0 then
+    print("written_heading=" .. tostring(flight_desired_write_internal_calls[1].heading_deg))
+end
+print("align_read_cleared=" .. tostring(ai_wheel_align_read_at_t))
+"""
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        # The press itself: one tap (press+release), the deadline
+        # scheduled, nothing written yet.
+        assert values["presses_at_press"] == "2"
+        assert values["align_read_scheduled"] == str(0.1)
+        assert values["writes_at_press"] == "0"
+        assert values["writes_after_deadline"] == "1"
+        assert values["written_heading"] == "245"
+        assert values["align_read_cleared"] == "nil"
+
+    def test_the_read_is_deferred_not_immediate(self) -> None:
+        """Before `ALIGN_READ_DELAY_S` elapses, nothing is written yet
+        -- a regression here would show up only as a wrong carried
+        heading in flight, never a test failure, per the review's own
+        worry."""
+        raw_in_cbtm = json.dumps(self._raw("CBTM", None))
+        script = f"""
+ai_pilot_parked_active = true
+ai_pilot_cbtm.action = "align"
+ai_pilot_cbtm.seq = 1
+ai_pilot_cbtm.status = "running"
+update_ai_pilot_wheel_overlay({raw_in_cbtm}, 0.0)
+ai_pilot_course_text = "245"
+
+-- Still inside the window (`ALIGN_READ_DELAY_S` is 0.1).
+run_ai_pilot_wheel_with_align_read(0.05)
+print("writes_before_deadline=" .. #flight_desired_write_internal_calls)
+print("align_read_still_pending=" .. tostring(ai_wheel_align_read_at_t ~= nil))
+"""
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["writes_before_deadline"] == "0"
+        assert values["align_read_still_pending"] == "true"
+
+    def test_a_nil_heading_at_the_deadline_writes_nothing(self) -> None:
+        """`held_targets().heading_deg` stale/unreadable (`course_text`
+        never became a number by the deadline) -- the deferred read
+        must not write a `nil`/garbage heading into `desired`."""
+        raw_in_cbtm = json.dumps(self._raw("CBTM", None))
+        script = f"""
+ai_pilot_parked_active = true
+ai_pilot_cbtm.action = "align"
+ai_pilot_cbtm.seq = 1
+ai_pilot_cbtm.status = "running"
+update_ai_pilot_wheel_overlay({raw_in_cbtm}, 0.0)
+-- `ai_pilot_course_text` deliberately left nil here.
+
+run_ai_pilot_wheel_with_align_read(0.0 + ALIGN_READ_DELAY_S)
+print("writes_after_deadline=" .. #flight_desired_write_internal_calls)
+print("align_read_cleared=" .. tostring(ai_wheel_align_read_at_t))
+"""
+        out = _run_ai_pilot_wheel_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["writes_after_deadline"] == "0"
+        # The deadline is still consumed (never retried) even though
+        # nothing was written -- matches `ai_wheel_align_read_at_t`'s
+        # own docstring: this is a one-shot deferred read, not a retry
+        # loop.
+        assert values["align_read_cleared"] == "nil"
 
 
 class TestSeatFromCamera:

@@ -1533,11 +1533,14 @@ end
 -- "held_targets()" deletion, were specific to this function). Two
 -- shapes:
 --
--- - **Unpark** (`fc_take_origin == "unpark"`): verbatim carry (Decision
---   32/Q4) -- every part `desired` holds, converted to true heading.
---   A standing break (`turn_rate_deg_s`/`turn_style ~= "normal"`) is
---   layered on top by the caller via a second `law_apply_goal`, since
---   `law_init_at_take` has no rate-override field of its own.
+-- - **Unpark** (`fc_take_origin == "unpark"`): carries every part
+--   `desired` holds (Decision 32/Q4), converted to true heading, speed/
+--   altitude clamped to `fc_limits` (U2, below) since mode 1 cannot fly
+--   every value mode 2 can hold -- `desired` itself stays exact, only
+--   the seed is clamped. A standing break (`turn_rate_deg_s`/`turn_
+--   style ~= "normal"`) is layered on top by the caller via a second
+--   `law_apply_goal`, since `law_init_at_take` has no rate-override
+--   field of its own.
 -- - **Voice take**: the ordinary bank-based/stopping-height/measured
 --   defaults (`law_init_at_take`'s own fallback, `seed` fields left
 --   `nil`) for every part, **except** one `desired` stamped strictly
@@ -1558,11 +1561,29 @@ local function build_take_seed(measured_true_deg)
             seed.heading_deg = heading_ref_to_true(desired.heading_deg, measured_true_deg)
         end
         if type(desired.alt_m) == "number" then
+            -- U2 (`plans/flight-desired-state/plan.md`, section 3,
+            -- answered yes): a carried value mode 1 cannot fly exactly
+            -- is flown clamped, never fed to the law raw -- `desired`
+            -- itself (and `seed`/`desired`'s own return below, which
+            -- body-layer's `fd_alt`/`fd_ias` mirror) keeps the exact
+            -- commanded value; only the seed fed to `law_init_at_take`
+            -- below is clamped, mirroring `belief.flight_control.
+            -- clamp_altitude`'s own "agl floor only" rule.
             seed.alt_m = desired.alt_m
             seed.alt_ref = (desired.alt_ref == "baro") and "B" or "R"
+            if seed.alt_ref == "R" and seed.alt_m < fc_limits.floor_agl_m then
+                seed.alt_m = fc_limits.floor_agl_m
+            end
         end
         if type(desired.ias_kmh) == "number" then
+            -- Same clamp as above, mirroring `belief.flight_control.
+            -- clamp_speed`'s `[min_ias_kmh, max_ias_kmh]` range.
             seed.speed_kmh = desired.ias_kmh
+            if seed.speed_kmh < fc_limits.min_ias_kmh then
+                seed.speed_kmh = fc_limits.min_ias_kmh
+            elseif seed.speed_kmh > fc_limits.max_ias_kmh then
+                seed.speed_kmh = fc_limits.max_ias_kmh
+            end
         end
         return seed, desired
     end

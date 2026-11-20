@@ -24,12 +24,18 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    decide_carried_value_speech,
     decide_flight_speech,
     parse_acks,
     resolve_pending_flight_readbacks,
     resolve_pending_take,
 )
-from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
+from belief.flight_control import (
+    FLOOR_AGL_M,
+    HANDOVER_ACK_TIMEOUT_S,
+    MAX_IAS_KMH,
+    MIN_IAS_KMH,
+)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -196,6 +202,120 @@ class TestDecideFlightSpeech:
         assert decision is not None
         assert decision.says == "You have controls!"
         assert decision.urgent is True
+
+
+class TestDecideCarriedValueSpeech:
+    """Review-fix round (`plans/flight-desired-state/review-s3.md`
+    Required Fix 1): U2's "a carried value the new mode cannot fly
+    exactly is announced once, not urgent" line, the m2->m1 half."""
+
+    def test_no_mode_n_on_either_side_is_a_no_op(self) -> None:
+        assert (
+            decide_carried_value_speech(FlightAuthorityState(), FlightAuthorityState())
+            == []
+        )
+
+    def test_an_unchanged_mode_n_is_a_no_op(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m1", mode_n=1)
+        new = FlightAuthorityState(fd_mode="m1", mode_n=1)
+        assert decide_carried_value_speech(prev, new) == []
+
+    def test_a_park_edge_says_nothing(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m1", mode_n=2)
+        new = FlightAuthorityState(fd_mode="m2", mode_n=3, mode_cause="park")
+        assert decide_carried_value_speech(prev, new) == []
+
+    def test_an_unpark_whose_values_fit_says_nothing(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            ias_kmh=150.0,
+            alt_m=300.0,
+            alt_ref="agl",
+        )
+        assert decide_carried_value_speech(prev, new) == []
+
+    def test_a_carried_speed_mode_1_cannot_fly_is_announced_once_not_urgent(
+        self,
+    ) -> None:
+        """The plan's own worked example: "speed 0" in mode 2, then
+        unpark -- mode 1 cannot fly 0 km/h, so it flies its own
+        minimum and says so once, not urgently ("Speed 8 0." for
+        `MIN_IAS_KMH == 80.0`)."""
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1", mode_n=4, mode_cause="unpark", ias_kmh=0.0
+        )
+        decisions = decide_carried_value_speech(prev, new)
+        assert len(decisions) == 1
+        digits = " ".join(str(int(MIN_IAS_KMH)))
+        assert decisions[0].says == f"Speed {digits}."
+        assert decisions[0].urgent is False
+
+    def test_a_carried_speed_above_the_ceiling_is_clamped_down(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            ias_kmh=MAX_IAS_KMH + 100.0,
+        )
+        decisions = decide_carried_value_speech(prev, new)
+        assert len(decisions) == 1
+        digits = " ".join(str(int(MAX_IAS_KMH)))
+        assert decisions[0].says == f"Speed {digits}."
+
+    def test_a_carried_agl_altitude_below_the_floor_is_announced(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            alt_m=FLOOR_AGL_M - 10.0,
+            alt_ref="agl",
+        )
+        decisions = decide_carried_value_speech(prev, new)
+        assert len(decisions) == 1
+        assert decisions[0].says == f"{int(FLOOR_AGL_M)} meters."
+        assert decisions[0].urgent is False
+
+    def test_a_carried_baro_altitude_is_never_floored(self) -> None:
+        """`clamp_altitude`'s own "agl floor only" rule -- a barometric
+        carry, however low, is never clamped or announced here."""
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            alt_m=FLOOR_AGL_M - 10.0,
+            alt_ref="baro",
+        )
+        assert decide_carried_value_speech(prev, new) == []
+
+    def test_both_parts_carried_badly_announce_both_in_one_call(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            ias_kmh=0.0,
+            alt_m=0.0,
+            alt_ref="agl",
+        )
+        decisions = decide_carried_value_speech(prev, new)
+        assert len(decisions) == 2
+        assert all(decision.urgent is False for decision in decisions)
+
+    def test_a_voice_take_edge_is_never_this_announcement(self) -> None:
+        """`mode_cause == "take"` (a voice take) never carries anything
+        from mode 2 -- only `"unpark"` does."""
+        prev = FlightAuthorityState(fd_mode="off", mode_n=1)
+        new = FlightAuthorityState(
+            fd_mode="m1", mode_n=2, mode_cause="take", ias_kmh=0.0
+        )
+        assert decide_carried_value_speech(prev, new) == []
 
 
 class TestParseAcks:

@@ -535,3 +535,118 @@ latter is fixed by 3a.
   suite (`not slow`, parallel via `pytest-xdist`): **3718 passed, 4 xfailed**; the 27 `slow`-marked
   flight scenario tests also run separately: **27 passed**.
 - `tools/check_rules.py`'s dry-run harness: clean, no new failures.
+
+## Review-fix round, 2026-11-20 (`plans/flight-desired-state/review-s3.md`, NEEDS REVISION)
+
+All four required fixes.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua`:
+  - **Required Fix 1 (U2, the m2→m1 carry)**: `build_take_seed`'s unpark branch now clamps the
+    seed it hands `law_init_at_take` to `fc_limits.min_ias_kmh`/`max_ias_kmh` (speed) and
+    `fc_limits.floor_agl_m` (altitude, agl ref only) — the same bounds
+    `belief.flight_control.clamp_speed`/`clamp_altitude` already enforce body-side. `desired`
+    itself (and the `fd_ias`/`fd_alt` wire fields it mirrors) is never touched by this clamp —
+    only the value actually fed to the law. Pruned the branch's own "verbatim carry" comment
+    (now wrong) to say so.
+- `body-layer/src/belief/flight_authority.py`: new `decide_carried_value_speech(prev, new)`,
+  the announcement half of the same fix. Fires on the same `fd_mode_n` edge `decide_flight_
+  speech` watches, only when the edge lands in `m1` with cause `unpark`; compares `new.ias_kmh`/
+  `alt_m` against `belief.flight_control.clamp_speed`/`clamp_altitude` and returns one non-urgent
+  `FlightAuthorityDecision` per part that differs ("Speed 8 0." for the plan's own worked
+  example). A small private `_digit_readback` copies `CrewConsole._digit_readback`'s one-line
+  algorithm rather than importing it — `crew_console.py` already imports this module, so the
+  reverse import would be circular; flagged here rather than silently duplicating it unremarked.
+- `body-layer/src/body.py`: calls `decide_carried_value_speech` right after `decide_flight_
+  speech` each poll (section 3a's own speech order: mode-change lines first, then U2's
+  carried-value lines) and speaks each returned decision via the existing `speak_flight_
+  authority_decision`.
+- `docs/acceptance/2026-11-20-bl16-desired-state-s3-card.md`: added step 10, the "speed 0 in m2
+  then unpark" scenario the plan's own Stage 3 bullet named but the shipped card omitted.
+- `body-layer/CLAUDE.md` (**Required Fix 4**): `flight_control.py`'s module-map entry no longer
+  describes the deleted `decide_flight_control` as current — now says what replaced it
+  (`belief.flight_authority`'s `decide_flight_speech`/ack-matching) and that `FlightControlState`
+  is diagnostics-only.
+
+### Where the U2 clamp lives, and why
+
+**On the Lua side, at `build_take_seed` itself — not at a Python m2→m1 edge handler.** What mode 1
+actually *flies* is decided entirely in `flight_control.lua` (the seed fed to `law_init_at_take`);
+body-layer has no write path into that value at all, only a read-only mirror of `desired`. So the
+clamp has to live where the seed is built, which is also where the review's own alternative
+("or at `build_take_seed` itself") pointed. The announcement is necessarily a second, separate
+piece in Python (`decide_carried_value_speech`), because only body-layer speaks — it recomputes
+the same clamp body-side (reusing the already-existing `clamp_speed`/`clamp_altitude`) against
+the mirrored exact `fd_ias`/`fd_alt` values to decide whether to say anything, but it never
+*writes* the clamped value anywhere; Lua's own clamp is what actually protects the law. **Q1a
+("the desired state keeps the exact value; what's flown is clamped") is why `desired` is never
+touched by either half** — the wire's `fd_ias`/`fd_alt` read the same number the pilot said, in
+both modes, before and after this fix.
+
+Per the brief: the user has since said the coming lift-vector law will have no minimum speed, so
+this clamp is kept deliberately small and tied only to mode 1's *current* `fc_limits.min_ias_kmh`/
+`max_ias_kmh`/`floor_agl_m` — four `if`/`elseif` lines in one existing function, no new constant,
+no new desired-state rule. Removing it later (when the law itself no longer needs a floor) is a
+revert of those four lines plus the Python announcement function, not a redesign.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_lua.py`:
+  - `TestVoiceTakeSetDuringTakingSurvivesTheSeed` (Required Fix 2) — drives a `set_desired` with
+    a `seq` strictly after the take's own `seq` while `fc_mode == "taking"` (before the resolving
+    `run_flight_control` call), confirming the law adopts the later-stamped heading rather than
+    the measured default; a control case pins `seq == take_seq` (not strictly after) as *not*
+    surviving.
+  - `TestUnparkTakeSeedClampsToMode1Limits` (Required Fix 1's own Lua-side proof) — "speed 0" and
+    "speed 400" carried through an unpark fly `MIN_IAS_KMH`/`MAX_IAS_KMH` respectively (via
+    `fc_in_band_speed` against a measured IAS set to the expected clamped value); an in-range
+    carry is unaffected. Verified these two fail at this branch's own pre-fix state (`git stash`
+    of just this file, re-run, restored by sha) — the in-range control case does not regress.
+- `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`:
+  - `TestAlignReadScheduling` (Required Fix 3) — extended `_run_ai_pilot_wheel_integration`'s
+    harness with a `flight_desired` mock (`write_internal` call recorder), the `ai_wheel_align_
+    read_at_t` local, the `ALIGN_READ_DELAY_S` constant, and the `held_targets`/`run_ai_pilot_
+    wheel_with_align_read` functions (additive only — no existing test's call shape changed).
+    Drives `ai_pilot_cbtm.action = "align"` directly (same "write the state a real dispatch
+    would set" convention `ap_held`/`set_desired` already use elsewhere in this codebase) through
+    a real `update_ai_pilot_wheel_overlay` call with `mode_text = "CBTM"`, confirming: the press
+    fires and schedules the deferred read; nothing is written before `ALIGN_READ_DELAY_S` elapses;
+    the deferred read writes the post-align `course_text` once the deadline passes; a stale/nil
+    `course_text` at the deadline writes nothing (but still consumes the deadline, matching the
+    "one-shot, never retried" docstring).
+- `body-layer/tests/test_flight_authority.py`:
+  - `TestDecideCarriedValueSpeech` — no-op cases (no edge, unchanged mode, a park edge, an
+    in-range unpark carry, a voice-take edge), the plan's own "speed 0" worked example, a
+    ceiling-clamp case, an agl-floor case, baro altitude never floored, both parts carried badly
+    in one call, and the digit-spelling format itself (`"Speed 8 0."`).
+
+### Checks
+
+- aircraft-layer: `ruff format --check`/`ruff check` pass (one `ISC004` lint fixed in the new
+  test file); `mypy src` clean (29 files); `luac5.1 -p` passes on both touched Lua files; the
+  GETGLOBAL sweep on both is clean (stdlib/DCS APIs plus the pre-existing legitimate cross-module
+  globals only — no new global leak from the clamp); full suite `pytest tests -q`: **1109
+  passed**.
+- body-layer: `ruff format --check`/`ruff check` pass; `mypy src` clean (93 files); full suite
+  (`not slow`, parallel via `pytest-xdist`): **3728 passed, 4 xfailed**; `slow`-marked tests run
+  separately: **27 passed**.
+
+### Notable Discoveries
+
+- `fc_in_band_speed`/`fc_in_band_altitude`/`fc_in_band_heading` all start `false`
+  unconditionally at `law_init_at_take` and are only recomputed by the *next* `law_update` call
+  (the just-took frame returns before calling it) — a clamp test asserting "in band" needs one
+  extra `run_flight_control` call after the take frame, easy to miss (cost three failed first
+  drafts here).
+- A second stale reference to the deleted `decide_flight_control` survives outside the file this
+  review named: `flight_control.lua` lines ~1772 and ~1990 (two comments, one inside `run_active_
+  frame`, one inside the unpark-take branch) still name it. Neither is attached to code this
+  round touched (the first is adjacent to the seed-building call I did edit, and was pruned along
+  with the "verbatim carry" line above; the second is one screen away, inside the unpark
+  precondition-refusal branch, which this round did not otherwise touch) — left as found, per
+  this role's own "stay local to the block you are editing" rule, but flagged here since it is
+  the same defect class Required Fix 4 was about, just outside `body-layer/CLAUDE.md`.
+- `docs/STRUCTURE.md` (body-layer) also still names `decide_flight_control` as current (two
+  hits) — out of this review's named scope (it named `body-layer/CLAUDE.md` specifically), left
+  untouched, flagged for whoever next edits that entry.

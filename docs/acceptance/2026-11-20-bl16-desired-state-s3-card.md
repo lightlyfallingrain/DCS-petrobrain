@@ -80,6 +80,11 @@ letter `m1`), and compare the cockpit instrument against what was commanded:
    target), not snap straight to the target or hold the measured heading.
 9. **"You have controls, heading 090" in one breath** — "I have controls." should be spoken
    first, then the heading readback, never the other order.
+10. **"Speed 0" in m2 then unpark** (U2's one line). Through the AI overlay, command "speed 0",
+    then unpark. Expect mode 1 to fly its own minimum speed, not 0, and to hear "Speed 8 0."
+    once, not urgently, right after any mode-change speech (there should be none here — an
+    ordinary unpark is silent). `fd_ias` itself should still read `0` (the exact commanded
+    value never changes), only what is actually flown is clamped.
 
 ## Report back
 

@@ -201,6 +201,7 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    decide_carried_value_speech,
     decide_flight_speech,
 )
 from belief.flight_control import (
@@ -5534,6 +5535,18 @@ def _run_crew_text_poll_loop(
                         if authority_decision is not None:
                             crew_console.speak_flight_authority_decision(
                                 authority_decision, runner.last_t_sim
+                            )
+                        # U2's carried-value lines (section 3a's own
+                        # speech order: mode-change lines first, then
+                        # these) -- the m2->m1 unpark carry, first
+                        # needed this stage; speaks once, not urgent,
+                        # per part mode 1 cannot fly exactly.
+                        for carried_decision in decide_carried_value_speech(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        ):
+                            crew_console.speak_flight_authority_decision(
+                                carried_decision, runner.last_t_sim
                             )
                         # Same hold as mode 2's own gate above -- the
                         # `flight` channel's own `seq` must never see a

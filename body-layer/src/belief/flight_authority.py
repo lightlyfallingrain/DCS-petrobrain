@@ -28,7 +28,7 @@ from typing import Final
 
 import tuning
 from aircraft_client import AircraftLayerClient
-from belief.flight_control import HANDOVER_ACK_TIMEOUT_S
+from belief.flight_control import HANDOVER_ACK_TIMEOUT_S, clamp_altitude, clamp_speed
 from belief.speech import render_unable
 
 #: How old a `flight` request may be when `Export.lua` applies it (BL-16
@@ -223,6 +223,68 @@ def decide_flight_speech(
     if new.fd_mode == "off" and new.mode_cause not in _SILENT_OFF_CAUSES:
         return FlightAuthorityDecision(says="You have controls!", urgent=True)
     return None
+
+
+def _digit_readback(value: int) -> str:
+    """Spells a non-negative integer digit by digit, space-separated --
+    `CrewConsole._digit_readback`'s own algorithm, copied rather than
+    imported: `crew_console.py` imports this module (`PendingTake`/
+    `resolve_pending_take` etc.), so the reverse import would be
+    circular. One line; keep the two in sync by hand if the convention
+    ever changes."""
+    return " ".join(str(int(value)))
+
+
+def decide_carried_value_speech(
+    prev: FlightAuthorityState, new: FlightAuthorityState
+) -> list[FlightAuthorityDecision]:
+    """U2 (`plans/flight-desired-state/plan.md`, section 3, answered
+    yes): "a carried value the new mode cannot fly exactly is announced
+    once, not urgent" -- the m2->m1 half (first needed in Stage 3; the
+    m1->m2 half, `m2_flown`, is Stage 4). Fires on the same `fd_mode_n`
+    edge `decide_flight_speech` watches (same "no edge to observe"
+    guard), only when the edge lands in `m1` with cause `unpark` --
+    every other edge carries nothing new to announce.
+
+    Compares each of ias/altitude against mode 1's own clamp
+    (`belief.flight_control.clamp_speed`/`clamp_altitude`, the body-side
+    twins of the `fc_limits.min_ias_kmh`/`max_ias_kmh`/`floor_agl_m`
+    values `Export.lua`'s `build_take_seed` now clamps the unpark seed
+    to) and returns one non-urgent decision per part that differs.
+    `new.ias_kmh`/`alt_m` -- the exact commanded value `fd_ias`/`fd_alt`
+    carries -- is never written here; only what mode 1 will actually
+    fly is clamped, in this comparison and in `build_take_seed`. Spoken
+    after the mode-change check above (section 3a's own speech order:
+    mode-change lines first, then U2's carried-value lines)."""
+    if prev.mode_n is None or new.mode_n is None or prev.mode_n == new.mode_n:
+        return []
+    if new.fd_mode != "m1" or new.mode_cause != "unpark":
+        return []
+    out: list[FlightAuthorityDecision] = []
+    if new.ias_kmh is not None:
+        flown_ias = clamp_speed(new.ias_kmh)
+        if flown_ias != new.ias_kmh:
+            out.append(
+                FlightAuthorityDecision(
+                    says=f"Speed {_digit_readback(int(flown_ias))}.", urgent=False
+                )
+            )
+    if new.alt_m is not None:
+        flown_alt: float | None = None
+        is_baro = False
+        if new.alt_ref == "agl":
+            flown_alt = clamp_altitude(new.alt_m, "agl")
+        elif new.alt_ref == "baro":
+            flown_alt = clamp_altitude(new.alt_m, "baro")
+            is_baro = True
+        if flown_alt is not None and flown_alt != new.alt_m:
+            suffix = " barometric" if is_baro else ""
+            out.append(
+                FlightAuthorityDecision(
+                    says=f"{int(flown_alt)} meters{suffix}.", urgent=False
+                )
+            )
+    return out
 
 
 def parse_acks(acks: str | None) -> list[tuple[int, str, str]]:
