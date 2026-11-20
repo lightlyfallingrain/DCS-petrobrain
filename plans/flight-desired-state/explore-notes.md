@@ -182,3 +182,17 @@ User, 2026-11-20, after "Ok for lift vector law proposal", verbatim:
 So the law steers by observation: measured 3D acceleration against desired, cyclic moved in the
 direction and collective by the amount that reduces the error. No model of the lift vector is
 trusted for values; any feed-forward is only a starting nudge.
+
+User, 2026-11-20, verbatim:
+
+> In DCS player can only *see* changes. In real world a pilot would *feel* acceleration changes. ->
+> Petrobrain can use raw telemetry to detect aircraft state and acceleration. That is better than
+> relying on instruments only.
+
+So the law reads aircraft state and acceleration from raw telemetry (the stand-in for what a pilot
+feels), not only from what the instruments show. This is consistent with the no-omniscience
+principle: it covers the crew's own aircraft as a body feels it, never the outside world. Today's
+law differentiates IAS and vertical speed because `LoGetAccelerationUnits`'s body-frame mapping was
+never confirmed (`flight_control.lua` module header). Confirming that mapping, together with
+`LoGetVectorVelocity`'s frame (also unresolved), is a prerequisite for the lift-vector law: a short
+recon plus a probe flight.
