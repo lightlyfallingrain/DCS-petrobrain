@@ -143,3 +143,13 @@ Settled:
 - **U6:** yes: a slow break turns more gently.
 - **U7:** yes: use `LoGetVectorVelocity` if LV-0 confirms it matches the position deltas. User
   test: DCS's velocity is 3D (sideways movement shows), most likely the 3D vector's length.
+
+## Slowing down (user, 2026-11-20, verbatim, on diagram 4's "1. speed gives: tilt back, trade speed for lift")
+
+> Also needs less collective so that load on rotor blades decreaes. Rotor blade load is what causes
+> both RPM drop and reatreating blade stall.
+> Slowing down is always pitch back and also less collective.
+
+So every deceleration (the "speed gives" step under limits, and any ordinary speed reduction) is
+pitch back plus less collective, never pitch back alone. Blade load drives both rotor-RPM droop
+and retreating-blade stall. Plan diagram 4 and "speed gives" amended.

@@ -219,7 +219,7 @@ shortfall goes down the manoeuvre's own chain. (Orders confirmed by the user, U3
 flowchart TB
   L{"lift length capped?<br/>collective at stop, RPM near floor,<br/>near blade-stall IAS, right pedal at limit"} -- no --> N["fly a_d as is"]
   L -- yes --> C{"manoeuvre class<br/>(derived each frame)"}
-  C -- "ordinary (Q2)" --> O1["1. speed gives:<br/>tilt back, trade speed for lift"] --> O2["2. turn rate gives:<br/>shallower bank"] --> O3["3. height gives, never below floor"]
+  C -- "ordinary (Q2)" --> O1["1. speed gives:<br/>tilt back AND less collective<br/>(lower blade load: RPM, blade stall)"] --> O2["2. turn rate gives:<br/>shallower bank"] --> O3["3. height gives, never below floor"]
   C -- "break (rate override set)" --> B1["1. height gives:<br/>within 100 m of entry, never below 40 m AGL"] --> B2["2. speed gives"] --> B3["3. turn rate gives"]
   C -- "low, slow, RPM drooping (Q-M1-2)" --> R1["accelerate: tilt forward,<br/>height gives first"]
 ```
@@ -371,7 +371,12 @@ heading loop in forward flight (finding 2), and no deliberate extra pedal in har
 `ordinary`. While the lift length is capped and `e_u` stays positive (not enough lift), the shortfall
 is handed down that class's chain, each absorber until its own limit:
 - **speed gives**: `θ_i` is allowed to integrate nose-up on `e_u` (today's `K_TILT_FROM_AZ_SATURATED`
-  idea, now one entry in a chain), until IAS falls below the speed band's floor;
+  idea, now one entry in a chain) **and collective is reduced at the same time**, until IAS falls
+  below the speed band's floor. User, 2026-11-20, verbatim: *"Also needs less collective so that
+  load on rotor blades decreaes. Rotor blade load is what causes both RPM drop and reatreating
+  blade stall. Slowing down is always pitch back and also less collective."* So any deceleration,
+  in this chain or from an ordinary speed reduction, is pitch back plus less collective, never pitch
+  back alone; a rule for the speed channel generally, not only under limits;
 - **turn gives**: `φ_ff` is scaled down (shallower bank, less lift needed) until a minimum share;
 - **height gives**: `a_u,d` is allowed below zero, bounded by the break floor or the 40 m floor.
 - `low_slow_rpm`: `θ_i` integrates nose-**down** (accelerate) and height gives.
