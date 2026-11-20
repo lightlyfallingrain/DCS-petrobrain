@@ -143,4 +143,6 @@ Settled:
   not urgent, the value now flown.
 - **Align / align for launch in mode 1:** "unable" (align exists only in mode 2, as decided
   earlier in BL-16).
-- **U4** (fly Stage 1 alone): asked what Stages 1 and 2 are; pending.
+- **U4:** after Stages 1 and 2 were explained (1: Lua reports mode and desired state in shadow, a
+  card checks it against the cockpit; 2: body-layer takes the mode from Lua), user, verbatim:
+  *"Build both, we'll refine if something does not work."* Stages 1 and 2 ship together, one card.
