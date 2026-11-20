@@ -1,8 +1,8 @@
 # BL-16 desired state, Stages 1-2 — test card (2026-11-20)
 
-**Branch to fly: `main`**, once this batch is merged. `git pull` in the repo root. No deploy
-steps beyond the usual: your redeploy script copies `Export.lua` plus the whole `Petrobrain/`
-folder, and body-layer's own code from this batch.
+**Branch to fly: `feature/bl16-desired-state`** (not yet on `main`; review done, the other gates
+run after Stages 3–4). In the repo root: `git checkout feature/bl16-desired-state`, then your usual
+redeploy and restarts. Back to `main` afterwards with `git checkout main`.
 
 **What this checks:** Stage 1, the shadow authority/desired state Lua now reports (`fd_mode`,
 `fd_mode_cause`, the desired heading/altitude/speed) against what the cockpit actually shows, and
