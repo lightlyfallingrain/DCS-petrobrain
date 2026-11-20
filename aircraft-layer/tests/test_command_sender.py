@@ -84,3 +84,33 @@ def test_send_command_raises_command_send_error_on_a_failed_send() -> None:
 
     with pytest.raises(CommandSendError):
         sender.send_command("forward")
+
+
+def test_send_reset_delivers_well_formed_datagram() -> None:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- body-layer's own process-start
+    reset, no `seq` field (deliberately -- see `send_reset`'s own
+    docstring)."""
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2.0)
+    port = receiver.getsockname()[1]
+
+    try:
+        with CommandSender(host="127.0.0.1", port=port) as sender:
+            sender.send_reset(1234)
+
+        data, _addr = receiver.recvfrom(4096)
+        decoded = json.loads(data.decode("utf-8"))
+        assert decoded == {"op": "reset", "epoch": 1234}
+    finally:
+        receiver.close()
+
+
+def test_send_reset_raises_command_send_error_on_a_failed_send() -> None:
+    sender = CommandSender(host="127.0.0.1", port=1)
+    sender.open()
+    sender._socket = _FailingSocket()  # type: ignore[assignment]
+
+    with pytest.raises(CommandSendError):
+        sender.send_reset(1234)

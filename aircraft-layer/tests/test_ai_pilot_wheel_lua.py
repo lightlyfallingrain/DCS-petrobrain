@@ -1754,6 +1754,163 @@ class TestOnStop:
         assert values["correction_hold_cmd"] == "nil"
 
 
+def _run_reset(epoch: int, *, pending_cmd: str = "3005") -> dict[str, str]:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- same fixture shape as `_run_on_
+    stop` above (an open hold press, `ai_pilot_goal`/`ai_pilot_cbtm`
+    populated as a live activation would leave them), run against the
+    real, extracted `reset` instead -- which itself calls `on_stop`
+    internally, so this also proves that cross-call survives extraction
+    (both functions are sliced from the real file, in the order `reset`
+    needs `on_stop` already defined)."""
+    exe = _lua_executable()
+    if exe is None:
+        pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
+
+    preamble = f"""
+local press_log = {{}}
+
+local function GetDevice(id)
+    if id == 30 then
+        return {{
+            performClickableAction = function(self, cmd, value)
+                table.insert(press_log, cmd .. ":" .. tostring(value))
+            end,
+        }}
+    end
+    return nil
+end
+
+local ai_wheel_pending_release_t = 42.0
+local ai_wheel_pending_cmd = {pending_cmd}
+local ai_pilot_takeover = {{
+    stage = "correcting_altitude",
+    t = 1.0,
+    handover_altitude_m = 900.0,
+    menu_open = true,
+    menu_open_at_t = 1.5,
+    menu_closed_since_t = nil,
+    awaiting_correction_decision = false,
+    correction_path = "hold",
+    correction_substage = nil,
+    correction_phase = "phase1",
+    correction_hold_cmd = {pending_cmd},
+    raw_arg852 = 0.95,
+    raw_arg952 = 0.05,
+    AI_PILOT_MENU_OPEN_DELAY_S = 0.5,
+}}
+local ai_wheel_goal_pending_release_t = nil
+local ai_wheel_goal_pending_cmd = nil
+local ai_pilot_goal = {{
+    param = "altitude",
+    heading_target_deg = nil,
+    altitude_target_m = 300.0,
+    altitude_target_ref = "barometric",
+    speed_target_kmh = nil,
+    goal_seq = 5,
+    progress = "pressing",
+    mode_cycle_attempts = 0,
+    hold_cmd = nil,
+    toggling_reference = false,
+    hvrt_direction = nil,
+    hvrt_hold_cmd = nil,
+    hvrt_started_t = nil,
+}}
+local ai_wheel_cbtm_pending_release_t = nil
+local ai_wheel_cbtm_pending_cmd = nil
+local ai_pilot_cbtm = {{
+    action = "break_left",
+    seq = 3,
+    status = "running",
+    mode_cycle_attempts = 1,
+    mode_blocked_since_t = nil,
+    presses_done = 1,
+    gap_until_t = nil,
+}}
+local ai_pilot_player_seat = "operator"
+local ai_pilot_cam_fwd_m = 1.2
+local ai_pilot_seat_settle_until_t = 3.0
+local ai_pilot_reset_epoch = nil
+"""
+    lines = [preamble]
+    lines.extend(
+        _extract_lua_function(path, name)
+        for path, name in (
+            (_CORE_LUA, "safe_call"),
+            (_AI_PILOT_WHEEL_LUA, "on_stop"),
+            (_AI_PILOT_WHEEL_LUA, "reset"),
+        )
+    )
+    lines.append(f"reset({epoch})")
+    lines.append(f"reset({epoch})")
+    lines.append(
+        'print("press_log=" .. table.concat(press_log, ","))\n'
+        'print("pending_cmd=" .. tostring(ai_wheel_pending_cmd))\n'
+        'print("stage=" .. tostring(ai_pilot_takeover.stage))\n'
+        'print("goal_param=" .. tostring(ai_pilot_goal.param))\n'
+        'print("goal_seq=" .. tostring(ai_pilot_goal.goal_seq))\n'
+        'print("goal_progress=" .. tostring(ai_pilot_goal.progress))\n'
+        'print("cbtm_action=" .. tostring(ai_pilot_cbtm.action))\n'
+        'print("cbtm_status=" .. tostring(ai_pilot_cbtm.status))\n'
+        'print("cbtm_seq=" .. tostring(ai_pilot_cbtm.seq))\n'
+        'print("reset_epoch=" .. tostring(ai_pilot_reset_epoch))'
+    )
+    script = "\n".join(lines)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".lua", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(script)
+        script_path = handle.name
+    try:
+        result = subprocess.run(
+            [exe, script_path], capture_output=True, text=True, check=False
+        )
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+    assert result.returncode == 0, f"Lua harness failed (exe={exe}): {result.stderr}"
+    return dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+
+
+class TestReset:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `ai_pilot_wheel.reset`, the
+    body-layer process-start reset. Reuses `on_stop` (every open press
+    released, goal/CBTM/takeover state cleared -- `TestOnStop` above
+    already proves that half) and goes one step further: `goal_seq`/
+    `cbtm_seq` themselves go back to `0`, which `on_stop` alone
+    deliberately leaves untouched."""
+
+    def test_reset_releases_press_clears_state_and_echoes_the_epoch(self) -> None:
+        values = _run_reset(99)
+        # `on_stop`'s own effect, proven again here to confirm `reset`
+        # actually reuses it rather than duplicating a shorter list.
+        assert values["press_log"] == "3005:0"
+        assert values["pending_cmd"] == "nil"
+        assert values["stage"] == "nil"
+        assert values["goal_param"] == "nil"
+        assert values["goal_progress"] == "idle"
+        assert values["cbtm_action"] == "nil"
+        assert values["cbtm_status"] == "idle"
+        # `reset`'s own addition over `on_stop`: both seq high-water
+        # marks go back to their startup default.
+        assert values["goal_seq"] == "0"
+        assert values["cbtm_seq"] == "0"
+        # The epoch is echoed back verbatim.
+        assert values["reset_epoch"] == "99"
+
+    def test_reset_is_idempotent_and_freely_resendable(self) -> None:
+        """`_run_reset` calls `reset(epoch)` twice -- body-layer resends
+        the reset while unconfirmed, and applying the same epoch a
+        second time must have no further effect (no double-release of
+        an already-released press, no crash)."""
+        values = _run_reset(5, pending_cmd="nil")
+        assert values["press_log"] == ""
+        assert values["reset_epoch"] == "5"
+        assert values["goal_seq"] == "0"
+        assert values["cbtm_seq"] == "0"
+
+
 #: Stage P2a/P2b's own integration harness -- a fresh, self-contained
 #: `GetDevice`/overlay mock (not `_run_ai_pilot_wheel_integration`'s own,
 #: which is built around the takeover correction's `GetDevice(0)`/MSL/AGL

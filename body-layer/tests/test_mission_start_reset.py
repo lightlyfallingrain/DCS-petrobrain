@@ -168,6 +168,14 @@ _RUNNER_PRESERVE = {
     "world_model_conn",
     "theatre",
     "world_model_store",
+    # BL-16 sortie 2026-11-20 (`docs/acceptance/2026-11-20-sortie-
+    # feedback.md`) -- the body-layer process-start reset's own three
+    # fields. They name a fact about this process, not this mission,
+    # so `reset_for_new_mission` passes them through unchanged, same
+    # reasoning as `theatre`/`world_model_store` above.
+    "command_reset_epoch",
+    "command_reset_confirmed",
+    "command_reset_last_sent_wall",
 }
 
 

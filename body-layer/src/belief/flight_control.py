@@ -423,6 +423,14 @@ class FlightControlState:
     slip_ball_pilot_raw: float | None = None
     slip_ball_operator_raw: float | None = None
     slip_ball_lo_api: float | None = None
+    #: BL-16 sortie 2026-11-20 (`docs/acceptance/
+    #: 2026-11-20-sortie-feedback.md`) -- mirrors `Export.lua`'s own
+    #: `fc_reset_epoch` echo. `body.py`'s poll loop compares this
+    #: against `ConsolePerceptionRunner.command_reset_epoch` to know
+    #: when it is safe to send anything that carries `wire_seq` -- not
+    #: decided here, same "mirror only" posture every other `lua_*`
+    #: field on this dataclass has.
+    lua_reset_epoch: int | None = None
 
 
 def _as_optional_float(value: object) -> float | None:
@@ -508,6 +516,7 @@ def advance_flight_control_state(
             sample.get("fc_slip_ball_operator_raw")
         ),
         slip_ball_lo_api=_as_optional_float(sample.get("fc_slip_ball_lo_api")),
+        lua_reset_epoch=_as_optional_int(sample.get("fc_reset_epoch")),
     )
 
 

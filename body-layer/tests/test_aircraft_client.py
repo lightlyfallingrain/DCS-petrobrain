@@ -78,6 +78,7 @@ def _make_handler(
     read_args_status: int = 200,
     probe_points_calls: list[tuple[int, list[list[int]]]] | None = None,
     ai_pilot_goal_calls: list[dict[str, object]] | None = None,
+    reset_calls: list[int] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     if triggered_searches is None:
         triggered_searches = []
@@ -87,6 +88,8 @@ def _make_handler(
         probe_points_calls = []
     if ai_pilot_goal_calls is None:
         ai_pilot_goal_calls = []
+    if reset_calls is None:
+        reset_calls = []
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -145,6 +148,11 @@ def _make_handler(
                 body = json.loads(self.rfile.read(length))
                 ai_pilot_goal_calls.append(body)
                 self._respond(200, {"ok": True})
+            elif self.path == "/command/reset":
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = json.loads(self.rfile.read(length))
+                reset_calls.append(body["epoch"])
+                self._respond(200, {"ok": True})
             else:
                 self._respond(404, {"error": "not found"})
 
@@ -187,6 +195,38 @@ def server_url_with_triggered_searches() -> Iterator[tuple[str, list[str]]]:
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=5)
+
+
+@pytest.fixture
+def server_url_with_reset_calls() -> Iterator[tuple[str, list[int]]]:
+    reset_calls: list[int] = []
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(reset_calls=reset_calls))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}", reset_calls
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_write_reset_posts_to_command_endpoint(
+    server_url_with_reset_calls: tuple[str, list[int]],
+) -> None:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `write_reset`'s own pure-pass-
+    through posture, mirroring `write_ai_pilot_goal`'s own test."""
+    url, reset_calls = server_url_with_reset_calls
+    client = AircraftLayerClient(base_url=url)
+    client.write_reset(1234)
+    assert reset_calls == [1234]
+
+
+def test_write_reset_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1")
+    with pytest.raises(AircraftLayerError):
+        client.write_reset(1)
 
 
 def test_get_telemetry_latest_returns_parsed_dict(server_url: str) -> None:

@@ -33,7 +33,16 @@ reset across a mission restart -- unlike `fc_take_seq`/`fc_goal_seq`,
 which `on_stop` clears. It exists so `belief.flight_control` can
 reconcile its own `wire_seq` (which *does* reset to 0 on a body-layer
 process restart) back above it, rather than being silently and
-permanently stuck below it for the rest of the DCS session."""
+permanently stuck below it for the rest of the DCS session.
+
+**`fc_reset_epoch`** (BL-16 sortie 2026-11-20, `docs/acceptance/
+2026-11-20-sortie-feedback.md`) is `Export.lua`'s own echo of the last
+body-layer process-start reset it actually applied (`flight_control.
+reset`'s own `epoch` argument), `None` until the first such reset this
+DCS session. Body-layer compares this against the epoch it generated
+at its own process start to know when it is safe to send anything that
+carries a `seq`, the same echo-and-compare shape `fc_last_cmd_seq` has,
+on a different generation."""
 
 from __future__ import annotations
 
@@ -79,6 +88,7 @@ class FlightControlState:
     slip_ball_pilot_raw: float | None
     slip_ball_operator_raw: float | None
     slip_ball_lo_api: float | None
+    reset_epoch: int | None = None
 
     @staticmethod
     def from_dict(
@@ -190,6 +200,7 @@ class FlightControlState:
             slip_ball_pilot_raw=slip_ball_pilot_raw,
             slip_ball_operator_raw=slip_ball_operator_raw,
             slip_ball_lo_api=slip_ball_lo_api,
+            reset_epoch=_optional_int("fc_reset_epoch"),
         )
 
     @staticmethod
@@ -230,6 +241,7 @@ class FlightControlState:
             "fc_agl_source": self.agl_source,
             "fc_release_reason": self.release_reason,
             "fc_refuse_cause": self.refuse_cause,
+            "fc_reset_epoch": self.reset_epoch,
             "fc_limit_hit": self.limit_hit,
             "fc_axes_pitch": self.axes_enabled.get("pitch", False),
             "fc_axes_roll": self.axes_enabled.get("roll", False),

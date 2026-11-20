@@ -164,6 +164,34 @@ class TestAdvanceFlightControlState:
         assert state is previous
 
 
+class TestAdvanceFlightControlStateResetEpoch:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- `lua_reset_epoch` mirrors
+    `Export.lua`'s own `fc_reset_epoch` echo verbatim, same "mirror
+    only" posture every other `lua_*` field already has."""
+
+    def test_mirrors_the_echoed_epoch(self) -> None:
+        body: dict[str, Any] = {
+            "t": 1.0,
+            "fc_mode": "off",
+            "fc_reset_epoch": 1234,
+            "fc_axes_pitch": False,
+            "fc_axes_roll": False,
+            "fc_axes_pedal": False,
+            "fc_axes_collective": False,
+        }
+        for url in _server(body):
+            client = AircraftLayerClient(base_url=url)
+            state = advance_flight_control_state(FlightControlState(), client)
+            assert state.lua_reset_epoch == 1234
+
+    def test_absent_field_mirrors_as_none(self, server_with_sample: str) -> None:
+        """`server_with_sample`'s own fixture body predates this field."""
+        client = AircraftLayerClient(base_url=server_with_sample)
+        state = advance_flight_control_state(FlightControlState(), client)
+        assert state.lua_reset_epoch is None
+
+
 class TestTakeControls:
     def test_overlay_flying_is_a_silent_no_op(self) -> None:
         state, result = take_controls(

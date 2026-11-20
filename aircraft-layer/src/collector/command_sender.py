@@ -403,6 +403,43 @@ class CommandSender:
                 f"failed to send flight_control seq={seq!r} cmd={cmd!r}: {exc}"
             ) from exc
 
+    def send_reset(self, epoch: int) -> None:
+        """Send `{"op": "reset", "epoch": epoch}` to `Export.lua`'s
+        command listener -- body-layer's own process-start reset
+        (BL-16 sortie 2026-11-20, `docs/acceptance/
+        2026-11-20-sortie-feedback.md`, `plans/flight-control/debug.md`).
+        `commands.lua`'s own `handle_reset_command` dispatches this to
+        every seq-carrying channel's own `reset(epoch)` (today:
+        `flight_control`/`ai_pilot_wheel`). Same `CommandSendError`
+        posture as every other write here: a dropped reset leaves
+        Lua's stale command state unreset, and the caller (`belief.
+        flight_control`/`body.py`'s own bounded resend loop) needs to
+        know that to keep retrying rather than assume it landed.
+
+        **No `seq` field, unlike every other command on this channel**
+        -- `epoch` is not a staleness counter (see `Export.lua`'s own
+        `handle_reset_command`'s docstring): this op is deliberately
+        idempotent and freely re-sendable, which is exactly what the
+        caller's own "resend while unconfirmed" loop needs.
+
+        **No validation happens here** -- same division of labour as
+        every other `send_*` method's own docstring: `api.server`'s
+        `POST /command/reset` handler validates shape before this
+        method is ever called."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps({"op": "reset", "epoch": epoch}).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning("reset command send failed: epoch=%r", epoch, exc_info=True)
+            raise CommandSendError(
+                f"failed to send reset epoch={epoch!r}: {exc}"
+            ) from exc
+
     def send_watch_args(self, watch_id: str, args: list[int]) -> None:
         """Send `{"op": "watch_args", "watch_id": watch_id, "args": args}`
         to `Export.lua`'s command listener -- the continuous watched-args

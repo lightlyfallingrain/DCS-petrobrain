@@ -93,6 +93,37 @@ if flight_control ~= nil then
     handlers.flight_control = flight_control.handle_flight_control_command
 end
 
+-- BL-16 sortie 2026-11-20 (`docs/acceptance/2026-11-20-sortie-feedback.
+-- md`) -- body-layer's own process-start reset, `{"op":"reset",
+-- "epoch":N}`. The one op this file dispatches to more than one owning
+-- module directly (every other op above belongs to exactly one): a
+-- fresh body-layer process needs *every* seq-carrying channel's Lua-side
+-- state cleared before it is safe to send anything on any of them, not
+-- just one. `sight_target`/`cockpit_switch`/`watch_args`/`read_args`/
+-- `petrovich_search` carry no seq and nothing that can go permanently
+-- stale (sight/cockpit-switch are "latest wins" with no staleness
+-- check at all; watch_args/read_args install/answer whole, no high-
+-- water mark; petrovich_search is a one-shot press) -- checked and left
+-- alone, same posture the guard below already gives a module that
+-- failed to load. No seq field of its own (unlike every other op here):
+-- idempotent and freely re-sendable, which is exactly what body-layer's
+-- own "resend while unconfirmed" loop needs -- a seq check here would
+-- only reject the very resends this op exists to tolerate.
+local function handle_reset_command(data, t)
+    local epoch = extract_json_number_field(data, "epoch")
+    if epoch == nil then
+        debug_log("ignoring malformed reset command (missing epoch)")
+        return
+    end
+    if flight_control ~= nil then
+        flight_control.reset(epoch)
+    end
+    if ai_pilot_wheel ~= nil then
+        ai_pilot_wheel.reset(epoch)
+    end
+end
+handlers.reset = handle_reset_command
+
 -- Drains every command datagram currently waiting on command_socket
 -- (non-blocking -- receivefrom returns nil once none remain) and acts on
 -- each. Called every frame by the loader, *before* its own 5 Hz export

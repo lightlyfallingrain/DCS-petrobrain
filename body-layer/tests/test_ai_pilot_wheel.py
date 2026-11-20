@@ -129,6 +129,36 @@ class TestAdvanceParkedFlightState:
         assert state.correction_path is None
         assert state.lua_goal_progress is None
         assert state.lua_goal_seq is None
+        assert state.lua_reset_epoch is None
+
+    def test_the_reset_epoch_is_parsed_through(self) -> None:
+        """BL-16 sortie 2026-11-20 (`docs/acceptance/
+        2026-11-20-sortie-feedback.md`) -- `lua_reset_epoch` mirrors
+        `Export.lua`'s own `apw_reset_epoch` echo verbatim. This one
+        also pins the explicit-reconstruction hazard `advance_parked_
+        flight_state`'s own docstring warns about: a new mirror field
+        left out of that function's `ParkedFlightState(...)` call would
+        silently reset to the default every poll rather than raise."""
+        body: dict[str, Any] = {
+            "t": 123.5,
+            "received_wall_clock_s": 1000.0,
+            "apw_parked_active": True,
+            "apw_reset_epoch": 1234,
+        }
+        httpd = HTTPServer(("127.0.0.1", 0), _make_handler(body))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = AircraftLayerClient(
+                base_url=f"http://127.0.0.1:{httpd.server_port}"
+            )
+            state = advance_parked_flight_state(ParkedFlightState(), client)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+        assert state.lua_reset_epoch == 1234
 
     def test_the_goal_progress_fields_are_parsed_through(self) -> None:
         body: dict[str, Any] = {

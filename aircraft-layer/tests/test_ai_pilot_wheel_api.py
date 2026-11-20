@@ -152,6 +152,11 @@ class TestAiPilotWheelState:
             "apw_goal_seq": 3,
             "apw_cbtm_status": None,
             "apw_cbtm_seq": None,
+            # `AiPilotWheelState(...)` above predates the BL-16 sortie
+            # 2026-11-20 reset-epoch field -- `None` default, same
+            # "missing is None" posture every other optional field here
+            # already has.
+            "apw_reset_epoch": None,
         }
 
 
@@ -310,6 +315,7 @@ class TestAiPilotWheelLatestEndpoint:
             "apw_goal_seq": None,
             "apw_cbtm_status": None,
             "apw_cbtm_seq": None,
+            "apw_reset_epoch": None,
         }
 
 

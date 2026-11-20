@@ -617,6 +617,21 @@ class FakeConsoleAircraftClient:
         self.flight_control_writes: list[
             tuple[int, str, dict[str, float], dict[str, object] | None]
         ] = []
+        #: BL-16 sortie 2026-11-20 (`docs/acceptance/
+        #: 2026-11-20-sortie-feedback.md`) -- every `write_reset` call
+        #: this fake has recorded, oldest first. No test here exercises
+        #: the reset-confirmation gate itself (that is `test_body_
+        #: command_reset.py`'s own job) -- this fake's own `flight_
+        #: control_state`/`ai_pilot_wheel_state` defaults mean `_resolve_
+        #: command_reset` never confirms for any test that does not set
+        #: either one, which is harmless here: no test in this file
+        #: asserts on `flight_control_writes`/an AI-pilot-goal send
+        #: having actually occurred through the real poll loop. Without
+        #: this method, the real poll loop's own unconditional `_resolve_
+        #: command_reset` call raised `AttributeError` against this fake
+        #: (no such method existed before this), silently killing the
+        #: poll-loop thread every test here drives.
+        self.reset_writes: list[int] = []
 
     def get_telemetry_latest(self) -> dict[str, Any] | None:
         return self._telemetry
@@ -746,6 +761,9 @@ class FakeConsoleAircraftClient:
         goal: dict[str, object] | None,
     ) -> None:
         self.flight_control_writes.append((seq, cmd, limits, goal))
+
+    def write_reset(self, epoch: int) -> None:
+        self.reset_writes.append(epoch)
 
 
 #: A frozen copy of `config/sequences/` (one `mi-24p/` subdirectory),

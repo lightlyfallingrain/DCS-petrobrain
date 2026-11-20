@@ -48,7 +48,15 @@ build", "The CBTM one-shot wire channel") -- `Export.lua`'s own report
 of the one-shot align/break channel (`"idle"`/`"running"`/`"done"`) and
 the `cbtm_seq` it is reporting against, same "echo the sequence number
 being reported on" shape as `goal_progress`/`goal_seq` above. Both
-optional on the wire, same old-Export.lua-still-parses reasoning."""
+optional on the wire, same old-Export.lua-still-parses reasoning.
+
+`reset_epoch` (BL-16 sortie 2026-11-20, `docs/acceptance/
+2026-11-20-sortie-feedback.md`) mirrors `Export.lua`'s own echo of the
+last body-layer process-start reset it actually applied (`ai_pilot_
+wheel.reset`'s own `epoch` argument) -- `None` until the first such
+reset this DCS session. Same shape and same purpose as `schema.flight_
+control.FlightControlState.reset_epoch`, mirroring the other seq-
+carrying channel's own generation."""
 
 from __future__ import annotations
 
@@ -86,6 +94,7 @@ class AiPilotWheelState:
     goal_seq: int | None = None
     cbtm_status: str | None = None
     cbtm_seq: int | None = None
+    reset_epoch: int | None = None
 
     @staticmethod
     def from_dict(
@@ -168,6 +177,17 @@ class AiPilotWheelState:
         else:
             cbtm_seq = raw_cbtm_seq
 
+        raw_reset_epoch = data.get("apw_reset_epoch")
+        if raw_reset_epoch is None:
+            reset_epoch: int | None = None
+        elif isinstance(raw_reset_epoch, bool) or not isinstance(raw_reset_epoch, int):
+            raise AiPilotWheelParseError(
+                "field 'apw_reset_epoch' must be a whole number or null, got "
+                f"{type(raw_reset_epoch).__name__}"
+            )
+        else:
+            reset_epoch = raw_reset_epoch
+
         return AiPilotWheelState(
             dcs_model_time_s=float(model_time),
             received_wall_clock_s=received_wall_clock_s,
@@ -188,6 +208,7 @@ class AiPilotWheelState:
             goal_seq=goal_seq,
             cbtm_status=optional_strings["apw_cbtm_status"],
             cbtm_seq=cbtm_seq,
+            reset_epoch=reset_epoch,
         )
 
     @staticmethod
@@ -224,4 +245,5 @@ class AiPilotWheelState:
             "apw_goal_seq": self.goal_seq,
             "apw_cbtm_status": self.cbtm_status,
             "apw_cbtm_seq": self.cbtm_seq,
+            "apw_reset_epoch": self.reset_epoch,
         }

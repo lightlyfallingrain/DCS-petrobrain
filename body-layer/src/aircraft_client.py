@@ -168,7 +168,15 @@ wheel.advance_parked_flight_state` is the one caller.
 `write_ai_pilot_goal` (Stage P2a/P2b, "Stage P2 ready to build") is this
 seam's write side for the goal channel -- `POST /command/ai_pilot_goal`,
 following `write_sight_target`'s exact raise-on-failure, pure-pass-through
-posture."""
+posture.
+
+`write_reset` (BL-16 sortie 2026-11-20, `docs/acceptance/
+2026-11-20-sortie-feedback.md`) is this seam's write side for body-
+layer's own process-start reset -- `POST /command/reset`, same raise-
+on-failure, pure-pass-through posture as `write_flight_control`/`write_
+ai_pilot_goal`. `body.py`'s own poll loop is the one caller, deciding
+when to (re)send it and when it has been confirmed; this client does no
+retry or confirmation logic of its own."""
 
 from __future__ import annotations
 
@@ -585,6 +593,21 @@ class AircraftLayerClient:
             "/command/flight_control",
             {"seq": seq, "cmd": cmd, "limits": limits, "goal": goal},
         )
+
+    def write_reset(self, epoch: int) -> None:
+        """`POST /command/reset` -> body-layer's own process-start reset
+        (BL-16 sortie 2026-11-20, `docs/acceptance/
+        2026-11-20-sortie-feedback.md`, `plans/flight-control/debug.md`):
+        `Export.lua`'s `commands.lua` dispatches it to every seq-carrying
+        channel's own `reset(epoch)` (today: `flight_control`/`ai_pilot_
+        wheel`), each of which echoes `epoch` back on its own status line
+        (`fc_reset_epoch`/`apw_reset_epoch`) so `body.py`'s own poll loop
+        can confirm it landed before sending anything that carries a
+        `seq`. Raises `AircraftLayerError` on any failure, mirroring
+        `write_flight_control`/`write_ai_pilot_goal` -- a dropped reset
+        is exactly the "keep retrying" signal the caller's own bounded
+        resend loop needs, not a state to swallow."""
+        self._post_json("/command/reset", {"epoch": epoch})
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
         """`POST /command/look_direction` -> pushes the currently-commanded

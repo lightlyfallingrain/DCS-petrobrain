@@ -356,6 +356,25 @@ MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: How often body-layer re-sends its own process-start reset while
+#: unconfirmed (BL-16 sortie 2026-11-20, `docs/acceptance/
+#: 2026-11-20-sortie-feedback.md`) -- every seq-carrying send (mode 1's
+#: handover/goal channel, mode 2's goal/CBTM channel) is held until
+#: `Export.lua`'s own status lines echo back the epoch this process
+#: sent, so a longer interval only ever delays how soon those channels
+#: can be used after a body-layer (re)start, never changes what gets
+#: sent. 2 s is short enough that an ordinary start (aircraft layer
+#: already up) confirms in one or two resends, long enough that a
+#: resend storm never floods the log while DCS/the collector is not up
+#: yet.
+COMMAND_RESET_RESEND_INTERVAL_S: Final[float] = tuning.real(
+    "body.COMMAND_RESET_RESEND_INTERVAL_S",
+    2.0,
+    lo=0.5,
+    hi=30.0,
+    status="judgement",
+)
+
 #: `plans/expected-area-look/plan.md` Stage 3a's own "Hold bound" --
 #: "the end of the glass step of B's sector plus one poll: <= 4 + 12 + 1
 #: ~ 17 s worst, ~ 5-8 s typical" -- `resolve_checks`'s own `deadline_s`:
@@ -564,6 +583,35 @@ class ConsolePerceptionRunner:
     #: same shape as `ai_pilot_goal_last_sent_seq` immediately above,
     #: on this channel's own distinct sequence space.
     ai_pilot_cbtm_last_sent_seq: int | None = None
+
+    #: BL-16 sortie 2026-11-20 (`docs/acceptance/
+    #: 2026-11-20-sortie-feedback.md`) -- the body-layer process-start
+    #: reset's own generation counter. A fresh value every process
+    #: start (`default_factory`, never a bare module-level constant),
+    #: deliberately **preserved** across a mission restart by `reset_
+    #: for_new_mission`'s own pass-through list below -- it names a fact
+    #: about this process, not this mission, and regenerating it on
+    #: every mission restart would force a pointless re-confirmation
+    #: round trip for no benefit (`Export.lua`'s own echoed epoch is not
+    #: reset by a mission restart either, see `flight_control.lua`'s/
+    #: `ai_pilot_wheel.lua`'s own `reset()`).
+    command_reset_epoch: int = field(default_factory=lambda: int(time.time() * 1000))
+    #: Set once both mode 1's (`crew_console.flight_control_state.lua_
+    #: reset_epoch`) and mode 2's (`parked_flight_state.lua_reset_
+    #: epoch`) echo this process's own `command_reset_epoch` back --
+    #: `_run_crew_text_poll_loop`'s own poll block is the one writer.
+    #: Also preserved across a mission restart, same reasoning as the
+    #: field above (and, once `True`, trivially true again on the very
+    #: next poll even if it were not preserved, since Lua's own echo
+    #: survives a mission restart too).
+    command_reset_confirmed: bool = False
+    #: `time.monotonic()` the reset was last (re)sent, or `None` before
+    #: the first send this process -- the bounded-resend gate's own
+    #: cursor (`COMMAND_RESET_RESEND_INTERVAL_S`). Preserved across a
+    #: mission restart for the same reason as the two fields above,
+    #: though in practice it is never read again once `command_reset_
+    #: confirmed` is `True`.
+    command_reset_last_sent_wall: float | None = None
 
     #: The effector-sequence engine's own run state (`belief.
     #: effector_engine.EffectorRunState`, `plans/effector-sequences/
@@ -815,6 +863,9 @@ class ConsolePerceptionRunner:
             world_model_conn=self.world_model_conn,
             theatre=self.theatre,
             world_model_store=self.world_model_store,
+            command_reset_epoch=self.command_reset_epoch,
+            command_reset_confirmed=self.command_reset_confirmed,
+            command_reset_last_sent_wall=self.command_reset_last_sent_wall,
         )
         self._last_look_direction = None
         self._last_scan_command_t_sim = None
@@ -3348,6 +3399,48 @@ def _maybe_switch_theatre(
     logger.info("mission theatre switched to %r (%s)", event_theatre, candidate_db)
 
 
+def _resolve_command_reset(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: AircraftLayerClient,
+) -> None:
+    """BL-16 sortie 2026-11-20 (`docs/acceptance/
+    2026-11-20-sortie-feedback.md`) -- body-layer's own process-start
+    reset. Called once per poll, before `_apply_ai_pilot_wheel_goal`/
+    `_apply_flight_control` (both gated on `runner.command_reset_
+    confirmed`, set here): while unconfirmed, this (re)sends the reset
+    itself, bounded by `COMMAND_RESET_RESEND_INTERVAL_S` so a DCS/
+    collector not yet up never spams the log. A true no-op once
+    confirmed -- the common case for the rest of the process's life.
+
+    Reads `runner.parked_flight_state.lua_reset_epoch`/`crew_console.
+    flight_control_state.lua_reset_epoch` as they stand *this* call --
+    the caller places this before both channels' own refresh runs each
+    poll, so a confirmation landing this exact poll is only ever noticed
+    one poll later, not lost."""
+    if runner.command_reset_confirmed:
+        return
+    if (
+        runner.parked_flight_state.lua_reset_epoch == runner.command_reset_epoch
+        and crew_console.flight_control_state.lua_reset_epoch
+        == runner.command_reset_epoch
+    ):
+        runner.command_reset_confirmed = True
+        return
+    now_wall = time.monotonic()
+    if (
+        runner.command_reset_last_sent_wall is not None
+        and now_wall - runner.command_reset_last_sent_wall
+        < COMMAND_RESET_RESEND_INTERVAL_S
+    ):
+        return
+    try:
+        aircraft_client.write_reset(runner.command_reset_epoch)
+    except AircraftLayerError:
+        logger.debug("command reset send failed (will retry)", exc_info=True)
+    runner.command_reset_last_sent_wall = now_wall
+
+
 def _apply_ai_pilot_wheel_goal(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -5269,6 +5362,7 @@ def _run_crew_text_poll_loop(
                             runner.guidance_unit_state,
                             readback_args,
                         )
+                        _resolve_command_reset(runner, crew_console, aircraft_client)
                         # `plans/flight-control/plan.md`, BL-16 mode 2,
                         # Stage P1 -- same "every poll a real ownship
                         # state exists" placement as `guidance_unit_state`
@@ -5292,13 +5386,19 @@ def _run_crew_text_poll_loop(
                                 "ai-pilot-wheel readback failed", exc_info=True
                             )
                         crew_console.parked_flight_state = runner.parked_flight_state
-                        _apply_ai_pilot_wheel_goal(
-                            runner,
-                            crew_console,
-                            aircraft_client,
-                            previous_payload_counts,
-                        )
-                        crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
+                        # Held while the process-start reset above is
+                        # unconfirmed -- `apw_goal_seq`/`apw_cbtm_seq`
+                        # must never see a send from this process before
+                        # Lua's own high-water marks have been cleared
+                        # to match.
+                        if runner.command_reset_confirmed:
+                            _apply_ai_pilot_wheel_goal(
+                                runner,
+                                crew_console,
+                                aircraft_client,
+                                previous_payload_counts,
+                            )
+                            crew_console.drain_ai_pilot_wheel_speech(runner.last_t_sim)
                         # BL-16 mode 1 Stage M1 -- same "refresh, apply
                         # pending transitions, speak" shape as mode 2's
                         # three calls immediately above, operating on
@@ -5320,11 +5420,15 @@ def _run_crew_text_poll_loop(
                             logger.debug(
                                 "flight-control readback failed", exc_info=True
                             )
-                        _apply_flight_control(crew_console, aircraft_client)
-                        crew_console.drain_flight_control(
-                            runner.last_t_sim,
-                            parked_active=runner.parked_flight_state.parked_active,
-                        )
+                        # Same hold as mode 2's own gate above --
+                        # `fc_last_cmd_seq` must never see a send from
+                        # this process before Lua's own reset confirms.
+                        if runner.command_reset_confirmed:
+                            _apply_flight_control(crew_console, aircraft_client)
+                            crew_console.drain_flight_control(
+                                runner.last_t_sim,
+                                parked_active=runner.parked_flight_state.parked_active,
+                            )
                         # `[[BL-17]]` D16 -- same spot, after `parked_
                         # flight_state` has been refreshed this poll
                         # (just above), so `current_crew_state()` inside
