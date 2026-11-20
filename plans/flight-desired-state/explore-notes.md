@@ -243,3 +243,7 @@ Working: collective writes; off → mode 2 engages.
 Stage 3 (+ the wait-for-Lua readbacks) → review → lift-vector law (its own plan,
 `plans/flight-lift-vector/`) → Stage 4. Performance, security and DoD stay held until Stage 4 is done
 (earlier direction: "Hold perf, sec and DoD until stages 3 and 4 finish").
+
+Late-accepted take ack (Lua accepts a take after body-layer already timed out and spoke "unable";
+body-layer doesn't notice), user, 2026-11-20: *"fix later, not now"*. Accepted follow-up, not part
+of Stage 3.
