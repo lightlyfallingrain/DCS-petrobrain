@@ -202,3 +202,20 @@ On the main loop's restatement "once he says 'you have controls', nothing he doe
 move the stick until you hand it back to him":
 
 > Not only move, but he must never *write* the axis values
+
+## Answers (user, 2026-11-23, verbatim)
+
+On what he says while a command waits:
+
+> * if unable to act immediately, but command was accepted -> "stand by"
+> * command confirmation on command execution
+>
+> This is the general rule for readback that should apply to any command readback (own BL item
+> about making it work everywhere).
+
+Filed as [[BL-B134]]; BL-16's `flight` channel applies it first.
+
+AI overlay release:
+
+> * 5 s staring value that I can tune, yes.
+> * after the timeout, overlay off continues Mode 1
