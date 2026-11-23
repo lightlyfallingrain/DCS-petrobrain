@@ -427,3 +427,148 @@ new behaviour).
   failure where `fast-tests.sh`'s targeted selection also caught it, confirming the full run adds
   no further surprises for this change. Rewritten to assert the one remaining (altitude)
   announcement.
+
+## LV-1 fixes (2026-11-24, applying `review-lv1.md`'s required fixes)
+
+Branch `impl/lv1-fixes` off `feature/bl16-lift-vector-law` tip `84cbc24`. All three required fixes
+applied; no deferral.
+
+### Required fix 1 — `law_update` itself gated to `LAW_HZ`, never the same frame as the estimator
+
+`flight_control.lua`: `law_update` (shapers, integrators, the chain, every trig call) now runs
+only when due at `profile.law_hz` (new `law_due(t, last_t, profile)`, mirroring `est_due`), with
+`law_dt` = time since `law_update` itself last ran (DCS model time), never the per-frame `dt`.
+`fc_law_last_update_t` (new module-level local, beside `fc_law`) tracks it, reset to `nil` at
+every site that already resets `fc_law` to `nil` (take/release/park/stop/reset) plus at
+`law_init_at_take` itself (the take frame seeds `fc_law` directly and never calls `law_update`).
+`law_outputs` stays per-frame, called from `run_active_frame` on every active frame regardless —
+it is only the cheap attitude-feedback combination (`u = T + k*(target - attitude) - k_d*rate`,
+no integrator of its own, no trig beyond what `write_outputs`' wobble already does), never the
+shapers/chain/trig this fix moves off the per-frame path, and the axis write itself stays every
+frame per the plan's own amendment ("the axis write itself may have to stay every frame -> this
+is true").
+
+**Collision avoidance, and why it is "defer once, then force" rather than an unconditional
+defer.** `run_flight_control` now captures `estimator_due_this_frame` (the same boolean that
+gates the estimator's own `LoGet*` reads) and passes it to `run_active_frame`; `law_update` is
+deferred one frame whenever both are due the same frame. **An unconditional defer starves the law
+completely** under a coarse step: discovered by the pre-existing whole-module test suite itself —
+six tests that step `run_flight_control` at a fixed 0.05–0.1 s interval (bigger than `law_hz`'s
+own ~0.033 s period) all failed outright, because every call then has both due, and an
+unconditional defer never finds a free frame to run on. Fixed with `fc_law_deferred_last_frame`
+(new module-level local, reset alongside `fc_law_last_update_t`): a collision defers once, but the
+*next* due call runs `law_update` regardless of whether the estimator is also due that frame. This
+keeps the "never the same frame" guarantee intact at the realistic ~140 Hz DCS rate (confirmed:
+zero collisions over a simulated second, see Tests Added) while guaranteeing the law is never
+starved at a coarser step. Three of the six broken tests (`TestUnparkTakeSeedClampsToMode1Limits`)
+needed one extra `run_flight_control` call added to their own drivers to reach the frame the law
+actually runs on under the new schedule (documented in each test's own docstring); the other
+three already looped enough times for the force-through branch to fire on its own.
+
+**`law_dt`'s own `DT_CAP` guard** (plan amendment: "Pause... no integrator step on the resume
+frame beyond the existing DT_CAP rule"). The top-level `dt > DT_CAP` branch in `run_active_frame`
+already freezes everything on a paused/jumped frame, including `fc_law_last_update_t` — but the
+frame *right after* it has a small, ordinary `dt` while `t - fc_law_last_update_t` still spans the
+whole gap. Without a guard, that first post-jump `law_update` call would see the whole multi-
+second gap as its own `dt`. Measured directly before adding the guard (`TestPauseRowHolds`'s own
+new test): pitch output held flat at ~0.499–0.501 (wobble only) with the guard, climbed from ~0.499
+to ~0.54 without it. Fixed: `law_dt` falls back to the frame's own `dt` whenever `t -
+fc_law_last_update_t > DT_CAP`, the same "treat it as a fresh start" posture a `nil`
+`fc_law_last_update_t` already gets.
+
+**Diagnostic-only instrumentation, never on any wire**: `fc_debug_estimator_sample_count`/
+`fc_debug_law_update_count` (module-level counters, incremented at the exact two call sites under
+test) and `M.debug_scheduling_counts()`, so the scheduling test observes the real decision
+`run_flight_control`/`run_active_frame` made each actual frame rather than inferring it indirectly
+through a wire-level side effect (which `law_outputs`' own per-frame write, the rate limiter and
+the wobble all make fragile to read directly).
+
+### Required fix 2 — estimator `t0` rebases periodically, not once
+
+`est_ring_push`'s one-time `t0` rebase (at the ring's first sample since the last reset) leaves
+`rt = t - ring.t0` growing unboundedly across a long session; the least-squares denominator's two
+subtracted terms both grow with session length even though their true difference does not, so
+floating-point cancellation error in the slope grows with it. Fixed with a new
+`EST_RING_REBASE_INTERVAL_S = 600.0` (10 minutes) and `est_ring_rebase(ring, shift)`: whenever a
+push's own `rt` would exceed the interval, every live sample's stored `rt` is shifted by `-rt` and
+the incremental sums recomputed directly from those (at most `EST_RING_CAPACITY`, in practice a
+handful) samples, rather than carrying the cancellation error forward — the one place this ring
+ever revisits stored samples instead of only adding/evicting at the edges.
+
+Measured both ways before picking the interval and the test's tolerance: over 3 simulated hours
+at 30 Hz, a known linear series whose own value also grows with time (`3*t + 7`, the realistic
+worst case — a real position coordinate grows with time the same way during a sustained-direction
+leg) drifts to ~3.169 (~5.6% relative error) with the periodic rebase disabled, and stays within
+~0.0024 (~0.08% relative) with it — a ~70× improvement, not merely small at today's sortie
+lengths.
+
+### Required fix 3 — the trivial fixes
+
+- `flight_profile.lua`'s `velocity_source` default changed `"position"` → `"vector"`, from the
+  LV-0 sortie trace (`docs/acceptance/2026-11-23-sortie-feedback.md`, "Row (e) answered" —
+  same axes/signs as the position-slope source across every row flown including sideslip; the
+  only offsets, ~0.2–0.4 m/s, are the position slope's own centre-of-window lag in the two steep
+  turns). `"position"` stays selectable.
+- `aircraft-layer/CLAUDE.md`'s `flight_control` bullet updated: names the `velocity_source`
+  default and decision, and the `law_update`/estimator scheduling split.
+- `body-layer/ROADMAP/BL-16.md` lines 701–703's duplicated/garbled sentence (a bad edit that left
+  the old line in place above the new one instead of replacing it) fixed; the LV-1 status note
+  updated with this fixes pass.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — `law_due`, `fc_law_last_update_t`,
+  `fc_law_deferred_last_frame`, the collision-avoidance/force-through scheduling in
+  `run_active_frame`, the `law_dt` `DT_CAP` guard, `estimator_due_this_frame` threaded from `run_
+  flight_control`, `est_ring_rebase`/`EST_RING_REBASE_INTERVAL_S`, the debug scheduling counters
+  and `M.debug_scheduling_counts`.
+- `aircraft-layer/dcs-export/Petrobrain/flight_profile.lua` — `velocity_source` default
+  `"vector"`; `law_hz`'s own comment updated (no longer says the law's cadence is "not yet
+  moved").
+- `aircraft-layer/tests/test_flight_control_lua.py` — `TestLawHzScheduling` (new); two new tests
+  in `TestPauseRowHolds` (the resume-after-a-jump `law_dt` guard); three `TestUnparkTakeSeedClamps
+  ToMode1Limits` tests given one extra `run_flight_control` call each (see required fix 1 above).
+- `aircraft-layer/tests/test_flight_control_estimator.py` — `TestRingRebasing` (new, the 3-hour
+  long-run test).
+- `aircraft-layer/CLAUDE.md`, `body-layer/ROADMAP/BL-16.md` — docs per required fix 3 above.
+
+### Tests Added
+
+- `test_flight_control_lua.py::TestLawHzScheduling::test_law_update_runs_near_law_hz_and_never_
+  the_same_frame_as_the_estimator` — 140 Hz for 1 simulated second via `debug_scheduling_counts()`:
+  zero same-frame collisions, `law_update` and the estimator step each ~20–34 times (loose bounds
+  for the priming delay and the one-frame defer).
+- `test_flight_control_lua.py::TestPauseRowHolds::test_the_resume_frame_after_a_huge_jump_takes_
+  no_giant_law_step` — the `law_dt` `DT_CAP` guard; confirmed red without the guard (pitch delta
+  ~0.040, assertion bound 0.01) and green with it (~0.002) before trusting the assertion.
+- `test_flight_control_estimator.py::TestRingRebasing::test_slope_of_a_linear_series_stays_
+  accurate_over_three_simulated_hours` — 3 simulated hours at 30 Hz, three checkpoints (1 h/2 h/
+  3 h) plus the end; confirmed red without the periodic rebase (~1.15% relative error at hour 2,
+  bound 1%) and green with it (~0.08% at hour 3) before trusting the assertion.
+
+### Checks
+
+- `aircraft-layer`: `ruff format --check src tests` — pass (90 files); `ruff check src tests` —
+  pass; `cd aircraft-layer && .venv/bin/mypy src` — pass (29 files, no issues); `pytest tests -q`
+  (full suite) — pass, 1142 passed; `luac5.1 -p` on both touched Lua files — pass; the `luac5.1 -l
+  -p` GETGLOBAL check on `flight_control.lua`/`flight_profile.lua` — clean (every global is
+  stdlib, a genuine DCS API, or a legitimate cross-module global; `flight_profile.lua` reads no
+  global at all).
+- `body-layer`: untouched by this fixes pass (no `src`/`tests` changes) — not re-run.
+
+### Notable Discoveries
+
+- **An unconditional "never the same frame" defer is a starvation bug, not a safety margin, under
+  a coarse step.** Six whole-module tests already in the suite — written long before this fix,
+  stepping `run_flight_control` at 0.05–0.1 s — are exactly that coarse-step case, and they are
+  what actually caught it (not a test written for this fix). Worth remembering for any future
+  periodic-vs-periodic scheduling interaction: a defer rule that only ever says "not this frame"
+  needs its own exit condition, or it can defer forever whenever the two periods are not
+  comfortably separated by the caller's own step size.
+- **The output rate limiter (`OUTPUT_RATE_LIMIT_PER_S`) hides a one-frame internal-state jump from
+  the written axis for exactly one frame**, which is why the first draft of the `law_dt` guard
+  test (checking only the single frame right after a jump) passed even with the guard removed —
+  the bug is real but only becomes visible in the *written* output a few frames later, once the
+  rate limiter has had time to chase the wrongly-jumped internal target. Caught by reading the
+  actual numbers (`debug_scheduling_counts()` plus printed deltas) rather than trusting the first
+  green run.

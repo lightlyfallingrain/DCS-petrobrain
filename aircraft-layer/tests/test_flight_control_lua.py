@@ -1189,6 +1189,79 @@ print(string.format("%.6f", written[2002]))
         assert abs(after_pitch - before_pitch) <= 0.0021
         assert abs(after_roll - before_roll) <= 0.0021
 
+    def test_the_resume_frame_after_a_huge_jump_takes_no_giant_law_step(self) -> None:
+        """BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
+        fix 1, plan amendment "Pause... no integrator step on the resume
+        frame beyond the existing DT_CAP rule"). `law_update` now runs on
+        its own schedule with `dt` = time since it last ran -- without a
+        guard, a huge jump that happens AFTER `law_update` has already
+        run at least once (so `fc_law_last_update_t` is a real, stale
+        timestamp going into the jump -- the jump frame itself is frozen,
+        covered by the test above, and never touches it) would feed that
+        whole multi-second gap into the very next `law_update` call as
+        its own `dt`.
+
+        Confirmed as a real defect by running this exact driver with the
+        guard removed before writing this test, instrumented with
+        `debug_scheduling_counts()`: `law_update` does not fire on the
+        very first resume frame -- the jump also re-primes the
+        (unrelated, pre-existing) un-primed-estimator gate, which defers
+        `law_update`'s own first post-jump call by several frames while
+        the estimator re-primes -- but once it does fire, pitch jumps
+        from ~0.499 to ~0.53 in that one step and keeps climbing, where
+        the guarded version stays flat at ~0.499-0.501 (wobble only)
+        throughout. This driver therefore runs enough resume frames to
+        reach past that deferred first call, not just the first one."""
+        driver = """
+pilot_args.pitch = 0.5
+pilot_args.roll = 0.2
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(10.0)
+set_desired(2, { heading_deg = 90.0 })
+-- A few ordinary frames first, so `law_update` actually runs at least
+-- once and `fc_law_last_update_t` holds a real (soon-to-be-stale)
+-- timestamp -- the take frame itself never calls `law_update` (bit-
+-- exact), so without this, the jump below would hit a `nil` schedule
+-- and never exercise the guard at all.
+local t = 10.0
+for _ = 1, 20 do
+    t = t + 1.0 / 140.0
+    flight_control.run_flight_control(t)
+end
+local before_pitch = written[2001]
+local before_roll = written[2002]
+written = {}
+-- The jump: dt = 40s, above DT_CAP, frozen (the test above covers this
+-- frame itself). `fc_law_last_update_t` is untouched -- now 40s stale.
+t = t + 40.0
+flight_control.run_flight_control(t)
+written = {}
+-- Ten ordinary resume frames (~1/140 s each) -- enough to get past the
+-- few frames the (unrelated) un-primed-estimator gate defers `law_
+-- update`'s own first post-jump call by. Without the DT_CAP guard on
+-- `law_dt`, that first call sees `law_dt` ~= 40s instead of ~1/140 s.
+for _ = 1, 10 do
+    t = t + 1.0 / 140.0
+    flight_control.run_flight_control(t)
+end
+print(string.format("%.6f", before_pitch))
+print(string.format("%.6f", written[2001]))
+print(string.format("%.6f", before_roll))
+print(string.format("%.6f", written[2002]))
+"""
+        lines = _run(driver)
+        before_pitch, after_pitch, before_roll, after_roll = (float(v) for v in lines)
+        # Ten ordinary ~1/140 s steps can move the output by at most a
+        # few frames' worth of the rate limiter (`OUTPUT_RATE_LIMIT_
+        # PER_S * dt`, 4.0 * 1/140 ~= 0.0286 each) plus the wobble step
+        # -- a tight bound that still passes with the guard (measured
+        # delta ~0.002) and fails without it (measured ~0.03-0.04 and
+        # still climbing).
+        assert abs(after_pitch - before_pitch) <= 0.01
+        assert abs(after_roll - before_roll) <= 0.01
+
 
 class TestEnvelopeRelease:
     """BL-16 lift-vector law, Stage LV-1 (U1/U8): the low-IAS envelope
@@ -1683,7 +1756,17 @@ class TestUnparkTakeSeedClampsToMode1Limits:
         IAS is set to exactly 0 so the (unclamped) seed and the
         (unmoving, mocked) measured value agree immediately -- `fc_in_
         band_speed` only reads `true` here if the seed was flown
-        exactly as commanded, with no floor clamping it up."""
+        exactly as commanded, with no floor clamping it up.
+
+        BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
+        fix 1): `law_update` (which computes `in_band_speed`) no longer
+        runs every frame -- at this driver's own 0.1 s step (coarser
+        than `law_hz`'s own ~0.033 s period), the estimator and the law
+        are due on the same call every time, so the first post-take
+        ordinary frame always defers the law once (never the same frame
+        as the estimator step, the fix's own guarantee) and a *second*
+        ordinary frame is where it actually runs. One extra `run_flight_
+        control` call over the pre-fix version of this test."""
         driver = """
 heading_rad = math.rad(0.0)
 bank_rad = math.rad(2.0)
@@ -1700,7 +1783,8 @@ flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
+flight_control.run_flight_control(0.4)
+flight_control.push_flight_control_state(0.4)
 print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
@@ -1711,6 +1795,9 @@ print(sent_lines[#sent_lines])
     def test_speed_above_the_ceiling_in_m2_then_unpark_flies_the_ceiling(
         self,
     ) -> None:
+        """BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
+        fix 1) -- see the extra `run_flight_control` call's own comment
+        on the sibling test above (same reason, same fix)."""
         driver = """
 heading_rad = math.rad(0.0)
 bank_rad = math.rad(2.0)
@@ -1727,7 +1814,8 @@ flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
+flight_control.run_flight_control(0.4)
+flight_control.push_flight_control_state(0.4)
 print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
@@ -1737,7 +1825,10 @@ print(sent_lines[#sent_lines])
 
     def test_an_in_range_speed_is_carried_unclamped(self) -> None:
         """Control: a value already inside `[0, max_ias_kmh]` is seeded
-        verbatim, same as before this fix."""
+        verbatim, same as before this fix. BL-16 lift-vector law, Stage
+        LV-1 fix (review-lv1.md, required fix 1) -- see the extra `run_
+        flight_control` call's own comment on the first test in this
+        class (same reason, same fix)."""
         driver = """
 heading_rad = math.rad(0.0)
 bank_rad = math.rad(2.0)
@@ -1754,7 +1845,8 @@ flight_control.run_flight_control(0.1)
 ap_parked = false
 flight_control.run_flight_control(0.2)
 flight_control.run_flight_control(0.3)
-flight_control.push_flight_control_state(0.3)
+flight_control.run_flight_control(0.4)
+flight_control.push_flight_control_state(0.4)
 print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
@@ -1825,6 +1917,67 @@ print(sent_lines[#sent_lines])
         # magnitude), not a specific value the mock cannot produce.
         v_g = float(_field(line, "fc_est_v_g"))
         assert v_g >= 0.0
+
+
+class TestLawHzScheduling:
+    """BL-16 lift-vector law, Stage LV-1 fix (`plans/flight-lift-vector/
+    review-lv1.md`, required fix 1) -- `law_update` itself now runs only
+    at `profile.law_hz` (not every frame), on a different frame from the
+    estimator step every time the two would otherwise land together.
+    `flight_control.debug_scheduling_counts()` (diagnostic-only, not on
+    any wire) observes the real decision `run_flight_control`/`run_
+    active_frame` made each actual frame -- not inferred indirectly from
+    a wire-level side effect, which `law_outputs`' own per-frame write
+    and the pause/wobble logic would make fragile to read."""
+
+    def test_law_update_runs_near_law_hz_and_never_the_same_frame_as_the_estimator(
+        self,
+    ) -> None:
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.0)
+local baseline = flight_control.debug_scheduling_counts()
+local prev_est, prev_law = baseline.estimator_sample, baseline.law_update
+local same_frame_collisions = 0
+-- 140 Hz DCS frame rate (the project's own typical measured rate,
+-- `aircraft-layer/CLAUDE.md`) for exactly 1 simulated second -- the
+-- required fix's own wording ("a 140 Hz frame rate... ~LAW_HZ times
+-- per simulated second").
+local FRAME_DT = 1.0 / 140.0
+local t = 0.0
+for _ = 1, 140 do
+    t = t + FRAME_DT
+    flight_control.run_flight_control(t)
+    local counts = flight_control.debug_scheduling_counts()
+    local estimator_ran = counts.estimator_sample > prev_est
+    local law_ran = counts.law_update > prev_law
+    if estimator_ran and law_ran then
+        same_frame_collisions = same_frame_collisions + 1
+    end
+    prev_est, prev_law = counts.estimator_sample, counts.law_update
+end
+print(same_frame_collisions)
+print(prev_law)
+print(prev_est)
+"""
+        lines = _run(driver)
+        collisions, law_calls, estimator_calls = (
+            int(lines[0]),
+            int(lines[1]),
+            int(lines[2]),
+        )
+        # The one property the fix exists for: no single frame ever
+        # carries both steps.
+        assert collisions == 0
+        # ~30 (`law_hz`) over the 1 s window -- loose bounds since the
+        # estimator needs two samples (~5 frames) to prime before the
+        # law may run at all (the pre-existing un-primed-estimator
+        # gate, unchanged by this fix), and the one-frame defer on a
+        # would-be collision nudges a tick later by construction.
+        assert 20 <= law_calls <= 34, law_calls
+        assert 25 <= estimator_calls <= 34, estimator_calls
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

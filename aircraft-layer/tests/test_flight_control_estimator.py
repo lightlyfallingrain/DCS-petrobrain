@@ -178,6 +178,66 @@ print(string.format("%.3f", flight_control.est_ring_slope(r)))
         assert abs(float(lines[0]) - 10.0) < 0.5
 
 
+class TestRingRebasing:
+    """BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
+    fix 2 -- `review-lv0.md`'s own "re-check before LV-1 closes the
+    loop on it"). `est_ring_push`'s `rt = t - ring.t0` used to rebase
+    only once, at the ring's first sample since the last reset -- over
+    a long session the two terms the least-squares denominator
+    subtracts (`n*sum_t2` and `sum_t*sum_t`) both grow with session
+    length even though their true difference does not, so the slope's
+    floating-point cancellation error grows with it. `EST_RING_REBASE_
+    INTERVAL_S` periodically re-bases `rt` back to a small value
+    instead."""
+
+    def test_slope_of_a_linear_series_stays_accurate_over_three_simulated_hours(
+        self,
+    ) -> None:
+        """3 simulated hours at 30 Hz (`law_hz`, the estimator's own
+        update rate) -- `review-lv0.md`'s own ask. A known linear series
+        whose own *value* also grows with elapsed time (`3*t + 7`, the
+        worst case for this cancellation error and the realistic one --
+        a real position coordinate grows with time the same way during
+        a sustained-direction flight leg) must still read back close to
+        its true slope, not merely at the very end but all the way
+        through (three checkpoints: 1 h, 2 h, 3 h) -- the error this fix
+        bounds grows with elapsed time, so a check only at the end would
+        miss a mid-session regression.
+
+        Measured directly, both ways, before picking this bound: with
+        `EST_RING_REBASE_INTERVAL_S` disabled (one-time rebase only, the
+        pre-fix behaviour), the slope drifts to ~3.169 by 3 h (~5.6%
+        relative error, growing with elapsed time, confirming the
+        defect review-lv0.md flagged); with the periodic rebase, it
+        stays within ~0.0024 (~0.08% relative) the whole way through --
+        bounded, not merely small at today's sortie lengths, and
+        unmistakably different from the un-rebased number. The bound
+        below is a generous 1% relative, comfortably inside the
+        rebased behaviour and comfortably outside the un-rebased one."""
+        driver = """
+local r = flight_control.est_ring_new()
+local HZ = 30.0
+local dt = 1.0 / HZ
+local CHECKPOINT_S = 3600.0
+local next_checkpoint = CHECKPOINT_S
+local steps = 3 * 3600 * HZ
+for i = 0, steps do
+    local t = i * dt
+    flight_control.est_ring_push(r, t, 3.0 * t + 7.0, 0.2)
+    if t >= next_checkpoint then
+        print(string.format("%.9f", flight_control.est_ring_slope(r)))
+        next_checkpoint = next_checkpoint + CHECKPOINT_S
+    end
+end
+print(string.format("%.9f", flight_control.est_ring_slope(r)))
+"""
+        lines = _run(driver)
+        assert len(lines) == 4, lines
+        for line in lines:
+            relative_error = abs(float(line) - 3.0) / 3.0
+            assert relative_error < 0.01, line
+
+
 class TestEulerRateTransform:
     def test_steady_60_degree_bank_turn_body_q_does_not_equal_euler_theta_dot(
         self,

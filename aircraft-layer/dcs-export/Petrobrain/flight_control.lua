@@ -348,6 +348,50 @@ local OUTPUT_RATE_LIMIT_PER_S = 4.0
 -- toy-plant tests can drive it with no DCS mock at all.
 local fc_law = nil
 
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix 1)
+-- -- the model-time `law_update` last actually ran, in DCS model time
+-- (never wall clock), so `law_update` can be gated to `profile.law_hz`
+-- the same way the estimator already is, with its own `dt` = time since
+-- its own last run rather than a per-frame `dt`. `nil` means "due
+-- immediately" -- set there by every site that resets `fc_law` to `nil`
+-- (a stale value from a previous active session must never seed a
+-- later `law_update`'s `dt` across a take/release/park/stop/reset
+-- boundary) and at `law_init_at_take` itself (the take frame seeds
+-- `fc_law` directly and never calls `law_update`, so the first ordinary
+-- frame after a take must see "due immediately", not a stale time from
+-- a previous session).
+local fc_law_last_update_t = nil
+
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix 1)
+-- -- `true` for exactly one frame: the previous frame wanted to run
+-- `law_update` (it was due) but deferred because the estimator step
+-- ran that same frame. Without this, a caller whose own step size sits
+-- at or above `1/profile.law_hz` (every toy-plant/whole-module test
+-- below that steps `run_flight_control` in such coarse jumps, and in
+-- principle a DCS session running at or below `law_hz` frames/second)
+-- would see `law_update` due on EVERY call and the estimator due on
+-- every call too, so the defer-on-collision rule would defer forever
+-- and starve the law completely -- confirmed: every per-stage test in
+-- this file that steps at 0.05 s intervals (`law_hz = 30` -> period
+-- ~0.033 s, already below the step) failed outright before this flag
+-- was added, with `law_update` never running at all after the take.
+-- Deferring **at most once in a row** keeps the "never the same frame"
+-- guarantee for the realistic 140 Hz case (where a collision is rare
+-- and one deferral always finds a free frame before the next is due)
+-- while guaranteeing the law is never starved under a coarser step.
+local fc_law_deferred_last_frame = false
+
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix 1)
+-- -- diagnostic-only call counters, never read by any `law_*`/`est_*`
+-- function and never sent on any wire (`push_flight_control_state`'s
+-- own line is unchanged). `M.debug_scheduling_counts` below exports
+-- them so `test_flight_control_lua.py`'s own scheduling test can
+-- observe the real decision `run_flight_control`/`run_active_frame`
+-- made each actual frame, rather than inferring it indirectly from a
+-- wire-level side effect.
+local fc_debug_estimator_sample_count = 0
+local fc_debug_law_update_count = 0
+
 local function law_wrap360(deg)
     local r = deg % 360.0
     if r < 0 then r = r + 360.0 end
@@ -602,6 +646,23 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         -- to `t_y` before the first `law_update` frame.
         turn_coord_pedal = 0.0,
     }
+end
+
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix 1
+-- -- the user's own direction, plan.md section A "Update rate, not
+-- every frame": "many of the flight control calculations (including
+-- estimator) don't really need to run every frame... 30Hz would be
+-- plenty... interleave calculations so that not everything is
+-- calculated in a single frame"). Cheap pre-check, same shape as `est_
+-- due` above: due once `law_hz` seconds (DCS model time, never wall
+-- clock) have passed since `law_update` itself last ran. `last_t ==
+-- nil` means due immediately -- the state right after a fresh `law_
+-- init_at_take` (which never calls `law_update` itself, bit-exact) or
+-- after any `fc_law = nil` reset, never a stale time from a previous
+-- session (every such site also clears `fc_law_last_update_t`, next to
+-- `fc_law`).
+local function law_due(t, last_t, profile)
+    return last_t == nil or (t - last_t) >= (1.0 / profile.law_hz)
 end
 
 -- `law_update(state, dt, measured, limits, profile)` -- one frame of the
@@ -952,6 +1013,17 @@ end
 -- every coordinated turn. Falls back to the body rate only when the
 -- estimator has not primed yet (same priming gap `law_init_at_take`
 -- falls back for).
+--
+-- **Called every frame, unlike `law_update` (review-lv1.md, required
+-- fix 1)** -- this is the one piece of the law that stays per-frame on
+-- purpose: it is a cheap attitude-feedback combination (`u = T +
+-- k*(target - attitude) - k_d*rate`, each term already in `state`/
+-- `measured`, no integrator and no new trig of its own beyond what
+-- `write_outputs`' own wobble already does), not the shapers/chain/
+-- trig `law_update` owns, and `run_active_frame` must write an axis
+-- value every frame regardless (`LuaExportBeforeNextFrame`, the user's
+-- own confirmation: "the axis write itself may have to stay every
+-- frame -> this is true").
 local function law_outputs(state, measured, profile)
     local theta_rate = measured.theta_dot_deg_s or measured.q_deg_s
     local phi_rate = measured.phi_dot_deg_s or measured.p_deg_s
@@ -1381,6 +1453,22 @@ end
 -- profile change within this bound needs no code change.
 local EST_RING_CAPACITY = 64
 
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix
+-- 2; `review-lv0.md`'s own "re-check before LV-1 closes the loop on
+-- it"). `est_ring_push`'s own `rt = t - ring.t0` grows unboundedly
+-- across a long session (`ring.t0` rebases once, at the ring's first
+-- sample since the last reset, never again) -- the least-squares
+-- denominator `n*sum_t2 - sum_t*sum_t` is mathematically shift-
+-- invariant, but the two terms being subtracted both grow as
+-- `O((n*rt)^2)` while the true difference stays `O(n*window_s^2)`, so
+-- floating-point cancellation error in the slope grows with session
+-- length. Periodically re-basing `rt` back to a small value (rather
+-- than a one-time rebase at start) keeps that error bounded
+-- indefinitely instead of merely small at today's realistic sortie
+-- lengths -- see the long-run test (`test_flight_control_estimator.py`,
+-- `TestRingRebasing`) this interval is sized against.
+local EST_RING_REBASE_INTERVAL_S = 600.0
+
 -- A fixed-size ring buffer of (t, value) samples plus the incremental
 -- least-squares sums (sum_t, sum_t2, sum_v, sum_tv) that let
 -- `est_ring_slope`/`est_ring_mean` read the current window's slope/
@@ -1410,20 +1498,47 @@ local function est_ring_reset(ring)
     ring.t0 = nil
 end
 
+-- Shifts every live sample's own stored `rt` by `-shift` and
+-- recomputes the incremental least-squares sums directly from those
+-- samples (at most `EST_RING_CAPACITY`, in practice a handful) rather
+-- than carrying the cancellation error forward -- the one place this
+-- ring ever revisits stored samples instead of only adding/evicting at
+-- the edges (`EST_RING_REBASE_INTERVAL_S`'s own declaration comment,
+-- required fix 2). `sum_v`/`count`/`head`/the stored `v` values are
+-- untouched -- a time shift, never a value change.
+local function est_ring_rebase(ring, shift)
+    ring.sum_t, ring.sum_t2, ring.sum_tv = 0.0, 0.0, 0.0
+    for back = 0, ring.count - 1 do
+        local idx = ((ring.head - back - 1) % EST_RING_CAPACITY) + 1
+        local new_t = ring.t[idx] - shift
+        ring.t[idx] = new_t
+        ring.sum_t = ring.sum_t + new_t
+        ring.sum_t2 = ring.sum_t2 + new_t * new_t
+        ring.sum_tv = ring.sum_tv + new_t * ring.v[idx]
+    end
+    ring.t0 = ring.t0 + shift
+end
+
 -- Pushes one (t, value) sample and evicts whatever has aged out of
 -- `window_s`, updating the incremental sums in O(1) amortized (add the
 -- newest sample, subtract each sample that ages out this call -- never
 -- a refit over the stored window). `ring.t0` rebases timestamps to the
--- ring's first sample since the last reset, which removes the absolute
--- model-time offset only: `rt` still grows over a long run between
--- resets, so cancellation error in the slope denominator grows with it.
--- Negligible for LV-0's shadow output; re-check before LV-1 closes the
--- loop on it (rebase per window, or periodic refit).
+-- ring's first sample since the last reset AND periodically thereafter
+-- (`EST_RING_REBASE_INTERVAL_S`, required fix 2) -- the one-time rebase
+-- alone removes only the absolute model-time offset, so `rt` would
+-- still grow unboundedly over a long session; the periodic rebase below
+-- keeps it bounded to at most one interval's worth, keeping the slope's
+-- cancellation error bounded for the life of a session rather than
+-- merely small at today's realistic sortie lengths.
 local function est_ring_push(ring, t, value, window_s)
     if ring.t0 == nil then
         ring.t0 = t
     end
     local rt = t - ring.t0
+    if rt > EST_RING_REBASE_INTERVAL_S then
+        est_ring_rebase(ring, rt)
+        rt = t - ring.t0
+    end
     ring.head = (ring.head % EST_RING_CAPACITY) + 1
     ring.t[ring.head] = rt
     ring.v[ring.head] = value
@@ -2172,6 +2287,8 @@ local function request_release(seq)
     -- `on_stop`/the self-arm branches below.
     fc_last_stowed_pilot_capture = nil
     fc_law = nil
+    fc_law_last_update_t = nil
+    fc_law_deferred_last_frame = false
     fc_last_command = nil
     fc_applied_stamp_hdg = nil
     fc_applied_stamp_alt = nil
@@ -2184,7 +2301,13 @@ end
 -- which must write from the very first frame it is active ("the output
 -- is continuous at take, bit-exact" -- Decision 24), never wait for the
 -- next call to `run_flight_control`.
-local function run_active_frame(t, dt, just_took)
+--
+-- `estimator_due_this_frame` (review-lv1.md, required fix 1) is `run_
+-- flight_control`'s own `est_due` result for this same frame -- the
+-- ordinary (non-`just_took`) path below uses it only to decide whether
+-- `law_update` itself may run this frame, never read by the `just_
+-- took`/paused branches, which never call `law_update` at all.
+local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
     if not just_took and (dt <= 0 or dt > DT_CAP) then
         -- Paused frame (or a huge jump): rewrite unchanged with wobble,
         -- freezing every shaper reference and integrator (plan's own
@@ -2225,6 +2348,8 @@ local function run_active_frame(t, dt, just_took)
         fc_release_reason = reason
         fc_refuse_cause = nil
         fc_law = nil
+        fc_law_last_update_t = nil
+        fc_law_deferred_last_frame = false
         fc_last_command = nil
         return
     end
@@ -2242,6 +2367,12 @@ local function run_active_frame(t, dt, just_took)
         -- parts stamped after this take's own seq.
         local seed, desired_at_take = build_take_seed(measured.psi_deg)
         fc_law = law_init_at_take(measured, fc_limits, command, seed, flight_profile.ACTIVE)
+        -- The take frame seeds `fc_law` directly and never calls `law_
+        -- update` (bit-exact-at-take) -- the first ordinary frame after
+        -- this one must see "due immediately", never a stale time left
+        -- over from a previous active session.
+        fc_law_last_update_t = nil
+        fc_law_deferred_last_frame = false
         -- A standing break carried into the unpark (`desired.turn_
         -- rate_deg_s`/`turn_style`) has no field of its own on `law_
         -- init_at_take`'s seed -- layered on top via an ordinary `law_
@@ -2286,31 +2417,88 @@ local function run_active_frame(t, dt, just_took)
         write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), dt)
         return
     end
-    local prev_turn_mode = fc_law.turn_mode
-    local prev_rate_override = fc_law.rate_override_deg_s
-    fc_law = law_update(fc_law, dt, measured, fc_limits, flight_profile.ACTIVE)
-    -- BL-16 Stage 3 (section 1, "Heading reference" / Co-moving table) --
-    -- the roll-out settle (turn -> heading) and the break settle (the
-    -- rate override clearing) each write the settled heading back into
-    -- `desired`, converted into `HEADING_REF`'s own reference, so a
-    -- later unpark (or the status line) reports what the law actually
-    -- settled on rather than a stale pre-settle value. Guarded on
-    -- `flight_desired` existing, same posture as every other cross-
-    -- module call in this file.
-    if flight_desired ~= nil then
-        if prev_turn_mode and not fc_law.turn_mode then
-            safe_call(function()
-                flight_desired.write_internal({
-                    heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
-                })
-            end)
-        elseif prev_rate_override ~= nil and fc_law.rate_override_deg_s == nil then
-            safe_call(function()
-                flight_desired.write_internal({
-                    heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
-                    clear_turn_rate = true,
-                })
-            end)
+    -- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
+    -- fix 1 -- plan.md section A "Update rate, not every frame", the
+    -- user's own direction, verbatim: "many of the flight control
+    -- calculations... 30Hz would be plenty... interleave calculations
+    -- so that not everything is calculated in a single frame" and
+    -- "the axis write itself may have to stay every frame -> this is
+    -- true"). `law_update` itself (shapers, integrators, the chain,
+    -- every trig call) now runs only when due at `profile.law_hz`, with
+    -- its own `dt` = time since `law_update` last actually ran (DCS
+    -- model time, never a per-frame `dt`) -- deferred one frame on any
+    -- frame the estimator step also ran (`estimator_due_this_frame`),
+    -- so the two most expensive pieces of this module land on different
+    -- frames at the realistic ~140 Hz DCS rate (confirmed: zero
+    -- collisions over a simulated second in `test_flight_control_lua.
+    -- py`'s own scheduling test). **The deferral itself only ever
+    -- lasts one frame** (`fc_law_deferred_last_frame`, its own
+    -- declaration comment) -- at a caller step size at or above `1/
+    -- profile.law_hz` (every coarse-stepped test below, and in
+    -- principle DCS running at or below `law_hz` frames/second) both
+    -- would be due on every single call, and deferring unconditionally
+    -- would starve the law completely rather than merely delay it.
+    -- `law_outputs` below still runs and writes every frame regardless
+    -- -- it is only the cheap attitude-feedback combination (`u = T +
+    -- k*(target - attitude) - k_d*rate`, no integrator of its own),
+    -- never the shapers/chain/trig this fix moves off the per-frame
+    -- path, and the per-frame axis write the DCS export hook requires
+    -- (`LuaExportBeforeNextFrame`) stays every frame by the user's own
+    -- confirmation above.
+    local law_is_due = law_due(t, fc_law_last_update_t, flight_profile.ACTIVE)
+    if law_is_due and estimator_due_this_frame and not fc_law_deferred_last_frame then
+        -- Collision: both are due this frame, and the law has not
+        -- already given way once in a row -- defer the law one frame
+        -- rather than let it run alongside the estimator step.
+        fc_law_deferred_last_frame = true
+    elseif law_is_due then
+        fc_law_deferred_last_frame = false
+        -- Plan amendment ("Pause... no integrator step on the resume
+        -- frame beyond the existing DT_CAP rule"): every site that sets
+        -- `fc_law`/`fc_law_last_update_t` to `nil` already prevents a
+        -- *stale* value surviving a take/release/park/stop/reset
+        -- boundary -- this guard is the one gap that leaves, a model-
+        -- time jump (DCS paused/resumed, or a mission-time
+        -- discontinuity) landing on an already-active session, where
+        -- the top-level `dt > DT_CAP` branch above already caught the
+        -- jump itself (freezing everything that frame, including
+        -- `fc_law_last_update_t`) -- the frame right AFTER it has a
+        -- small, ordinary frame `dt`, but `t - fc_law_last_update_t`
+        -- would still span the whole gap. Falls back to this frame's
+        -- own small `dt`, the same "treat it as a fresh start" posture
+        -- `fc_law_last_update_t == nil` already gets.
+        local law_dt = dt
+        if fc_law_last_update_t ~= nil and (t - fc_law_last_update_t) <= DT_CAP then
+            law_dt = t - fc_law_last_update_t
+        end
+        local prev_turn_mode = fc_law.turn_mode
+        local prev_rate_override = fc_law.rate_override_deg_s
+        fc_law = law_update(fc_law, law_dt, measured, fc_limits, flight_profile.ACTIVE)
+        fc_law_last_update_t = t
+        fc_debug_law_update_count = fc_debug_law_update_count + 1
+        -- BL-16 Stage 3 (section 1, "Heading reference" / Co-moving
+        -- table) -- the roll-out settle (turn -> heading) and the break
+        -- settle (the rate override clearing) each write the settled
+        -- heading back into `desired`, converted into `HEADING_REF`'s
+        -- own reference, so a later unpark (or the status line) reports
+        -- what the law actually settled on rather than a stale
+        -- pre-settle value. Guarded on `flight_desired` existing, same
+        -- posture as every other cross-module call in this file.
+        if flight_desired ~= nil then
+            if prev_turn_mode and not fc_law.turn_mode then
+                safe_call(function()
+                    flight_desired.write_internal({
+                        heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
+                    })
+                end)
+            elseif prev_rate_override ~= nil and fc_law.rate_override_deg_s == nil then
+                safe_call(function()
+                    flight_desired.write_internal({
+                        heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
+                        clear_turn_rate = true,
+                    })
+                end)
+            end
         end
     end
     write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), dt)
@@ -2333,12 +2521,18 @@ local function run_flight_control(t)
     -- costs only the two comparisons inside `est_due` -- the
     -- perf-plan-review's own "gate the read, not only the use."
     local flight_profile_active = flight_profile.ACTIVE
-    if est_due(fc_est, t, flight_profile_active) then
+    -- Captured for `run_active_frame` below (review-lv1.md, required
+    -- fix 1): the frame the estimator step actually consumed must never
+    -- also carry `law_update`'s own step, so the flag that gates the
+    -- estimator's `LoGet*` reads is the same flag that defers the law.
+    local estimator_due_this_frame = est_due(fc_est, t, flight_profile_active)
+    if estimator_due_this_frame then
         local raw = read_estimator_raw(t, flight_profile_active.velocity_source)
         local ran = est_sample(fc_est, t, raw, flight_profile_active)
         if ran and FLIGHT_TRACE_ENABLED then
             flight_trace_log(format_trace_line(t, fc_est, raw))
         end
+        fc_debug_estimator_sample_count = fc_debug_estimator_sample_count + 1
     end
 
     -- `is_parked()` unknown (ai_pilot_wheel failed to load) is treated
@@ -2403,6 +2597,8 @@ local function run_flight_control(t)
         -- session's shaper/integrator state.
         fc_last_stowed_pilot_capture = nil
         fc_law = nil
+        fc_law_last_update_t = nil
+        fc_law_deferred_last_frame = false
         fc_last_command = nil
         return
     end
@@ -2428,6 +2624,8 @@ local function run_flight_control(t)
             fc_mode = "armed"
             fc_last_stowed_pilot_capture = nil
             fc_law = nil
+            fc_law_last_update_t = nil
+            fc_law_deferred_last_frame = false
             fc_last_command = nil
         end
         return
@@ -2514,7 +2712,7 @@ local function run_flight_control(t)
     end
 
     if fc_mode == "active" then
-        run_active_frame(t, dt, false)
+        run_active_frame(t, dt, false, estimator_due_this_frame)
         return
     end
 
@@ -2676,6 +2874,8 @@ local function on_stop()
     fc_last_stowed_pilot_capture = nil
     fc_last_steady_values = nil
     fc_law = nil
+    fc_law_last_update_t = nil
+    fc_law_deferred_last_frame = false
     fc_last_command = nil
     fc_applied_stamp_hdg = nil
     fc_applied_stamp_alt = nil
@@ -2723,6 +2923,17 @@ M.mode_info = function()
         mode = fc_mode,
         release_reason = fc_release_reason,
         refuse_cause = fc_refuse_cause,
+    }
+end
+
+-- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix
+-- 1) -- diagnostic-only, never on any wire (see the counters' own
+-- declaration comment). `test_flight_control_lua.py`'s own scheduling
+-- test is the only reader.
+M.debug_scheduling_counts = function()
+    return {
+        estimator_sample = fc_debug_estimator_sample_count,
+        law_update = fc_debug_law_update_count,
     }
 end
 

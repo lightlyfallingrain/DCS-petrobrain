@@ -247,20 +247,25 @@ M.PROFILES["Mi-24P"] = {
     -- Estimator and law update rate (plan, "Update rate, not every
     -- frame", user 2026-11-20 verbatim: "I'd say 30Hz would be plenty").
     -- First cut; LV-0's card measures whether this is too fast/slow for
-    -- the noise floor. **LV-1 reads the estimator's own output every
-    -- frame it runs the law (still per-frame, see `flight_control.lua`'s
-    -- own module docstring for why the law's own cadence is not yet
-    -- moved to this rate) -- only the estimator's own `LoGet*` reads
-    -- are gated to `law_hz`.**
+    -- the noise floor. **Both the estimator's own `LoGet*` reads
+    -- (`est_due`) and `law_update` itself (`law_due`) are gated to this
+    -- rate, from LV-1 on (review-lv1.md, required fix 1)** -- on
+    -- different frames from each other, never the same one; `law_
+    -- outputs` still runs and writes every frame.
     law_hz = 30.0,
 
     -- Which raw telemetry source the estimator differentiates/averages
     -- for world-frame velocity -- `"position"` (least-squares slope of
     -- `LoGetSelfData().Position`) or `"vector"` (running average of
-    -- `LoGetVectorVelocity`). `"position"` is the default until a card
-    -- confirms `LoGetVectorVelocity` matches `dP/dt` on all three axes
-    -- (plan, section A).
-    velocity_source = "position",
+    -- `LoGetVectorVelocity`). `"vector"` for LV-1 on (decided from the
+    -- LV-0 sortie trace, main loop, `docs/acceptance/
+    -- 2026-11-23-sortie-feedback.md`, "Row (e) answered": same axes and
+    -- signs as the position slope across every row the card flew,
+    -- including sideslip, with the only offsets (~0.2-0.4 m/s) in the
+    -- two steep turns -- the position slope's own centre-of-window lag,
+    -- which `LoGetVectorVelocity` does not carry). `"position"` stays
+    -- selectable (plan, section A).
+    velocity_source = "vector",
 
     -- Running-average window lengths (seconds), chosen as multiples of
     -- the blade-pass period so vibration falls in the average's null
