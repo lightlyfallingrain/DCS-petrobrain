@@ -526,12 +526,6 @@ _UNABLE_TEMPLATES: dict[str, str] = {
     # nothing that can ever select it would be a reason nobody can reach.
     "NOT_FLYING": "Unable, not flying.",
     "HANDS_BUSY": "Unable, hands busy.",
-    # BL-16 mode 1 Decision 22/3 (`plans/flight-control/plan.md`,
-    # "Revised 2026-11-18") -- `take_controls`'s own refusal when IAS is
-    # below `MIN_IAS_KMH` (the user: "~80"). Heard and understood, not
-    # doable right now -- the "unable" half of the project's "say again"
-    # vs "unable" distinction, same shape as `ON_GROUND`.
-    "TOO_SLOW": "Unable, too slow.",
     # BL-16 mode 1 Decision 21/22 (U9, answered 2026-11-18) -- the one
     # closed reason reached from two places: `turn_continuous` with no
     # degrees heard while Petrovich flies through the AI overlay (no

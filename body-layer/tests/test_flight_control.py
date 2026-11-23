@@ -34,7 +34,6 @@ from aircraft_client import AircraftLayerClient
 from belief.flight_control import (
     FLOOR_AGL_M,
     MAX_IAS_KMH,
-    MIN_IAS_KMH,
     FlightControlGoalRequest,
     FlightControlState,
     advance_flight_control_state,
@@ -179,7 +178,6 @@ class TestTakeControls:
         result = take_controls(
             overlay_flying=True,
             on_ground=False,
-            too_slow=False,
             attack_run_engaged=False,
         )
         assert result == {"ok": True, "acted": False}
@@ -188,36 +186,24 @@ class TestTakeControls:
         result = take_controls(
             overlay_flying=False,
             on_ground=True,
-            too_slow=False,
             attack_run_engaged=False,
         )
         assert result == {"ok": False, "reason": "ON_GROUND"}
-
-    def test_too_slow_refuses(self) -> None:
-        result = take_controls(
-            overlay_flying=False,
-            on_ground=False,
-            too_slow=True,
-            attack_run_engaged=False,
-        )
-        assert result == {"ok": False, "reason": "TOO_SLOW"}
 
     def test_attack_run_engaged_refuses(self) -> None:
         result = take_controls(
             overlay_flying=False,
             on_ground=False,
-            too_slow=False,
             attack_run_engaged=True,
         )
         assert result == {"ok": False, "reason": "ATTACK_RUN_ENGAGED"}
 
-    def test_refusal_order_is_ground_then_speed_then_attack_run(self) -> None:
-        """All three refusals true at once -- `ON_GROUND` wins, pinning
-        the plan's own check order."""
+    def test_refusal_order_is_ground_then_attack_run(self) -> None:
+        """Both refusals true at once -- `ON_GROUND` wins, pinning the
+        plan's own check order."""
         result = take_controls(
             overlay_flying=False,
             on_ground=True,
-            too_slow=True,
             attack_run_engaged=True,
         )
         assert result == {"ok": False, "reason": "ON_GROUND"}
@@ -226,7 +212,6 @@ class TestTakeControls:
         result = take_controls(
             overlay_flying=False,
             on_ground=False,
-            too_slow=False,
             attack_run_engaged=False,
         )
         assert result == {"ok": True, "acted": True}
@@ -259,8 +244,12 @@ class TestClampHelpers:
         assert clamp_altitude(0.0, "baro") == 0.0
         assert clamp_altitude(-50.0, "baro") == -50.0
 
-    def test_clamp_speed_floors_and_ceilings(self) -> None:
-        assert clamp_speed(MIN_IAS_KMH - 10.0) == MIN_IAS_KMH
+    def test_clamp_speed_has_no_floor_only_a_ceiling(self) -> None:
+        """BL-16 lift-vector law, Stage LV-1 (U8, "no floor"): the
+        lower bound is gone entirely -- `clamp_speed` only ever ceils
+        now."""
+        assert clamp_speed(-10.0) == 0.0
+        assert clamp_speed(0.0) == 0.0
         assert clamp_speed(MAX_IAS_KMH + 10.0) == MAX_IAS_KMH
         assert clamp_speed(150.0) == 150.0
 
@@ -269,7 +258,7 @@ class TestWireHelpers:
     def test_flight_control_limits_carries_the_given_on_ground_threshold(self) -> None:
         limits = flight_control_limits(12.5)
         assert limits["on_ground_agl_threshold_m"] == 12.5
-        assert limits["min_ias_kmh"] == MIN_IAS_KMH
+        assert "min_ias_kmh" not in limits
         assert limits["max_ias_kmh"] == MAX_IAS_KMH
 
     def test_flight_control_limits_carries_m2s_shaper_limits_and_bands(self) -> None:

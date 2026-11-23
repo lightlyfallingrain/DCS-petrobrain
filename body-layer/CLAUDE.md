@@ -616,7 +616,13 @@ Belief — observation *consumption*:
   (Decision 13); the `axes_*` goal actions never write the `ai_pilot_*` one-shots mode 2 owns
   (Co-moving row 11's own leak fix is the cautionary tale for why this one matters).
   `CrewConsole.flight_mode()` is the one place `rules.actions._by_mode` reads to decide which of
-  the 16 shared `flight.*` actions' two bodies runs.
+  the 16 shared `flight.*` actions' two bodies runs. **BL-16 lift-vector law, Stage LV-1**
+  (`plans/flight-lift-vector/plan.md`, U1/U8, "no floor") removed `MIN_IAS_KMH` and every
+  commanded-speed floor from this module entirely: `take_controls` no longer takes a `too_slow`
+  parameter or returns `"TOO_SLOW"`, `clamp_speed` only ceils now (`[0, MAX_IAS_KMH]`), and
+  `flight_control_limits()` no longer sends `min_ias_kmh` on the wire — the real law change (the
+  lift-vector control law itself) lives in `Export.lua`'s `flight_control.lua`/`flight_profile.lua`
+  on the aircraft-layer side; this module only carried the floor that used to protect it.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

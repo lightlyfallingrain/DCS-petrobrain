@@ -490,12 +490,14 @@ class ConsolePerceptionRunner:
     #: parity with `last_t_sim`'s "latest telemetry snapshot" role and any
     #: future non-enrichment consumer.
     last_ownship_state: OwnshipState | None = None
-    #: BL-16 mode 1 Stage M1 -- `take_controls`'s own `TOO_SLOW` refusal
-    #: (Decision 22) needs live IAS, which `OwnshipState` does not carry
-    #: (it was never needed before this). Set in `run_once` from the raw
-    #: telemetry dict's own `"ias_mps"` field, alongside `last_ownship_
-    #: state` above, since no other call site reads the raw dict at all.
-    #: `None` before the first poll, same posture as `last_ownship_state`.
+    #: BL-16 mode 1 Stage M1 -- live IAS, which `OwnshipState` does not
+    #: carry. Set in `run_once` from the raw telemetry dict's own
+    #: `"ias_mps"` field, alongside `last_ownship_state` above, since no
+    #: other call site reads the raw dict at all. `None` before the
+    #: first poll, same posture as `last_ownship_state`. Read by `belief.
+    #: ai_pilot_wheel`'s own IAS-ceiling recovery check (`[[BL-16]]`
+    #: Stage P2) -- the `take_controls` `TOO_SLOW` consumer this field
+    #: was originally added for is gone (BL-16 lift-vector law, LV-1).
     last_ias_kmh: float | None = None
     #: Built lazily on the first poll that has both real telemetry and a
     #: `world_model_conn`/`theatre` (i.e. always, once `_run_crew_text_poll_
@@ -5411,13 +5413,10 @@ def _run_crew_text_poll_loop(
                         )
                         # BL-16 mode 1 Stage M1 -- refreshed every poll,
                         # same as `on_ground`/`attack_run_engaged` above:
-                        # `take_controls`'s own `TOO_SLOW` refusal and
-                        # `decide_flight_control`'s ack-timeout clock
-                        # both need a sim-time/IAS reading synchronous
-                        # Lua-action dispatch has no other way to reach
-                        # (`CrewConsole.poll_now_sim`/`ias_kmh`'s own
-                        # field docstrings on why).
-                        crew_console.ias_kmh = runner.last_ias_kmh
+                        # the ack-timeout clock a synchronous Lua-action
+                        # dispatch needs has no other way to reach a
+                        # sim-time reading (`CrewConsole.poll_now_sim`'s
+                        # own field docstring on why).
                         crew_console.poll_now_sim = runner.last_t_sim
                         # `plans/9k113-scan-procedure/plan-stage2.md`,
                         # "What 'ready' means" -- refreshed every poll, so

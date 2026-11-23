@@ -912,9 +912,12 @@ class TestHandoverActions:
     belief-state side effect is immediate and asserted here instead.
 
     `_dispatching_console`'s `**state_fields` only ever sets `Parked
-    FlightState` fields (its own docstring) -- `on_ground`/`ias_kmh`/
+    FlightState` fields (its own docstring) -- `on_ground`/
     `attack_run_engaged`/`flight_control_state` are set directly on the
-    returned console in the tests below that need them."""
+    returned console in the tests below that need them. (`ias_kmh` was
+    `CrewConsole`'s own IAS mirror for `take_controls`'s now-removed
+    `TOO_SLOW` check, BL-16 lift-vector law Stage LV-1 -- the field
+    itself is gone.)"""
 
     def test_you_have_controls_is_silent_while_overlay_flying(self) -> None:
         """The 2026-11-17 no-op: Petrovich already has the controls
@@ -928,7 +931,6 @@ class TestHandoverActions:
     def test_you_have_controls_takes_when_clear_to_fly(self) -> None:
         console = _dispatching_console(parked_active=False)
         console.on_ground = False
-        console.ias_kmh = 150.0
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []
@@ -938,17 +940,19 @@ class TestHandoverActions:
     def test_you_have_controls_refuses_on_the_ground(self) -> None:
         console = _dispatching_console(parked_active=False)
         console.on_ground = True
-        console.ias_kmh = 150.0
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == [render_unable("ON_GROUND").text]
         assert console.flight_control_transition is None
 
-    def test_you_have_controls_refuses_too_slow(self) -> None:
+    def test_you_have_controls_accepted_below_80_kmh_no_hand_back(self) -> None:
+        """BL-16 lift-vector law, Stage LV-1 (U1/U8): the 80 km/h
+        takeover refusal is gone entirely -- there is no IAS reading
+        left on `CrewConsole` for this action to even read."""
         console = _dispatching_console(parked_active=False)
         console.on_ground = False
-        console.ias_kmh = 10.0
         lines = console.handle_command("you_have_controls", now_sim=0.0)
-        assert lines == [render_unable("TOO_SLOW").text]
+        assert lines == []
+        assert console.flight_control_transition == "take"
 
     def test_i_have_controls_is_unable_while_overlay_flying(self) -> None:
         """U9, answered 2026-11-18: "unable", not remembered -- the
@@ -1035,7 +1039,7 @@ class TestSeatNeverGatesMode1:
     """BL-16 mode 1 Decision 25 -- "mode 1 is never gated on seat":
     `flight_mode()`/`take_controls`'s own result must be identical
     whether `player_seat` reads `"pilot"`, `"operator"`, or `None`
-    (unknown) -- both read `parked_active`/`on_ground`/`ias_kmh`/
+    (unknown) -- both read `parked_active`/`on_ground`/
     `attack_run_engaged` only."""
 
     @pytest.mark.parametrize("seat", ["pilot", "operator", None])
@@ -1056,7 +1060,6 @@ class TestSeatNeverGatesMode1:
     ) -> None:
         console = _dispatching_console(parked_active=False, player_seat=seat)
         console.on_ground = False
-        console.ias_kmh = 150.0
         console.attack_run_engaged = False
         lines = console.handle_command("you_have_controls", now_sim=0.0)
         assert lines == []

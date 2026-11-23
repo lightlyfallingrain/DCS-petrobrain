@@ -158,7 +158,6 @@ from belief.flight_authority import (
 )
 from belief.flight_control import (
     MAX_IAS_KMH,
-    MIN_IAS_KMH,
     SPEED_STEP_KMH,
     AltitudeRef,
     FlightControlGoalRequest,
@@ -2120,16 +2119,6 @@ class CrewConsole:
     flight_authority_state: FlightAuthorityState = field(
         default_factory=FlightAuthorityState, repr=False
     )
-
-    #: `take_controls`'s own `TOO_SLOW` refusal (Decision 22) needs live
-    #: IAS, which no existing field on this class carries (`on_ground`
-    #: is the nearest precedent: refreshed every poll by `body.py` from
-    #: real telemetry, defaulting to the safe "refuse" assumption before
-    #: the first poll resolves it -- here, "too slow" rather than "on
-    #: the ground"). `None` before the first poll; `take_controls` reads
-    #: `None` as "too slow" (fail toward refusing a takeover, not
-    #: granting one on unknown airspeed).
-    ias_kmh: float | None = field(default=None, repr=False)
 
     #: A sim-time reading no existing path threads `now_sim` from
     #: `handle_command` down into a rule's own action invoke (`rules.
@@ -5531,7 +5520,10 @@ class CrewConsole:
         rule-callable wrapper around `belief.flight_control.take_
         controls`'s pure request builder, supplying the live context it
         needs (`flight_mode() == "overlay"`, `self.on_ground`, `self.
-        ias_kmh`, `self.attack_run_engaged`).
+        attack_run_engaged`). **BL-16 lift-vector law, Stage LV-1
+        (U1/U8)**: no IAS check any more -- `take_controls` no longer
+        takes a `too_slow` parameter, so this wrapper no longer reads
+        one either.
 
         **`says` is recorded, never spoken here** -- BL-16 Stage 3:
         `body.py`'s `_apply_flight_requests` queues a `PendingTake`
@@ -5540,11 +5532,9 @@ class CrewConsole:
         flight_control` speak it only once `fd_acks` accepts that seq
         (the same "spoken when it actually lands" contract as `effector.
         write`'s `says`, speech-rules D20)."""
-        too_slow = self.ias_kmh is None or self.ias_kmh < MIN_IAS_KMH
         result = take_controls(
             overlay_flying=self.flight_mode() == "overlay",
             on_ground=self.on_ground,
-            too_slow=too_slow,
             attack_run_engaged=self.attack_run_engaged,
         )
         if result.get("acted"):
@@ -5643,9 +5633,9 @@ class CrewConsole:
 
     def axes_set_speed(self, value: int) -> dict[str, object]:
         """BL-16 mode 1 Decision 21's axes body for `flight.set_speed`
-        -- "speed &lt;value&gt;", clamped to `[MIN_IAS_KMH, MAX_IAS_
-        KMH]` (unlike mode 2, no discrete wheel steps -- this is a
-        continuous goal)."""
+        -- "speed &lt;value&gt;", clamped to `[0, MAX_IAS_KMH]` (LV-1,
+        U8: no floor any more; unlike mode 2, no discrete wheel steps --
+        this is a continuous goal)."""
         clamped = clamp_speed(float(value))
         self.flight_control_goal_transition = FlightControlGoalRequest(ias_kmh=clamped)
         is_max = clamped >= MAX_IAS_KMH

@@ -275,9 +275,12 @@ def decide_carried_value_speech(
 
     Compares each of ias/altitude against mode 1's own clamp
     (`belief.flight_control.clamp_speed`/`clamp_altitude`, the body-side
-    twins of the `fc_limits.min_ias_kmh`/`max_ias_kmh`/`floor_agl_m`
-    values `Export.lua`'s `build_take_seed` now clamps the unpark seed
-    to) and returns one non-urgent decision per part that differs.
+    twins of the `fc_limits.max_ias_kmh`/`floor_agl_m` values `Export.
+    lua`'s `build_take_seed` now clamps the unpark seed to -- BL-16
+    lift-vector law, Stage LV-1, U8: `clamp_speed` lost its lower bound
+    entirely, so this fires for a carried speed only above the ceiling
+    now, never below) and returns one non-urgent decision per part that
+    differs.
     `new.ias_kmh`/`alt_m` -- the exact commanded value `fd_ias`/`fd_alt`
     carries -- is never written here; only what mode 1 will actually
     fly is clamped, in this comparison and in `build_take_seed`. Spoken

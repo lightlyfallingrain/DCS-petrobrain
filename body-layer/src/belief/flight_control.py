@@ -81,17 +81,14 @@ FLOOR_AGL_M: Final[float] = tuning.real(
     status="agreed-guess",
 )
 
-#: Below this IAS, mode 1 refuses a takeover (`TOO_SLOW`) and `Export.
-#: lua`'s own envelope check self-releases an already-active session
-#: (Decision 3, user: "~80"). Also the unpark-take precondition Lua
-#: checks on its own, independently, from the same wire value.
-MIN_IAS_KMH: Final[float] = tuning.real(
-    "belief.flight_control.MIN_IAS_KMH",
-    80.0,
-    lo=20.0,
-    hi=200.0,
-    status="agreed-guess",
-)
+#: BL-16 lift-vector law, Stage LV-1 (`plans/flight-lift-vector/
+#: plan.md`, U1/U8): `MIN_IAS_KMH` is removed entirely, not lowered --
+#: the 80 km/h takeover refusal/self-release and every commanded-speed
+#: floor are gone (the user's own informed choice, Q1 verbatim: "remove
+#: the limit. Any speed. What does not work, I will bring back and we
+#: fix"). What protects low speed now is `Export.lua`'s own gain
+#: schedule (`flight_profile.lua`'s `schedule_gain_min`), not a wire
+#: value this module ever sent.
 
 #: The ceiling `set_speed`/`step_speed`/`set_speed_max` clamp to -- mode
 #: 2's own Q5 ceiling (280 km/h), reused as a judgement call the same way
@@ -452,7 +449,6 @@ def take_controls(
     *,
     overlay_flying: bool,
     on_ground: bool,
-    too_slow: bool,
     attack_run_engaged: bool,
 ) -> dict[str, object]:
     """Decision 22's `flight.take_controls` -- **BL-16 Stage 3**: a pure
@@ -461,9 +457,13 @@ def take_controls(
     `resolve_pending_take`, driven by the numbered channel's own
     `fd_acks` rather than a local `phase`). `overlay_flying` wins first
     (the 2026-11-17 no-op: "'you have controls' is no-op, say nothing" --
-    not an error, `acted=False` only). The three refusals that follow
-    match in the order the plan lists them; none is more authoritative
-    than another, this order is simply deterministic.
+    not an error, `acted=False` only). The two refusals that follow
+    match in the order the plan lists them; neither is more
+    authoritative than the other, this order is simply deterministic.
+
+    **BL-16 lift-vector law, Stage LV-1 (U1/U8)**: `TOO_SLOW` is gone --
+    a take is accepted at any airspeed now, so this function no longer
+    takes a `too_slow` parameter at all.
 
     On success: `{"ok": True, "acted": True}` -- the caller
     (`CrewConsole.take_controls`) queues the wire `take` request and
@@ -472,8 +472,6 @@ def take_controls(
         return {"ok": True, "acted": False}
     if on_ground:
         return {"ok": False, "reason": "ON_GROUND"}
-    if too_slow:
-        return {"ok": False, "reason": "TOO_SLOW"}
     if attack_run_engaged:
         return {"ok": False, "reason": "ATTACK_RUN_ENGAGED"}
     return {"ok": True, "acted": True}
@@ -510,9 +508,11 @@ def clamp_altitude(m: float, ref: AltitudeRef) -> float:
 
 
 def clamp_speed(kmh: float) -> float:
-    """Decision 21's `set_speed`/`step_speed` clamp -- `[MIN_IAS_KMH,
-    MAX_IAS_KMH]`."""
-    return max(MIN_IAS_KMH, min(MAX_IAS_KMH, kmh))
+    """Decision 21's `set_speed`/`step_speed` clamp. **BL-16 lift-vector
+    law, Stage LV-1 (U8, no floor)**: the lower bound (`MIN_IAS_KMH`) is
+    gone entirely -- `[0, MAX_IAS_KMH]` now, never a floor above the
+    commanded value."""
+    return max(0.0, min(MAX_IAS_KMH, kmh))
 
 
 def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
@@ -526,11 +526,12 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
     `max_bank_deg` field any more** (F-M1, mode-1 batch: "remove the 30
     degree limit. Set no limit for now") -- removed from the wire
     entirely, not widened, so a stale consumer never finds a number
-    that no longer means anything."""
+    that no longer means anything. **No `min_ias_kmh` field any more
+    either** (BL-16 lift-vector law, Stage LV-1, U1/U8) -- same
+    reasoning, removed rather than widened."""
     return {
         "takeover_level_bank_deg": TAKEOVER_LEVEL_BANK_DEG,
         "floor_agl_m": FLOOR_AGL_M,
-        "min_ias_kmh": MIN_IAS_KMH,
         "max_ias_kmh": MAX_IAS_KMH,
         "on_ground_agl_threshold_m": on_ground_agl_threshold_m,
         "arm_lease_s": ARM_LEASE_S,

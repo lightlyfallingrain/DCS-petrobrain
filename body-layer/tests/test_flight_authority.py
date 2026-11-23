@@ -35,7 +35,6 @@ from belief.flight_control import (
     FLOOR_AGL_M,
     HANDOVER_ACK_TIMEOUT_S,
     MAX_IAS_KMH,
-    MIN_IAS_KMH,
 )
 
 
@@ -284,22 +283,20 @@ class TestDecideCarriedValueSpeech:
         )
         assert decide_carried_value_speech(prev, new) == []
 
-    def test_a_carried_speed_mode_1_cannot_fly_is_announced_once_not_urgent(
+    def test_a_carried_speed_of_0_is_flown_exactly_no_floor_no_announcement(
         self,
     ) -> None:
-        """The plan's own worked example: "speed 0" in mode 2, then
-        unpark -- mode 1 cannot fly 0 km/h, so it flies its own
-        minimum and says so once, not urgently ("Speed 8 0." for
-        `MIN_IAS_KMH == 80.0`)."""
+        """BL-16 lift-vector law, Stage LV-1 (U8, "no floor"): the
+        plan's own worked example used to say mode 1 could not fly
+        0 km/h and announced its own minimum instead -- that floor
+        (`MIN_IAS_KMH`) is gone entirely now, so "speed 0" in mode 2,
+        then unpark, is flown exactly as commanded and says nothing new
+        (`clamp_speed(0.0) == 0.0`, matching the carried value exactly)."""
         prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
         new = FlightAuthorityState(
             fd_mode="m1", mode_n=4, mode_cause="unpark", ias_kmh=0.0
         )
-        decisions = decide_carried_value_speech(prev, new)
-        assert len(decisions) == 1
-        digits = " ".join(str(int(MIN_IAS_KMH)))
-        assert decisions[0].says == f"Speed {digits}."
-        assert decisions[0].urgent is False
+        assert decide_carried_value_speech(prev, new) == []
 
     def test_a_carried_speed_above_the_ceiling_is_clamped_down(self) -> None:
         prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
@@ -341,7 +338,11 @@ class TestDecideCarriedValueSpeech:
         )
         assert decide_carried_value_speech(prev, new) == []
 
-    def test_both_parts_carried_badly_announce_both_in_one_call(self) -> None:
+    def test_only_altitude_is_carried_badly_now_speed_has_no_floor(self) -> None:
+        """BL-16 lift-vector law, Stage LV-1 (U8, "no floor"): `ias_kmh
+        = 0.0` used to be a second badly-carried part (clamped up to
+        `MIN_IAS_KMH`) alongside the altitude floor -- that floor is
+        gone, so only the altitude part announces now."""
         prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
         new = FlightAuthorityState(
             fd_mode="m1",
@@ -352,7 +353,7 @@ class TestDecideCarriedValueSpeech:
             alt_ref="agl",
         )
         decisions = decide_carried_value_speech(prev, new)
-        assert len(decisions) == 2
+        assert len(decisions) == 1
         assert all(decision.urgent is False for decision in decisions)
 
     def test_a_voice_take_edge_is_never_this_announcement(self) -> None:

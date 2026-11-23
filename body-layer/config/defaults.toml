@@ -297,11 +297,6 @@ MAX_IAS_KMH = 280.0
 # source: belief/flight_control.py:MAX_TURN_BANK_DEG
 MAX_TURN_BANK_DEG = 20.0
 
-# Below this IAS, mode 1 refuses a takeover (`TOO_SLOW`) and `Export.lua`'s own envelope check self-releases an already-active session (Decision 3, user: "~80").
-# status: agreed-guess | range: 20.0 .. 200.0
-# source: belief/flight_control.py:MIN_IAS_KMH
-MIN_IAS_KMH = 80.0
-
 # Decision 30 -- at or above this IAS, the same collective-rate guard caps a further increase, to stay clear of retreating blade stall.
 # status: agreed-guess | range: 100.0 .. 400.0
 # source: belief/flight_control.py:RETREATING_BLADE_STALL_IAS_KMH
