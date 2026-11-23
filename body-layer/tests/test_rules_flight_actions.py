@@ -900,13 +900,12 @@ class TestHandoverActions:
     "Revised 2026-11-18") -- replaces the old `TestHaveControlsNoOp`:
     "you/i have controls" now really hand the controls over on the
     axes, category `"flight_handover"`. The *readback* text ("I have
-    controls."/"You have controls.") is deferred for a successful take
-    (spoken only once `Export.lua` confirms, via `drain_flight_control`
-    -- the Lua rule body for `you_have_controls` calls no `say()` at
-    all), so `handle_command`'s own immediate return stays `[]` even
-    when the take succeeds; the belief-state side effect is immediate
-    and asserted here instead. `release_controls`'s own rule *does*
-    call `say()` directly when it acts, so that line is immediate.
+    controls."/"You have controls.") is deferred for both a successful
+    take and a successful release (spoken only once `Export.lua`
+    confirms, via `drain_flight_control` -- neither rule body calls
+    `say()` at all, debug-2026-11-23 problem 1), so `handle_command`'s
+    own immediate return stays `[]` even when either acts; the
+    belief-state side effect is immediate and asserted here instead.
 
     `_dispatching_console`'s `**state_fields` only ever sets `Parked
     FlightState` fields (its own docstring) -- `on_ground`/`ias_kmh`/
@@ -955,11 +954,15 @@ class TestHandoverActions:
         assert lines == [render_unable("AI_OVERLAY").text]
 
     def test_i_have_controls_releases_while_flying_on_the_axes(self) -> None:
+        """Debug-2026-11-23, problem 1 -- the readback is deferred the
+        same way `you_have_controls`'s "I have controls." is: nothing
+        is spoken until `Export.lua` acks the release."""
         console = _dispatching_console(parked_active=False)
         _set_mode1_active(console)
         lines = console.handle_command("i_have_controls", now_sim=0.0)
-        assert lines == ["You have controls."]
+        assert lines == []
         assert console.flight_control_transition == "release"
+        assert console.pending_release_says == "You have controls."
 
     def test_i_have_controls_is_a_silent_no_op_with_nobody_flying(self) -> None:
         """The player already has the controls -- `acted=False`, same

@@ -1748,6 +1748,22 @@ class CrewConsole:
     #: it drops the pending take at the timeout and never re-checks that
     #: `seq`. Flagged in `plans/flight-desired-state/implementation.md`.
     flight_pending_take: PendingTake | None = None
+    #: Debug-2026-11-23 (`plans/flight-lift-vector/debug-2026-11-23.md`,
+    #: problem 1) -- the release's own text, mirroring `pending_take_
+    #: says` exactly: `release_controls` sets this instead of speaking
+    #: "You have controls." immediately, so the line waits for Lua's
+    #: own ack the same way the take's "I have controls." already did.
+    #: Before this fix, `config/rules/flight.lua`'s `i_have_controls`
+    #: handler spoke on `r.acted` alone -- true the instant the request
+    #: is *queued*, not once Lua has actually released, so the sortie's
+    #: own report ("I have controls" -> seat change -> "you have
+    #: controls" -> Petrovich still held controls) could speak the
+    #: handover before the axis writes had actually stopped.
+    pending_release_says: str | None = None
+    #: Debug-2026-11-23, problem 1 -- the release's own deferred ack,
+    #: the exact `flight_pending_take` twin for the opposite handover
+    #: direction.
+    flight_pending_release: PendingTake | None = None
     #: BL-16 Stage 3b (`plans/flight-desired-state/plan.md`, section 3a)
     #: -- the readback lines an ordinary `flight_control*`-category
     #: dispatch computed this call, staged here instead of being spoken
@@ -5539,12 +5555,23 @@ class CrewConsole:
     def release_controls(self) -> dict[str, object]:
         """BL-16 mode 1 Decision 22's `flight.release_controls` -- the
         rule-callable wrapper around `belief.flight_control.release_
-        controls`'s pure request builder."""
+        controls`'s pure request builder.
+
+        **Debug-2026-11-23, problem 1**: `says` is recorded, never
+        spoken here -- the exact same "landed-confirmation contract"
+        `take_controls` above already has. `body.py`'s
+        `_apply_flight_requests` queues a `PendingTake` (`self.pending_
+        release_says`) once it knows the request's own wire `seq`;
+        `belief.flight_authority.resolve_pending_take`/`drain_flight_
+        control` speak it only once `fd_acks` accepts that seq -- never
+        on `acted` alone, which is true the instant the request is
+        queued, not once Lua has actually stopped writing axes."""
         result = release_controls(
             overlay_flying=self.flight_mode() == "overlay",
             flying_axes=self.flight_authority_state.fd_mode in ("taking", "m1"),
         )
         if result.get("acted"):
+            self.pending_release_says = "You have controls."
             self.flight_control_transition = "release"
         return result
 
@@ -5838,12 +5865,33 @@ class CrewConsole:
           practice: `fd_mode` cannot be `"off"` with `decide_flight_
           speech`'s own silent-cause exception for `"taking"`'s own
           edge, but checked here rather than assumed)."""
+        # Debug-2026-11-23, problem 1 -- the release's own ack, resolved
+        # independently of the take/readback-queue logic below: a
+        # release never has anything queued behind it the way a take
+        # can (`pending_flight_readbacks` is 3a's own mechanism for
+        # ordinary flight-category commands that arrived *while a take
+        # was pending*; nothing stages a request behind a release the
+        # same way), so there is no FIFO-holding behaviour to mirror
+        # here -- just "don't speak until Lua acks."
+        lines: list[str] = []
+        if self.flight_pending_release is not None:
+            new_release_pending, release_decision = resolve_pending_take(
+                self.flight_pending_release, self.flight_authority_state.acks, now_sim
+            )
+            self.flight_pending_release = new_release_pending
+            if release_decision is not None:
+                lines.append(release_decision.says)
+                self._print(
+                    [release_decision.says],
+                    now_sim,
+                    bypass_gate=release_decision.urgent,
+                )
+
         take_was_pending = self.flight_pending_take is not None
         new_pending, decision = resolve_pending_take(
             self.flight_pending_take, self.flight_authority_state.acks, now_sim
         )
         self.flight_pending_take = new_pending
-        lines: list[str] = []
         if decision is not None:
             lines.append(decision.says)
             self._print([decision.says], now_sim, bypass_gate=decision.urgent)

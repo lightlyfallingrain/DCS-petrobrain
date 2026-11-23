@@ -319,6 +319,195 @@ print(string.format("%.4f", est.v_g))
         assert lines[1] == "nil"
         assert all(float(x) == 0.0 for x in lines[2:])
 
+    def test_duplicate_timestamp_sample_does_not_spike_acceleration(self) -> None:
+        """Debug-2026-11-23 (`plans/flight-lift-vector/debug-2026-11-23.md`,
+        problem 2b) -- the real LV-0 sortie trace showed `v` reading
+        exactly 0.0 for one sample mid-flight (position source) while
+        the raw `LoGetVectorVelocity` channel stayed perfectly smooth,
+        producing a 300-550 m/s^2 acceleration spike over the next
+        ~0.3 s. Reproduced here with two samples sharing one timestamp
+        -- `est_ring_slope`'s own `denom == 0.0` guard, the same
+        degenerate shape a duplicated/undercounted model-time tick
+        would give. A steady 30 m/s climb-free run, then one duplicate
+        tick, then normal ticks resume: velocity must hold at its last
+        known value through the duplicate (never snap to 0), and the
+        acceleration that follows must not spike."""
+        driver = """
+local est = new_est()
+local v_n = 30.0
+local pos_n = 0.0
+for i = 0, 20 do
+    local t = i * (1.0 / 30.0)
+    pos_n = pos_n + v_n * (1.0 / 30.0)
+    local raw = {
+        pos_n = pos_n, pos_u = 0.0, pos_e = 0.0,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+end
+print(string.format("%.4f", est.v.n))
+print(string.format("%.4f", est.a.n))
+
+-- A duplicate-timestamp tick: same `t` as the last real sample, no
+-- position change either (as a duplicate frame would report).
+local t_dup = 20 * (1.0 / 30.0)
+local raw_dup = {
+    pos_n = pos_n, pos_u = 0.0, pos_e = 0.0,
+    psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+    p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+}
+flight_control.est_sample(est, t_dup, raw_dup, PROFILE)
+print(string.format("%.4f", est.v.n))
+print(string.format("%.4f", est.a.n))
+
+-- Normal ticks resume.
+local max_abs_a = 0.0
+for i = 21, 31 do
+    local t = i * (1.0 / 30.0)
+    pos_n = pos_n + v_n * (1.0 / 30.0)
+    local raw = {
+        pos_n = pos_n, pos_u = 0.0, pos_e = 0.0,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+    if math.abs(est.a.n) > max_abs_a then
+        max_abs_a = math.abs(est.a.n)
+    end
+end
+print(string.format("%.4f", max_abs_a))
+"""
+        lines = _run(driver)
+        v_before, a_before, v_at_dup, a_at_dup, max_abs_a_after = (
+            float(x) for x in lines
+        )
+        assert abs(v_before - 30.0) < 0.5
+        assert abs(a_before) < 1.0
+        # The duplicate tick must hold velocity at its last known value
+        # -- never snap to 0.0 the way a bare `est_ring_slope` would.
+        assert abs(v_at_dup - v_before) < 0.5
+        assert abs(a_at_dup) < 1.0
+        # No acceleration spike in the frames that follow either.
+        assert max_abs_a_after < 1.0
+
+    def test_invalid_self_data_holds_velocity_instead_of_snapping_to_origin(
+        self,
+    ) -> None:
+        """Debug-2026-11-23, problem 2 ("not fixed" note, confirmed by
+        the 2026-11-23 retest sortie): the retest trace showed the
+        aircraft departing controlled flight, being destroyed, and
+        `LoGetSelfData` failing a few frames later -- at that point
+        `a_f` reached -13,000,000 m/s^2, because the position ring
+        still held ~115s of real history and the failed-read fallback
+        (`pos_n/u/e = 0.0`) was fed into it as a genuine sample, a
+        >100m "position jump" to the origin in one `dt`. `raw.pos_
+        valid = false` (now set by `read_estimator_raw` whenever
+        `LoGetSelfData`'s `Position` is not a clean numeric table) must
+        hold velocity at its last value instead."""
+        driver = """
+local est = new_est()
+local v_n = 50.0
+local pos_n = 0.0
+for i = 0, 30 do
+    local t = i * (1.0 / 30.0)
+    pos_n = pos_n + v_n * (1.0 / 30.0)
+    local raw = {
+        pos_n = pos_n, pos_u = 0.0, pos_e = 0.0, pos_valid = true,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+end
+print(string.format("%.4f", est.v.n))
+
+-- `LoGetSelfData` starts failing -- the aircraft is gone. The fallback
+-- position (0.0) must never be treated as a real sample.
+local max_abs_a = 0.0
+for i = 31, 40 do
+    local t = i * (1.0 / 30.0)
+    local raw = {
+        pos_n = 0.0, pos_u = 0.0, pos_e = 0.0, pos_valid = false,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+    if math.abs(est.a.n) > max_abs_a then
+        max_abs_a = math.abs(est.a.n)
+    end
+end
+print(string.format("%.4f", est.v.n))
+print(string.format("%.4f", max_abs_a))
+"""
+        lines = _run(driver)
+        v_before, v_after, max_abs_a_after = (float(x) for x in lines)
+        assert abs(v_before - 50.0) < 1.0
+        # Velocity holds at its last known value through the invalid
+        # reads -- never snaps toward 0 because the position "jumped".
+        assert abs(v_after - v_before) < 1.0
+        assert max_abs_a_after < 10.0
+
+    def test_mission_start_bridges_from_vector_velocity_while_priming(
+        self,
+    ) -> None:
+        """Debug-2026-11-23, problem 2a -- the real LV-0 sortie trace
+        showed a_f 350-700 m/s^2 for ~0.35 s at every mission start: the
+        very first sample primes the position ring at v=0 (no
+        information yet), and the second sample's real velocity used
+        to be fed straight into the acceleration ring as a one-step
+        jump from that artificial 0. The LV-0 card always flies with
+        the trace flag on, which also means `LoGetVectorVelocity` is
+        being read every frame (`raw.vec_n` not nil) -- that direct
+        reading now bridges the position ring's priming gap instead of
+        a fabricated 0, so the acceleration estimate never sees a step
+        discontinuity to begin with."""
+        driver = """
+local est = new_est()
+local v_n = 42.0
+for i = 0, 10 do
+    local t = i * (1.0 / 30.0)
+    local raw = {
+        pos_n = v_n * t, pos_u = 0.0, pos_e = 0.0,
+        vec_n = v_n, vec_u = 0.0, vec_e = 0.0,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+    print(string.format("%.4f", est.a.n))
+end
+"""
+        lines = _run(driver)
+        a_values = [float(x) for x in lines]
+        assert max(abs(a) for a in a_values) < 1.0
+
+    def test_mission_start_without_vector_velocity_still_bounded(
+        self,
+    ) -> None:
+        """Documented residual (debug report, problem 2a "not fully
+        fixed"): with no `LoGetVectorVelocity` reading available at all
+        (trace off, `velocity_source == "position"`), there is no way
+        to know velocity before the position ring has two real samples
+        -- the warm-up transient this test measures is the genuine,
+        bounded cost of that, not a regression. Pinned here so a
+        future change that makes it worse is caught."""
+        driver = """
+local est = new_est()
+local v_n = 42.0
+for i = 0, 10 do
+    local t = i * (1.0 / 30.0)
+    local raw = {
+        pos_n = v_n * t, pos_u = 0.0, pos_e = 0.0,
+        psi_deg = 0.0, phi_deg = 0.0, theta_deg = 0.0,
+        p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0, ball_raw = 0.03,
+    }
+    flight_control.est_sample(est, t, raw, PROFILE)
+    print(string.format("%.4f", est.a.n))
+end
+"""
+        lines = _run(driver)
+        a_values = [float(x) for x in lines]
+        assert max(abs(a) for a in a_values) < 1500.0
+
 
 class TestGroundSpeedAndHeadingFrameRotation:
     def test_northbound_ground_speed_matches_heading(self) -> None:

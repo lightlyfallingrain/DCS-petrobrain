@@ -317,11 +317,16 @@ when.speech("hvrt_step_down",
 -- Category "flight_handover": always PASS, not limited by seat or
 -- flight state -- what each means depends on state, which the action
 -- itself reads (see that category's own docstring in rules/gates.py).
--- Refusals raise unable; "I have controls." is spoken only once Lua
--- confirms the take (the `says` argument, landed-confirmation contract).
--- In the AI overlay, "you have controls" is a silent no-op (the
--- 2026-11-17 answer -- Request Aircraft Control is that handover);
--- "I have controls" there answers "Unable, AI overlay." (U9).
+-- Refusals raise unable; both "I have controls." and "You have
+-- controls." are spoken only once Lua confirms the handover (the
+-- `take`/`release` request's own ack) -- never on `r.acted` alone here
+-- (Debug-2026-11-23, problem 1: `r.acted` is true the instant the
+-- request is *queued*, not once Lua has actually stopped writing
+-- axes; speaking from it directly let the readback land before the
+-- release did). In the AI overlay, "you have controls" is a silent
+-- no-op (the 2026-11-17 answer -- Request Aircraft Control is that
+-- handover); "I have controls" there answers "Unable, AI overlay."
+-- (U9).
 when.speech("you_have_controls",
     "you have controls",
     "flight_handover", function(s)
@@ -330,6 +335,5 @@ end)
 when.speech("i_have_controls",
     "i have controls",
     "flight_handover", function(s)
-  local r = flight.release_controls()
-  if r.acted then say("You have controls.") end
+  flight.release_controls()
 end)

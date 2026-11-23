@@ -3968,6 +3968,7 @@ def _apply_flight_requests(
         crew_console.flight_control_transition = None
         crew_console.flight_control_goal_transition = None
         crew_console.pending_take_says = None
+        crew_console.pending_release_says = None
         # BL-16 Stage 3b (section 3a) -- a mode-1 command's own readback
         # was staged (`handle_command`) but the mode flipped to overlay
         # before this poll's send ran, so the request above it was just
@@ -3997,6 +3998,16 @@ def _apply_flight_requests(
             crew_console.pending_take_says = None
             crew_console.flight_pending_take = PendingTake(
                 seq=seq, says=says, sent_at_sim=now_sim
+            )
+        elif transition == "release":
+            # Debug-2026-11-23, problem 1 -- the exact `take` branch
+            # above, mirrored: "You have controls." waits for this
+            # release's own ack rather than being spoken the instant
+            # `release_controls` queued the request.
+            release_says = crew_console.pending_release_says or "You have controls."
+            crew_console.pending_release_says = None
+            crew_console.flight_pending_release = PendingTake(
+                seq=seq, says=release_says, sent_at_sim=now_sim
             )
 
     goal_request = crew_console.flight_control_goal_transition

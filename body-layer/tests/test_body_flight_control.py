@@ -109,6 +109,36 @@ class TestApplyFlightRequests:
         assert pending.says == "I have controls."
 
     def test_a_release_transition_is_sent_and_cleared(self) -> None:
+        """Debug-2026-11-23, problem 1 -- a release is now queued as
+        its own `PendingTake` (`flight_pending_release`), the exact
+        `take` twin, so `drain_flight_control` waits for Lua's own ack
+        before ever speaking "You have controls." -- it is no longer
+        spoken at dispatch time."""
+        client = _FakeAircraftClient()
+        runner = _FakeRunner()
+        console = _console()
+        console.flight_control_transition = "release"
+        console.pending_release_says = "You have controls."
+
+        _apply_flight_requests(runner, console, client, 1, 7.0)  # type: ignore[arg-type]
+
+        assert console.flight_control_transition is None
+        assert console.pending_release_says is None
+        _epoch, seq, _until, kind, fields = client.flight_calls[0]
+        assert seq == 1
+        assert kind == "release"
+        assert fields == {}
+        # No `PendingTake` is queued on the *take* field for a release.
+        assert console.flight_pending_take is None
+        pending = console.flight_pending_release
+        assert pending is not None
+        assert pending.seq == 1
+        assert pending.says == "You have controls."
+        assert pending.sent_at_sim == 7.0
+
+    def test_a_release_with_no_recorded_says_falls_back_to_the_default_line(
+        self,
+    ) -> None:
         client = _FakeAircraftClient()
         runner = _FakeRunner()
         console = _console()
@@ -116,13 +146,9 @@ class TestApplyFlightRequests:
 
         _apply_flight_requests(runner, console, client, 1, 0.0)  # type: ignore[arg-type]
 
-        assert console.flight_control_transition is None
-        _epoch, seq, _until, kind, fields = client.flight_calls[0]
-        assert seq == 1
-        assert kind == "release"
-        assert fields == {}
-        # No `PendingTake` is queued for a release.
-        assert console.flight_pending_take is None
+        pending = console.flight_pending_release
+        assert pending is not None
+        assert pending.says == "You have controls."
 
     def test_a_goal_request_is_sent_as_a_set_with_its_fields_and_cleared(
         self,

@@ -1428,6 +1428,33 @@ local function est_ring_mean(ring)
     return ring.sum_v / ring.count
 end
 
+-- Debug-2026-11-23 (`plans/flight-lift-vector/debug-2026-11-23.md`,
+-- problem 2b): a ring with fewer than two samples, or two samples
+-- sharing the identical timestamp (`est_ring_slope`'s own
+-- `denom == 0.0` guard -- the live LV-0 sortie trace showed exactly
+-- this: `v` reading precisely 0.000 on all three axes for one sample,
+-- mid-flight, while the raw `LoGetVectorVelocity` channel stayed
+-- smooth), is not "the velocity/acceleration is zero" -- it is "not
+-- known yet". Deliberately **not** a full-window-span check: that was
+-- tried and found to turn problem 2a's gradual least-squares warm-up
+-- (already converging smoothly from sample 2 onward) into a worse,
+-- single-step jump once the span threshold was finally crossed. Only
+-- the genuinely degenerate (duplicate-timestamp) case is withheld
+-- here; the ordinary short-window convergence at a reset/mission
+-- start is left to the least-squares fit itself, which already damps
+-- it (plan, section A: "Total lag about 0.15-0.2s", an accepted
+-- warm-up, not a defect this debugger pass can remove without
+-- reseeding `v` from a getter that returns it directly -- see the
+-- debug report's "not fixed" note on problem 2a).
+local function est_ring_primed(ring)
+    if ring.count < 2 then
+        return false
+    end
+    local n = ring.count
+    local denom = n * ring.sum_t2 - ring.sum_t * ring.sum_t
+    return denom ~= 0.0
+end
+
 local function est_ring_update_slope(ring, t, value, window_s)
     est_ring_push(ring, t, value, window_s)
     return est_ring_slope(ring)
@@ -1574,12 +1601,26 @@ local function read_estimator_raw(t, velocity_source)
     local self_data = safe_call(LoGetSelfData)
     local pos_n, pos_u, pos_e = 0.0, 0.0, 0.0
     local psi_deg = 0.0
+    -- Debug-2026-11-23 (`plans/flight-lift-vector/debug-2026-11-23.md`,
+    -- problem 2, "not fixed" note turned up during the retest): the
+    -- retest trace shows the aircraft departing controlled flight and
+    -- being destroyed around t=115s (`phidot` running away to 536 deg/s,
+    -- then `LoGetVectorVelocity` turning `nil`); a few frames later
+    -- `LoGetSelfData` itself stops returning a valid `Position` too, and
+    -- without this flag the `0.0, 0.0, 0.0` fallback above was fed into
+    -- the position ring as if it were a real sample -- against ~115s of
+    -- real accumulated position, that reads as a multi-million-m/s^2
+    -- "velocity", not the finite-near-zero value a priming gap gives.
+    -- `pos_valid` lets `est_sample` tell "no information this frame"
+    -- apart from "the aircraft is genuinely at the origin".
+    local pos_valid = false
     if type(self_data) == "table" then
         if type(self_data.Position) == "table" then
             local p = self_data.Position
-            if type(p.x) == "number" then pos_n = p.x end
-            if type(p.y) == "number" then pos_u = p.y end
-            if type(p.z) == "number" then pos_e = p.z end
+            if type(p.x) == "number" and type(p.y) == "number" and type(p.z) == "number" then
+                pos_n, pos_u, pos_e = p.x, p.y, p.z
+                pos_valid = true
+            end
         end
         if type(self_data.Heading) == "number" then
             psi_deg = law_wrap360(math.deg(self_data.Heading))
@@ -1601,7 +1642,7 @@ local function read_estimator_raw(t, velocity_source)
     end
 
     local raw = {
-        pos_n = pos_n, pos_u = pos_u, pos_e = pos_e,
+        pos_n = pos_n, pos_u = pos_u, pos_e = pos_e, pos_valid = pos_valid,
         psi_deg = psi_deg, phi_deg = phi_deg, theta_deg = theta_deg,
         p_deg_s = p_deg_s, q_deg_s = q_deg_s, r_deg_s = r_deg_s,
         ball_raw = ball_raw,
@@ -1677,15 +1718,59 @@ local function est_sample(est, t, raw, profile)
         selected_n = est_ring_update_mean(est.rings.vec_n, t, raw.vec_n, profile.w_v_s)
         selected_u = est_ring_update_mean(est.rings.vec_u, t, raw.vec_u, profile.w_v_s)
         selected_e = est_ring_update_mean(est.rings.vec_e, t, raw.vec_e, profile.w_v_s)
-        if FLIGHT_TRACE_ENABLED then
+        if FLIGHT_TRACE_ENABLED and raw.pos_valid ~= false then
             est.v_unselected.n = est_ring_update_slope(est.rings.pos_n, t, raw.pos_n, profile.w_v_s)
             est.v_unselected.u = est_ring_update_slope(est.rings.pos_u, t, raw.pos_u, profile.w_v_s)
             est.v_unselected.e = est_ring_update_slope(est.rings.pos_e, t, raw.pos_e, profile.w_v_s)
         end
+    elseif raw.pos_valid == false then
+        -- Debug-2026-11-23, problem 2 ("not fixed" note, confirmed by
+        -- the retest trace): `LoGetSelfData` failing (aircraft
+        -- destroyed/unloaded) must never push its `0.0, 0.0, 0.0`
+        -- fallback into a ring that already holds ~100s of real
+        -- position history -- that reading as a real sample is what
+        -- produced the retest's multi-million-m/s^2 `a_f` once the
+        -- aircraft was gone. Hold `est.v` and skip the ring entirely
+        -- (same posture as the duplicate-timestamp case below, one
+        -- level earlier: this is "not known this frame", not "the
+        -- position is exactly zero").
+        selected_n, selected_u, selected_e = est.v.n, est.v.u, est.v.e
     else
-        selected_n = est_ring_update_slope(est.rings.pos_n, t, raw.pos_n, profile.w_v_s)
-        selected_u = est_ring_update_slope(est.rings.pos_u, t, raw.pos_u, profile.w_v_s)
-        selected_e = est_ring_update_slope(est.rings.pos_e, t, raw.pos_e, profile.w_v_s)
+        -- Debug-2026-11-23, problem 2: push first, then only accept the
+        -- slope once the ring has actually spanned `w_v_s` -- two
+        -- samples a frame apart (just re-primed, or mission start) or
+        -- two samples sharing one timestamp (`est_ring_slope`'s own
+        -- `denom == 0.0` guard) both give a slope of 0.0 that is not a
+        -- measured "velocity is zero", it is "not known yet". Holding
+        -- `est.v` at its last value instead of overwriting it with that
+        -- 0.0 is what keeps a lone bad/degenerate sample from reading
+        -- as a real velocity discontinuity one `w_a_s` window later.
+        est_ring_push(est.rings.pos_n, t, raw.pos_n, profile.w_v_s)
+        est_ring_push(est.rings.pos_u, t, raw.pos_u, profile.w_v_s)
+        est_ring_push(est.rings.pos_e, t, raw.pos_e, profile.w_v_s)
+        if est_ring_primed(est.rings.pos_n) then
+            selected_n = est_ring_slope(est.rings.pos_n)
+            selected_u = est_ring_slope(est.rings.pos_u)
+            selected_e = est_ring_slope(est.rings.pos_e)
+        elseif raw.vec_n ~= nil then
+            -- Debug-2026-11-23, problem 2a: while the position ring is
+            -- still priming (mission start, or just after a reset),
+            -- holding at the last value is right for a *resumed*
+            -- estimator but wrong for the very first one -- there is
+            -- no last value, so held-at-0 reads as a fabricated
+            -- velocity and the first real sample a step later becomes
+            -- an acceleration spike (the sortie's own 350-700 m/s^2 at
+            -- t=0). `LoGetVectorVelocity` needs no differentiation and
+            -- bridges exactly this gap when it is being read this
+            -- frame (trace on, or `velocity_source == "vector"`) --
+            -- available for every LV-0 card flight, which is run with
+            -- the trace flag on. Still falls through to held-at-last
+            -- when it is not (trace off, default profile): a narrower,
+            -- documented residual rather than a silent one.
+            selected_n, selected_u, selected_e = raw.vec_n, raw.vec_u, raw.vec_e
+        else
+            selected_n, selected_u, selected_e = est.v.n, est.v.u, est.v.e
+        end
         if FLIGHT_TRACE_ENABLED and raw.vec_n ~= nil then
             est.v_unselected.n = est_ring_update_mean(est.rings.vec_n, t, raw.vec_n, profile.w_v_s)
             est.v_unselected.u = est_ring_update_mean(est.rings.vec_u, t, raw.vec_u, profile.w_v_s)
@@ -1706,12 +1791,22 @@ local function est_sample(est, t, raw, profile)
     -- more running mean over `w_a2_s` (plan, section A). `a_u` is the
     -- slope of `v_u` directly -- no gravity, no body frame, so it reads
     -- zero in a level turn exactly as the altimeter says.
-    local a1_n = est_ring_update_slope(est.rings.acc1_n, t, est.v.n, profile.w_a_s)
-    local a1_u = est_ring_update_slope(est.rings.acc1_u, t, est.v.u, profile.w_a_s)
-    local a1_e = est_ring_update_slope(est.rings.acc1_e, t, est.v.e, profile.w_a_s)
-    est.a.n = est_ring_update_mean(est.rings.acc2_n, t, a1_n, profile.w_a2_s)
-    est.a.u = est_ring_update_mean(est.rings.acc2_u, t, a1_u, profile.w_a2_s)
-    est.a.e = est_ring_update_mean(est.rings.acc2_e, t, a1_e, profile.w_a2_s)
+    -- Debug-2026-11-23, problem 2: same "withhold until primed" guard
+    -- as the position-velocity ring above, one stage further down --
+    -- `est.v` is now held-not-fabricated (above), but the acceleration
+    -- ring itself still needs its own span before its slope is trusted
+    -- (e.g. right after `est_reset`, where it starts over empty).
+    est_ring_push(est.rings.acc1_n, t, est.v.n, profile.w_a_s)
+    est_ring_push(est.rings.acc1_u, t, est.v.u, profile.w_a_s)
+    est_ring_push(est.rings.acc1_e, t, est.v.e, profile.w_a_s)
+    if est_ring_primed(est.rings.acc1_n) then
+        local a1_n = est_ring_slope(est.rings.acc1_n)
+        local a1_u = est_ring_slope(est.rings.acc1_u)
+        local a1_e = est_ring_slope(est.rings.acc1_e)
+        est.a.n = est_ring_update_mean(est.rings.acc2_n, t, a1_n, profile.w_a2_s)
+        est.a.u = est_ring_update_mean(est.rings.acc2_u, t, a1_u, profile.w_a2_s)
+        est.a.e = est_ring_update_mean(est.rings.acc2_e, t, a1_e, profile.w_a2_s)
+    end
     est.a.f = est.a.n * cos_psi + est.a.e * sin_psi
     est.a.r = -est.a.n * sin_psi + est.a.e * cos_psi
 
