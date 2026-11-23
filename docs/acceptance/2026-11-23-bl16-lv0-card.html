@@ -1,0 +1,266 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>LV-0 Instruments Card</title>
+<style>
+/* layout: a tall single-column cockpit card, one numbered block per fix in flight order,
+   a highlighted "prize" block for the crash-causing fix, pre-flight gate up top */
+:root{
+  --bg:#0c1210; --bg-panel:#141c19; --fg:#e9efe9; --fg-dim:#9fb0a8;
+  --accent:#e8a33d; --accent-dim:#7a5a23; --record:#4fa3c4; --record-dim:#1c3038;
+  --ok:#5fb87c; --warn:#d9684b; --rule:#263430;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+    --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+    --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+  --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+  --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+  color-scheme: light;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--fg); margin:0;
+  font-family:"Source Sans 3",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+  padding-block:24px;
+}
+h1,h2,.mono{font-family:"Barlow Condensed",system-ui,sans-serif;}
+.mono,code,pre{font-family:"JetBrains Mono",monospace;}
+.wrap{max-width:740px; margin:0 auto; display:flex; flex-direction:column; gap:20px;}
+header{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+header h1{font-size:clamp(1.6rem,5vw,2.2rem); margin:0 0 4px; letter-spacing:.02em; text-transform:uppercase; color:var(--accent);}
+header p{margin:0; color:var(--fg-dim); font-size:.95rem;}
+.branch{
+  display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:6px; padding:10px 14px;
+}
+.branch .tag{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-dim);}
+.branch code{color:var(--accent); font-size:.95rem;}
+.note{
+  background:var(--bg-panel); border-left:3px solid var(--accent-dim); border-radius:0 6px 6px 0;
+  padding:12px 14px; font-size:.9rem; color:var(--fg-dim); line-height:1.5;
+}
+.note a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+.note code{color:var(--fg);}
+.gate{
+  background:var(--bg-panel); border:1px solid var(--warn); border-radius:10px; padding:16px 18px;
+}
+.gate h2{margin:0 0 8px; font-size:1.1rem; color:var(--warn);}
+.card{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:18px 18px 16px;
+}
+.card.prize{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-dim) inset;}
+.card h2{
+  margin:0 0 10px; font-size:1.3rem; letter-spacing:.01em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+}
+.card h2 .n{color:var(--accent); font-variant-numeric:tabular-nums;}
+.prizetag{
+  font-size:.65rem; letter-spacing:.09em; text-transform:uppercase; color:var(--bg);
+  background:var(--accent); border-radius:4px; padding:2px 7px; font-family:"Source Sans 3",sans-serif;
+}
+.block{display:flex; flex-direction:column; gap:10px;}
+.label{font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:2px;}
+pre.cmd{
+  background:var(--bg); border:1px solid var(--rule); border-radius:6px; padding:10px 12px;
+  overflow-x:auto; font-size:.85rem; color:var(--fg); margin:0; line-height:1.5;
+}
+.expect{font-size:.95rem; line-height:1.55;}
+.record-box{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:6px; padding:10px 12px;
+  font-size:.9rem; line-height:1.5;
+}
+.record-box .label{color:var(--record); opacity:.9;}
+.chk{display:flex; align-items:flex-start; gap:10px; margin-top:4px;}
+.chk input[type=checkbox]{
+  width:20px; height:20px; margin-top:2px; accent-color:var(--accent); flex-shrink:0;
+}
+.chk label{font-size:.95rem; line-height:1.4;}
+.open-q{
+  border-left:3px solid var(--record); padding:2px 0 2px 10px; font-size:.88rem; color:var(--record);
+}
+.bringback{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:16px 18px;
+}
+.bringback h2{margin:0 0 10px; font-size:1.1rem;}
+.bringback ul{margin:0; padding-left:20px; font-size:.92rem; line-height:1.6;}
+.bringback .surprise{margin-top:10px; font-style:italic; color:var(--record);}
+.seealso{font-size:.85rem; color:var(--fg-dim); line-height:1.6;}
+.seealso a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px;}
+</style>
+<div class="wrap">
+  <header>
+    <h1>LV-0 Instruments</h1>
+    <p>BL-16 lift-vector law, stage LV-0 &mdash; new measurements only, no behaviour change &mdash; 2026-11-23</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <code>feature/bl16-lift-vector-law</code>
+    <span class="tag">in the repo root &mdash; <code>git checkout feature/bl16-lift-vector-law</code>, then your usual redeploy. Back with <code>git checkout main</code>.</span>
+  </div>
+
+  <div class="note">
+    <strong>Mode 1 flies exactly as before.</strong> This stage adds instruments only: velocity,
+    acceleration, attitude rates and the smoothed slip ball, at 30&nbsp;Hz on mission time, in every
+    mode. Nothing steers on them yet. So this card is about <strong>reading numbers against the real
+    aircraft</strong>, not about how Petrovich flies. Your redeploy script already picks up the new
+    <code>flight_profile.lua</code>.<br><br>
+    <strong>Not testable here:</strong> any new flying behaviour (that starts in LV-1). Ignore the
+    <code>lambda</code> column &mdash; nothing reads it yet.
+  </div>
+
+  <div class="gate">
+    <h2>Pre-flight &mdash; before the mission loads</h2>
+    <div class="block">
+      <div class="label">Trace flag (read once at load, so it must exist before mission start)</div>
+      <pre class="cmd">Saved Games\DCS\Scripts\aircraft_layer_flight_debug.flag   (empty file)</pre>
+      <div class="expect">After landing, the per-step log is in
+        <code>Saved Games\DCS\Logs\aircraft_layer_flight_trace.log</code>. Delete the flag afterwards.</div>
+      <div class="label">SAU</div>
+      <div class="expect">H, K and T <strong>off</strong> before every take.</div>
+      <div class="label">Status-line watch (Mac, repo root) &mdash; needs DCS running, not run here</div>
+      <pre class="cmd">source run-scripts/petrobrain.env
+while true; do curl -s http://$DCS_COLLECTOR_IP:7791/flight_control/latest | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; print(*(d.get(k) for k in ('t','fc_mode','fc_est_a_f','fc_est_a_r','fc_est_a_u','fc_est_v_g','fc_est_v_g_f','fc_est_phi_dot','fc_est_theta_dot','fc_est_psi_dot','fc_est_ball')))"; sleep 0.5; done</pre>
+      <div class="expect">Columns: time, mode, <code>a_f a_r a_u</code> (m/s&sup2;, heading frame &mdash;
+        forward, right, up), <code>v_g v_g_f</code> (ground speed, and along the nose, m/s),
+        <code>phi_dot theta_dot psi_dot</code> (bank / pitch / heading rate, &deg;/s), ball.
+        Numbers appear in every mode, even before any take.</div>
+      <div class="chk"><input type="checkbox" data-k="pre" id="c0"><label for="c0">Flag in place, SAU off, numbers flowing</label></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">a</span> Voice take retest (stage 3 alone)</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Set a desired state, then &ldquo;you have controls.&rdquo; Later, an unpark from mode 2 to mode 1.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Not fixed by this stage. The point is to know, before LV-1 changes the law,
+        whether the 2026-11-20 erratic take still happens &mdash; so LV-1 has one cause to chase, not two.</div>
+      <div class="chk"><input type="checkbox" data-k="a" id="ca"><label for="ca">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Did the erratic take come back &mdash; same shape, different, or gone? Where did the unpark land: mode 1 or off?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">b</span> Level legs: 60&nbsp;s north, 60&nbsp;s east</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Steady height, steady heading, no turns. One leg on 000&deg;, one on 090&deg;.</div>
+      <div class="label">Expect</div>
+      <div class="expect"><code>v_g_f</code> &asymp; <code>v_g</code> (nearly all of the ground speed is along the nose).
+        <code>a_f</code>, <code>a_r</code>, <code>a_u</code> hover near 0. <code>psi_dot</code> &asymp; 0.</div>
+      <div class="chk"><input type="checkbox" data-k="b" id="cb"><label for="cb">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>On either leg, did anything read rotated or backwards &mdash; e.g. <code>v_g_f</code> near zero or negative while flying straight ahead?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">c</span> Steady turns: 30&deg; and 60&deg;, both ways</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Hold each coordinated, level turn at least 10&nbsp;s. Left and right.</div>
+      <div class="label">Expect</div>
+      <div class="expect"><code>psi_dot</code> &asymp; turn rate: at 150&nbsp;km/h about <strong>8&nbsp;&deg;/s at 30&deg;</strong>,
+        <strong>23&nbsp;&deg;/s at 60&deg;</strong> (200&nbsp;km/h: 6 and 17). Sign follows turn direction.
+        <code>theta_dot</code> stays near 0 (pitch attitude not changing, even at 60&deg; bank).
+        <code>a_u</code> stays near 0 &mdash; this is not a G-meter, which would read ~2&nbsp;g at 60&deg;.
+        <code>a_r</code> carries the turn: roughly 5.7&nbsp;m/s&sup2; at 30&deg;, 17&nbsp;m/s&sup2; at 60&deg;.</div>
+      <div class="chk"><input type="checkbox" data-k="c" id="cc"><label for="cc">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Rough <code>psi_dot</code> and <code>a_r</code> at each bank, which sign for left vs right, and whether <code>theta_dot</code> and <code>a_u</code> stayed near zero.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">d</span> Speed up, slow down</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">From level flight, nose down to accelerate, then nose up to decelerate.</div>
+      <div class="label">Expect</div>
+      <div class="expect"><code>a_f</code> positive while speeding up, negative while slowing.</div>
+      <div class="chk"><input type="checkbox" data-k="d" id="cd"><label for="cd">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Sign of <code>a_f</code> each way, and roughly how big.</div>
+    </div>
+  </div>
+
+  <div class="card prize">
+    <h2><span class="n">e</span> DCS velocity vs position change <span class="prizetag">The prize</span></h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Trace on. Reuse leg (b), then add a <strong>sideslip</strong> leg: steady level
+        flight, step of pedal, hold heading and height with bank &mdash; sideways motion, no turn.</div>
+      <div class="label">Expect</div>
+      <div class="expect">In the trace log, <code>vec_n vec_u vec_e</code> (DCS&rsquo;s own velocity) matches
+        <code>v_n v_u v_e</code> (from position change) on all three axes, same sign, including in the sideslip.
+        This one row decides which velocity LV-1 steers on. I&rsquo;ll read the log myself &mdash; just bring it back.</div>
+      <div class="chk"><input type="checkbox" data-k="e" id="ce"><label for="ce">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Trace log file. Rough time in the mission of the sideslip leg.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">f</span> 10&nbsp;s hands-off straight and level</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Trace on, no inputs, 10&nbsp;s.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Vibration noise on <code>a_f a_r a_u</code> well under 0.5&nbsp;m/s&sup2; peak to peak.</div>
+      <div class="chk"><input type="checkbox" data-k="f" id="cf"><label for="cf">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Rough time in the mission of the 10&nbsp;s; I&rsquo;ll measure the spread from the log.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">g</span> Smoothness, all flight</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Nothing extra &mdash; notice it throughout.</div>
+      <div class="label">Expect</div>
+      <div class="expect">DCS feels as smooth as before, including before any take.</div>
+      <div class="chk"><input type="checkbox" data-k="g" id="cg"><label for="cg">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Any stutter or frame-time spike you didn&rsquo;t have before? &ldquo;Felt the same&rdquo; is a real answer.</div>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ul>
+      <li><code>aircraft_layer_flight_trace.log</code>, plus rough mission times of (e) sideslip and (f).</li>
+      <li>a: erratic take back or gone; where the unpark landed.</li>
+      <li>b: anything rotated or backwards on the north/east legs.</li>
+      <li>c: <code>psi_dot</code>, <code>a_r</code> per bank; did <code>theta_dot</code>, <code>a_u</code> stay near 0.</li>
+      <li>d: <code>a_f</code> sign each way.</li>
+      <li>g: any stutter.</li>
+    </ul>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-11-23-bl16-lv0-card.md</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='bl16-lv0-card';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
