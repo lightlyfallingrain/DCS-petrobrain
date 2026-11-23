@@ -229,3 +229,12 @@ Retest, both logs on (`aircraft_layer_debug.log`, `aircraft_layer_flight_trace.l
 
 > Mode 2 -> Mode 1 erratic transition
 > off -> Mode 1: "unable not ready", so no data
+
+## Clarification on the handback rule (user, 2026-11-23, verbatim)
+
+> Stick handback: exception, as specified earlier - AI overlay activation is still considered a
+> handocer to Mode 2.
+
+So after "you have controls", the player switching the AI overlay on is itself a handover to
+Petrovich in mode 2 (the existing park rule). Mode 2 flies through ED's AI wheel and writes no raw
+axes, so "never write the axis values" still holds; only a fresh take puts mode 1 back on the axes.
