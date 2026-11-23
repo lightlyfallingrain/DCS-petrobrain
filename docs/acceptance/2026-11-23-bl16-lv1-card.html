@@ -1,0 +1,300 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>LV-1 Forward Flight Card</title>
+<style>
+/* layout: a tall single-column cockpit card, one numbered block per fix in flight order,
+   a highlighted "prize" block for the crash-causing fix, pre-flight gate up top */
+:root{
+  --bg:#0c1210; --bg-panel:#141c19; --fg:#e9efe9; --fg-dim:#9fb0a8;
+  --accent:#e8a33d; --accent-dim:#7a5a23; --record:#4fa3c4; --record-dim:#1c3038;
+  --ok:#5fb87c; --warn:#d9684b; --rule:#263430;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+    --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+    --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+  --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+  --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+  color-scheme: light;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--fg); margin:0;
+  font-family:"Source Sans 3",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+  padding-block:24px;
+}
+h1,h2,.mono{font-family:"Barlow Condensed",system-ui,sans-serif;}
+.mono,code,pre{font-family:"JetBrains Mono",monospace;}
+.wrap{max-width:740px; margin:0 auto; display:flex; flex-direction:column; gap:20px;}
+header{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+header h1{font-size:clamp(1.6rem,5vw,2.2rem); margin:0 0 4px; letter-spacing:.02em; text-transform:uppercase; color:var(--accent);}
+header p{margin:0; color:var(--fg-dim); font-size:.95rem;}
+.branch{
+  display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:6px; padding:10px 14px;
+}
+.branch .tag{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-dim);}
+.branch code{color:var(--accent); font-size:.95rem;}
+.note{
+  background:var(--bg-panel); border-left:3px solid var(--accent-dim); border-radius:0 6px 6px 0;
+  padding:12px 14px; font-size:.9rem; color:var(--fg-dim); line-height:1.5;
+}
+.note a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+.note code{color:var(--fg);}
+.gate{
+  background:var(--bg-panel); border:1px solid var(--warn); border-radius:10px; padding:16px 18px;
+}
+.gate h2{margin:0 0 8px; font-size:1.1rem; color:var(--warn);}
+.card{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:18px 18px 16px;
+}
+.card.prize{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-dim) inset;}
+.card h2{
+  margin:0 0 10px; font-size:1.3rem; letter-spacing:.01em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+}
+.card h2 .n{color:var(--accent); font-variant-numeric:tabular-nums;}
+.prizetag{
+  font-size:.65rem; letter-spacing:.09em; text-transform:uppercase; color:var(--bg);
+  background:var(--accent); border-radius:4px; padding:2px 7px; font-family:"Source Sans 3",sans-serif;
+}
+.block{display:flex; flex-direction:column; gap:10px;}
+.label{font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:2px;}
+pre.cmd{
+  background:var(--bg); border:1px solid var(--rule); border-radius:6px; padding:10px 12px;
+  overflow-x:auto; font-size:.85rem; color:var(--fg); margin:0; line-height:1.5;
+}
+.expect{font-size:.95rem; line-height:1.55;}
+.record-box{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:6px; padding:10px 12px;
+  font-size:.9rem; line-height:1.5;
+}
+.record-box .label{color:var(--record); opacity:.9;}
+.chk{display:flex; align-items:flex-start; gap:10px; margin-top:4px;}
+.chk input[type=checkbox]{
+  width:20px; height:20px; margin-top:2px; accent-color:var(--accent); flex-shrink:0;
+}
+.chk label{font-size:.95rem; line-height:1.4;}
+.open-q{
+  border-left:3px solid var(--record); padding:2px 0 2px 10px; font-size:.88rem; color:var(--record);
+}
+.bringback{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:16px 18px;
+}
+.bringback h2{margin:0 0 10px; font-size:1.1rem;}
+.bringback ul{margin:0; padding-left:20px; font-size:.92rem; line-height:1.6;}
+.bringback .surprise{margin-top:10px; font-style:italic; color:var(--record);}
+.seealso{font-size:.85rem; color:var(--fg-dim); line-height:1.6;}
+.seealso a{color:var(--record); text-decoration:none; border-bottom:1px dotted var(--record);}
+footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px;}
+</style>
+<div class="wrap">
+  <header>
+    <h1>LV-1 Forward Flight</h1>
+    <p>BL-16 lift-vector law, stage LV-1 &mdash; first flight on the new mode 1 law, plus the 2026-11-23 handback fixes &mdash; 2026-11-24</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <code>feature/bl16-lift-vector-law</code>
+    <span class="tag">on <strong>both</strong> machines &mdash; <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, then your usual redeploy and restart of collector and body-layer. Back with <code>git checkout main</code>.</span>
+  </div>
+
+  <div class="note">
+    <strong>New in mode 1:</strong> he steers the flight path (DCS velocity), pedals always fly the ball,
+    slowing is cyclic back <em>and</em> less collective, every slow trim is capped, the take starts
+    from where your stick is. <strong>No minimum speed, no &ldquo;too slow&rdquo;</strong> &mdash; your
+    &ldquo;any speed, what does not work I will bring back&rdquo;. RPM, blade-stall and VRS guards stay.<br><br>
+    <strong>Not on this card:</strong> breaks (LV-2), hover and low-speed regime (LV-3), &ldquo;stand by&rdquo;
+    readbacks (BL-B134), the 5&nbsp;s overlay-release window. A command during the second after a
+    mission restart still gets &ldquo;unable, not ready&rdquo; &mdash; expected for now.
+  </div>
+
+  <div class="gate">
+    <h2>Pre-flight</h2>
+    <div class="block">
+      <div class="label">Both flags in <code>Saved Games\DCS\Scripts\</code>, before the mission loads</div>
+      <pre class="cmd">aircraft_layer_debug.flag
+aircraft_layer_flight_debug.flag</pre>
+      <div class="label">SAU</div>
+      <div class="expect">H, K and T <strong>off before every take</strong>.</div>
+      <div class="label">Status watch (Mac, repo root) &mdash; needs DCS running</div>
+      <pre class="cmd">source run-scripts/petrobrain.env
+while true; do curl -s http://$DCS_COLLECTOR_IP:7791/flight_control/latest | python3 -c "import sys,json; d=json.load(sys.stdin) or {}; print(*(d.get(k) for k in ('t','fc_mode','fc_measured_heading','fc_measured_altitude','fc_measured_speed','fc_slip_ball_pilot_raw','fc_est_a_f','fc_est_a_r','fc_est_a_u')))"; sleep 0.5; done</pre>
+      <div class="expect">Columns: time, mode, heading, altitude, speed, ball (centred &asymp; +0.03, right positive), a_f a_r a_u.</div>
+      <div class="chk"><input type="checkbox" data-k="pre" id="c0"><label for="c0">Flags in, SAU off, numbers flowing</label></div>
+    </div>
+  </div>
+
+  <div class="gate">
+    <h2>If anything diverges</h2>
+    <div class="expect">A bank that keeps growing, or an oscillation getting bigger: <strong>&ldquo;I have controls&rdquo; and take the stick at once.</strong>
+      Note the mission time. That shape crashed the last retest within 0.2&nbsp;s; LV-1 is built and tested against it, this card is the live check.</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">R1</span> Take after a mission restart</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">With body-layer already running, restart the mission. Wait ~5&nbsp;s, then &ldquo;you have controls&rdquo;.</div>
+      <div class="label">Expect</div>
+      <div class="expect">He takes it. No &ldquo;unable, not ready&rdquo; (unless you speak in the first second after load). No body-layer restart needed.</div>
+      <div class="chk"><input type="checkbox" data-k="r1" id="cr1"><label for="cr1">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Taken or refused? What did he say?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span> Take into a held heading</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Steady level flight, &ldquo;you have controls&rdquo;, no command.</div>
+      <div class="label">Expect</div>
+      <div class="expect">No jump on the take. Wings level within a few degrees in a couple of seconds, no pedal kick, ball near +0.03, heading steady.</div>
+      <div class="chk"><input type="checkbox" data-k="b1" id="c1"><label for="c1">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Any jump? How long to settle? Ball and heading after.</div>
+    </div>
+  </div>
+
+  <div class="card prize">
+    <h2><span class="n">8&ndash;9</span> Take from a bank, and mid-turn <span class="prizetag">The prize</span></h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">(8) Hand-fly a steady 30&deg; bank, &ldquo;you have controls&rdquo;. (9) Hold a turn for several seconds first, then take mid-turn.
+        Repeat one from mode 2 &rarr; mode 1 (unpark while he flies the overlay).</div>
+      <div class="label">Expect</div>
+      <div class="expect">No jump at the take. Bank comes back toward level and settles. Never a runaway or a growing oscillation.</div>
+      <div class="chk"><input type="checkbox" data-k="b8" id="c8"><label for="c8">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Each take: jump or not, settled or not, and if it diverged &mdash; what it looked like, how fast, mission time.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span> Turns: 30&deg; and 90&deg;, both ways, 120 and 220&nbsp;km/h</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">&ldquo;turn left/right 30&rdquo;, &ldquo;turn left/right 90&rdquo; at each speed (8 turns).</div>
+      <div class="label">Expect</div>
+      <div class="expect">Ball centred through roll-in, turn and roll-out; pedal goes <em>with</em> the turn. Collective comes in <em>with</em> the bank, same second. No sag on roll-in, no balloon on roll-out. Settles on the heading without hunting.</div>
+      <div class="chk"><input type="checkbox" data-k="b2" id="c2"><label for="c2">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Per turn: ball, pedal timing, collective timing, height change, overshoot.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">3</span> Speed 150 &rarr; 220 &rarr; 150</h2>
+    <div class="block">
+      <div class="label">Expect</div>
+      <div class="expect">Speeding up: nose down and collective up together. Slowing: nose up and collective <strong>down</strong> together &mdash; no balloon.</div>
+      <div class="chk"><input type="checkbox" data-k="b3" id="c3"><label for="c3">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Did collective ease off as the nose came up? Any height change?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">4</span> Climb 100&nbsp;m, descend 100&nbsp;m</h2>
+    <div class="block">
+      <div class="label">Expect</div>
+      <div class="expect">Speed stays near the set speed through both.</div>
+      <div class="chk"><input type="checkbox" data-k="b4" id="c4"><label for="c4">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>How far did speed swing?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">5</span> Heading hold in a crosswind</h2>
+    <div class="block">
+      <div class="label">Expect</div>
+      <div class="expect">Nose stays on the heading (HSI); the aircraft drifts with the wind &mdash; not corrected to a ground track.</div>
+      <div class="chk"><input type="checkbox" data-k="b5" id="c5"><label for="c5">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Nose on heading? Any weaving?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">7</span> Take at about 70&nbsp;km/h</h2>
+    <div class="block">
+      <div class="label">Expect</div>
+      <div class="expect">Accepted, no &ldquo;too slow&rdquo;. Gentle acceleration to the set speed, no lurch.</div>
+      <div class="chk"><input type="checkbox" data-k="b7" id="c7"><label for="c7">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Accepted? How did the acceleration feel?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">R2</span> Handback with a seat change</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">While he flies mode 1: &ldquo;I have controls&rdquo; and move to the pilot seat before he answers.</div>
+      <div class="label">Expect</div>
+      <div class="expect">&ldquo;You have controls&rdquo; only once he has let go &mdash; and then the stick is yours, nothing moving it. If he could not let go, he must not say it.</div>
+      <div class="chk"><input type="checkbox" data-k="r2" id="cr2"><label for="cr2">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>What he said, and whether anything still moved the stick after it. Mission time.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">10</span> Slow flight &mdash; expected to find the edge</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">At least 300&nbsp;m AGL, wings level: &ldquo;speed 40&rdquo;. Only if that settles cleanly: &ldquo;speed 20&rdquo;.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Not designed for this yet (no ground-speed reference, no pedal yaw loop until LV-3). <strong>Take the stick the moment</strong> it drifts off heading, sags, or hunts.</div>
+      <div class="chk"><input type="checkbox" data-k="b10" id="c10"><label for="c10">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>How far it got, what went wrong first, at what speed.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">6</span> Optional: lift feed-forward off</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">In <code>aircraft-layer/dcs-export/Petrobrain/flight_profile.lua</code> set <code>k_lift_ff = 0.0</code>, redeploy, fly one turn from row 2. Set it back to <code>0.05</code> and redeploy.</div>
+      <div class="label">Expect</div>
+      <div class="expect">A brief sag at roll-in the normal turn did not have.</div>
+      <div class="chk"><input type="checkbox" data-k="b6" id="c6"><label for="c6">Done</label></div>
+      <div class="record-box"><div class="label">Record</div>Sag or not, compared with the same turn in row 2.</div>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Both logs from <code>Saved Games\DCS\Logs\</code> (debug and flight trace), plus body-layer console if handy.</li>
+      <li>Mission times of each take, and of anything that went wrong.</li>
+      <li>R1: taken after restart? R2: what he said, did the stick stay yours?</li>
+      <li>8&ndash;9: jump, settle or divergence, per take.</li>
+      <li>2&ndash;3: ball, pedal and collective timing; sag or balloon.</li>
+      <li>10: how far slow flight got.</li>
+    </ul>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-11-23-bl16-lv1-card.md</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='bl16-lv1-card';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
