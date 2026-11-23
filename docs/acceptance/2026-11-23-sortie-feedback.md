@@ -219,3 +219,13 @@ AI overlay release:
 
 > * 5 s staring value that I can tune, yes.
 > * after the timeout, overlay off continues Mode 1
+
+## Retest with debug log (user, 2026-11-23, verbatim)
+
+On 373–390 s in the first trace: *"not sure what they were. I did pause the game a few times,
+restarted the mision a few times. Could be those."*
+
+Retest, both logs on (`aircraft_layer_debug.log`, `aircraft_layer_flight_trace.log`):
+
+> Mode 2 -> Mode 1 erratic transition
+> off -> Mode 1: "unable not ready", so no data
