@@ -87,14 +87,16 @@ local LIMITS = {
 }
 """
 
-#: BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/plan.md`)
-#: -- the five `law_*` pure functions now take `profile` as an explicit
-#: trailing parameter (`flight_profile.lua`'s `PROFILES["Mi-24P"]`
-#: table). Values below are copied verbatim from that profile table, not
-#: re-derived -- this is what "bit-identical before and after the move"
-#: means operationally: every toy-plant scenario below exercises the law
-#: exactly as before, only reading these numbers through `profile.*`
-#: instead of a module-level `local`.
+#: BL-16 lift-vector law, Stage LV-1 (`plans/flight-lift-vector/
+#: plan.md`) -- the five `law_*` pure functions take `profile` as an
+#: explicit trailing parameter (`flight_profile.lua`'s `PROFILES
+#: ["Mi-24P"]` table). Values below are copied from that profile table.
+#: Removed from LV-0's own copy of this table (dead fields, per the
+#: plan's own "Removed and kept"): `k_bank_increment`, `k_tilt_from_ax`,
+#: `k_tilt_from_az_saturated`, `tau_accel_filter_s`, `k_break_pedal_
+#: bias`. New for LV-1: the gain schedule, the trim loops (D), the
+#: ordinary priority chain (G), the lift-length feed-forward (E) and
+#: the ball-centring pedal loop (F).
 _PROFILE = """
 local PROFILE = {
     law_zeta = 1.0,
@@ -109,19 +111,32 @@ local PROFILE = {
     k_vs_error = 0.3,
     k_alt_error = 0.05,
     k_speed_error = 0.2,
+    schedule_gain_min = 0.3,
+    schedule_full_speed_kmh = 150.0,
+    c_theta = 0.5,
+    k_phi_trim = 0.02,
+    k_theta_trim = 0.02,
+    trim_hold_attitude_err_deg = 10.0,
+    phi_i_bound_deg = 8.0,
+    k_theta_speed_give = 0.5,
+    speed_give_capacity = 0.05,
+    k_phi_give = 4.0,
+    phi_ff_min_scale = 0.3,
+    k_collective_speed_give = 0.1,
+    k_lift_ff = 0.05,
     k_collective = 0.08,
-    k_tilt_from_ax = 0.04,
-    k_tilt_from_az_saturated = 0.03,
     theta_min_deg = -15.0,
     theta_max_deg = 15.0,
-    k_bank_increment = 0.5,
     k_theta = 0.03,
     k_theta_i = 0.015,
     k_q = 0.01,
     k_phi = 0.03,
     k_phi_i = 0.015,
     k_p = 0.01,
+    k_ball_pedal = 0.3,
     k_pedal_from_collective_rate = 0.25,
+    rotor_dir = 1.0,
+    k_turn_coord_pedal = 0.02,
     pedal_limit_positive = 0.5,
     pedal_limit_negative = -1.0,
     pedal_near_limit_margin = 0.1,
@@ -130,9 +145,6 @@ local PROFILE = {
     collective_rate_cap_near_rpm_floor = 0.0,
     retreating_blade_stall_margin_kmh = 20.0,
     collective_rate_cap_near_blade_stall = 0.0,
-    k_break_pedal_bias = 0.2,
-    k_turn_coord_pedal = 0.02,
-    tau_accel_filter_s = 0.3,
     turn_settle_deg_s = 0.3,
     law_hz = 30.0,
     velocity_source = "position",
@@ -351,6 +363,14 @@ for i = 1, 2000 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
     measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
@@ -391,6 +411,14 @@ for i = 1, 2000 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
     measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
@@ -425,6 +453,14 @@ for i = 1, {steps} do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
     measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
@@ -486,6 +522,14 @@ for i = 1, {steps} do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     if math.abs(measured.bank_deg) > max_bank then max_bank = math.abs(measured.bank_deg) end
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -690,6 +734,14 @@ for i = 1, 3000 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
     measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
@@ -853,12 +905,23 @@ local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, rol
 local dt = 0.05
 local plant_w_gain = 15.0  -- m/s^2 per unit collective deflection
 local max_h_ref = state.h_ref
+local prev_w = measured.w_mps
 for i = 1, 4000 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     local w_dot = plant_w_gain * (outputs.collective - trim_collective)
     measured.w_mps = measured.w_mps + w_dot * dt
     measured.h_m = measured.h_m + measured.w_mps * dt
+    -- BL-16 lift-vector law, LV-1 -- the real vertical acceleration,
+    -- so `e_u = a_u,d - a_u` (section E) has genuine measured-rate
+    -- damping to work against, the same role `a_z_f`'s own low-pass
+    -- filter played in the pre-LV-1 law. Without it `a_u` stays the
+    -- `law_update` fallback (0.0) forever and this double-integrator
+    -- plant (collective -> accel -> velocity -> position) has nothing
+    -- to damp the collective-rate integrator against -- confirmed:
+    -- w_mps swung to +-30 m/s before this was added.
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    prev_w = measured.w_mps
     if state.h_ref > max_h_ref then max_h_ref = state.h_ref end
 end
 print(string.format("%.6f", state.alt_goal_m))
@@ -920,6 +983,14 @@ for i = 1, 3000 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    -- BL-16 lift-vector law, LV-1 -- the real lateral (centripetal)
+    -- acceleration a coordinated turn at this bank actually produces,
+    -- so the trim loop's own measured-acceleration feedback (section D,
+    -- `e_r = a_r,d - a_r`) has something real to converge against;
+    -- without it `a_r` stays the `law_update` fallback (0.0) forever,
+    -- which never opposes `phi_i`'s own integration and leaves it
+    -- pinned wherever the turn left it.
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
     measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
@@ -997,46 +1068,6 @@ print(string.format("%.6f", state.t_y))
         assert abs(t_y_after_20s) > 0.01
 
 
-class TestBreakPedalBiasUnwinds:
-    """BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`,
-    defect A, hypothesis 2): `K_BREAK_PEDAL_BIAS` was integrated into
-    `t_y` for the duration of a break and never reversed -- a standing
-    pedal offset left over from a break the user flew earlier would
-    persist into whatever came after it, including a later take."""
-
-    def test_pedal_returns_to_its_pre_break_value_once_the_break_settles(
-        self,
-    ) -> None:
-        """An idealised plant where the measured heading instantly
-        tracks the law's own internal reference (`state.psi_ref`) --
-        isolating the pedal-bias unwind from heading-tracking physics,
-        which the other scenarios in this file already cover
-        separately (`TestHeadingChannel`)."""
-        driver = f"""
-local measured_take = {_measured(collective_enabled=False)}
-local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
-local t_y_before_break = state.t_y
-state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = 15.0 }}, LIMITS, PROFILE)
-for i = 1, 400 do
-    local m = {_measured(psi_deg=0.0, collective_enabled=False)}
-    -- psi_deg is overwritten below, per-frame, to the law's own
-    -- current psi_ref (the idealised plant).
-    state = flight_control.law_update(state, 0.1, {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
-           v_t_mps = 42.0, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
-           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}, LIMITS, PROFILE)
-end
-print(string.format("%.6f", t_y_before_break))
-print(string.format("%.6f", state.t_y))
-print(tostring(state.rate_override_deg_s))
-"""
-        lines = _run(driver)
-        t_y_before_break, t_y_after_settle = (float(v) for v in lines[:2])
-        override_after = lines[2]
-        assert override_after == "nil"  # the break actually settled
-        assert abs(t_y_after_settle - t_y_before_break) < 1e-6
-
-
 class TestCollectiveHoldsAltitudeInABankedTurn:
     """Sortie 2026-11-20 (`docs/acceptance/2026-11-20-sortie-feedback.md`,
     "Mode 1 flight, `main` @ `a8b21de0`"), user: "Use pedals. All the
@@ -1057,6 +1088,14 @@ local measured_take = {_measured()}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.2 }}
 local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 local measured = {_measured(bank_deg=40.0)}
+-- This scenario fixes the measured bank externally (40 deg, never
+-- itself driven by the law -- the point is the altitude/collective
+-- split, not bank tracking) rather than via a turn command. Section H's
+-- own anti-windup would otherwise read that as "the inner loop is not
+-- following its own target" (the law never asked for 40 deg of bank)
+-- and hold every trim integrator -- seeding `phi_d` to match is what a
+-- real break/turn command would have produced on its own.
+state.phi_d = 40.0
 local dt = 0.1
 local max_theta = 0.0
 -- Lift lost to the bank's own tilt (`1 - cos(bank)`), a standing drain
@@ -1065,6 +1104,12 @@ local max_theta = 0.0
 local lift_loss = 1.0 - math.cos(math.rad(40.0))
 for i = 1, 600 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    -- `law_update` recomputes `phi_d` fresh every frame from `phi_ff`/
+    -- `phi_i` (both ~0 here, no turn commanded) -- re-pin it after every
+    -- call, not just once at take, or section H's "not following" gate
+    -- would see a standing 40 deg mismatch from frame 2 onward and
+    -- freeze every trim integrator this scenario means to exercise.
+    state.phi_d = 40.0
     local target_w
     if {"true" if collective_effective else "false"} then
         -- Collective actually reaches the plant: vertical speed chases
@@ -1204,34 +1249,139 @@ class TestTurnCoordinationPedal:
         assert in_band == "true"
         assert float(pedal_after) == 0.0
 
-    def test_suppressed_during_a_break_which_keeps_its_own_bias_unchanged(
+    def test_not_suppressed_during_a_break_u5_reverted(
         self,
     ) -> None:
-        """A break's own `K_BREAK_PEDAL_BIAS` reaches `PEDAL_LIMIT_
-        POSITIVE` (0.5) within ~2.5 s regardless of this batch
-        (`TestBreakPedalBiasUnwinds`'s own fixture) -- this just checks
-        the turn-coordination overlay stays exactly zero throughout a
-        break, so the two terms never stack."""
+        """U5 reverted (plan, section F): "revert my idea about extra
+        pedal. Just fly the slip ball." There is no `K_BREAK_PEDAL_BIAS`
+        any more to avoid stacking with -- the turn-entry nudge now
+        applies the same way whether a break's rate override is active
+        or not, since the only thing left to fly the pedal is the ball
+        (which defaults to centred here) plus this one nudge."""
         driver = f"""
 local measured_take = {_measured(collective_enabled=False)}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
 local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = 40.0 }}, LIMITS, PROFILE)
-local max_t_y = 0.0
-for i = 1, 100 do
-    local m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 150.0 / 3.6,
-           v_t_mps = 150.0 / 3.6, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
-           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
-    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
-    if state.t_y > max_t_y then max_t_y = state.t_y end
-end
-print(string.format("%.6f", max_t_y))
+local m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 150.0 / 3.6,
+       v_t_mps = 150.0 / 3.6, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
+       q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
+state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
 print(string.format("%.6f", state.turn_coord_pedal))
+print(tostring(state.rate_override_deg_s))
 """
         lines = _run(driver)
-        max_t_y, turn_coord_pedal = (float(v) for v in lines)
-        assert abs(max_t_y - 0.5) < 1e-6  # the break bias alone, unchanged
-        assert turn_coord_pedal == 0.0
+        turn_coord_pedal, rate_override = lines
+        # The break is active (`rate_override_deg_s` is set) and the
+        # nudge is nonzero anyway -- no suppression condition exists in
+        # LV-1 any more.
+        assert rate_override != "nil"
+        assert float(turn_coord_pedal) > 0.0
+
+
+class TestAntiWindupPreventsTheRetestDivergence:
+    """Main-loop addition 2 (LV-1 task brief, from the LV-0 debug pass,
+    `plans/flight-lift-vector/debug-2026-11-23.md`, problem 3): the
+    retest's take diverged from a mid-turn attitude -- `phidot` ran
+    away from a bounded ~20 deg/s oscillation to `+536 deg/s` over six
+    ~38 ms samples, attributed to an unguarded `phi_i` integrator
+    (Decision 30's own named risk, closed here by section H). This is
+    the toy-plant proof the new law does not reproduce that shape: a
+    take from a bad initial attitude (30 deg bank, nose 10 deg down,
+    mid-turn) must converge, with every body rate staying bounded
+    throughout -- never a one-sided runaway in either direction."""
+
+    def test_take_from_30deg_bank_10deg_nose_down_mid_turn_converges(
+        self,
+    ) -> None:
+        driver = f"""
+local measured = {
+            _measured(
+                bank_deg=30.0,
+                pitch_deg=-10.0,
+                psi_deg=0.0,
+                r_deg_s=8.0,
+                ias_mps=160.0 / 3.6,
+                v_t_mps=160.0 / 3.6,
+            )
+        }
+local command = {{ pitch = 0.1, roll = 0.15, pedals = 0.0, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = measured.psi_deg }}, LIMITS, PROFILE)
+local dt = 0.05
+local tau = 1.0
+local max_abs_p, max_abs_bank, max_abs_pitch = 0.0, 0.0, 0.0
+for i = 1, 3000 do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
+    measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
+    measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
+    local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
+    measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
+    measured.r_deg_s = r
+    if math.abs(measured.p_deg_s) > max_abs_p then max_abs_p = math.abs(measured.p_deg_s) end
+    if math.abs(measured.bank_deg) > max_abs_bank then max_abs_bank = math.abs(measured.bank_deg) end
+    if math.abs(measured.pitch_deg) > max_abs_pitch then max_abs_pitch = math.abs(measured.pitch_deg) end
+end
+print(string.format("%.6f", max_abs_p))
+print(string.format("%.6f", max_abs_bank))
+print(string.format("%.6f", max_abs_pitch))
+print(string.format("%.6f", measured.bank_deg))
+print(string.format("%.6f", measured.pitch_deg))
+print(tostring(state.in_band_heading))
+"""
+        lines = _run(driver)
+        max_abs_p, max_abs_bank, max_abs_pitch, final_bank, _final_pitch, in_band = (
+            lines
+        )
+        # A real divergence in this toy plant's own kinematics shows up
+        # exactly like the retest trace did -- a roll rate orders of
+        # magnitude past anything a real coordinated turn produces
+        # (the retest's own runaway reached 536 deg/s). A generous bound
+        # (100 deg/s) still catches a genuine runaway while giving the
+        # transient roll-out room to move.
+        assert float(max_abs_p) < 100.0
+        # Never saturates toward +-90 (the physical ceiling `law_
+        # outputs`' own clamp would eventually hit on a real runaway).
+        assert float(max_abs_bank) < 90.0
+        assert float(max_abs_pitch) < 90.0
+        # And it actually settles, not just "stays finite" -- back to
+        # level, on the captured heading. No speed goal was ever given,
+        # so the captured -10 deg trim pitch has no reason to move
+        # (`final_pitch` is covered by the bounded-magnitude check
+        # above only, not a convergence claim).
+        assert abs(float(final_bank)) < 5.0
+        assert in_band == "true"
+
+
+class TestTakeIsBumpless:
+    """Main-loop addition 3: the take is bumpless -- every integrator
+    (`phi_i`/`theta_i`/`u_c_i`/`t_p`/`t_r`/`t_y`) is seeded from the
+    *measured* state at take, so the first written frame equals the
+    captured command exactly (`TestBitExactAtTake` proves the output);
+    this class proves the *integrators themselves* hold values
+    consistent with that measured state, not an arbitrary reset to
+    zero that would only coincidentally cancel out this one frame."""
+
+    def test_integrators_seed_from_measured_state_not_zero(self) -> None:
+        driver = f"""
+local measured = {_measured(bank_deg=12.0, pitch_deg=-4.0, ias_mps=60.0, v_t_mps=62.0)}
+local command = {{ pitch = 0.321, roll = -0.154, pedals = 0.05, collective = 0.3 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+print(string.format("%.6f", state.phi_d))
+print(string.format("%.6f", state.theta_d))
+print(string.format("%.6f", state.u_c))
+"""
+        lines = _run(driver)
+        phi_d, theta_d, u_c = (float(v) for v in lines)
+        # The take seeds the *target*, not a zeroed integrator, to the
+        # measured attitude -- a nonzero captured bank/pitch is not
+        # discarded.
+        assert abs(phi_d - 12.0) < 1e-6
+        assert abs(theta_d - (-4.0)) < 1e-6
+        assert abs(u_c - 0.3) < 1e-6
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

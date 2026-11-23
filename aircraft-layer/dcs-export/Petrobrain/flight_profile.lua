@@ -1,5 +1,5 @@
 --[[
-Petrobrain / flight_profile -- BL-16 lift-vector law, Stage **LV-0**
+Petrobrain / flight_profile -- BL-16 lift-vector law
 (`plans/flight-lift-vector/plan.md`): one per-aircraft profile table
 holding every loop gain, time constant and estimator window
 `flight_control.lua`'s law reads, so a user can retune flying behaviour
@@ -8,21 +8,26 @@ in the law's own code. `AC-B12` (`plans/ac-b12-export-modules/plan.md`):
 one of the `dofile`-loaded module chunks `Export.lua` composes, loaded
 BEFORE `flight_control` (it reads `flight_profile.ACTIVE` at call time).
 
-**LV-0 scope**: every constant below that the five "pure" law functions
-(`law_apply_goal`/`law_init_at_take`/`law_update`/`law_outputs`/
-`law_turn_rate_at_bank`) already read was moved here **verbatim, values
-unchanged** -- `tests/test_flight_control_law.py`'s toy-plant suite
-and `tests/test_flight_control_lua.py`'s whole-module harness both
-confirm bit-identical law output before and after this move. The
-estimator fields (`law_hz`, `velocity_source`, the running-average
-windows, the ball calibration) are new for LV-0's own estimator, which
-runs in parallel and writes only new status fields -- nothing in
-`law_update` reads them yet, so they cannot change today's flying
-behaviour. **Not yet added** (first needed by LV-1/LV-2/LV-3, per the
-plan's own staging): the regime blend speeds (25/50 km/h), the gain
-schedule `G(V)` breakpoints, the per-manoeuvre priority orders (G), and
-`rotor_dir`. Adding unused data now risks guessing ahead of what those
-stages actually need.
+**Stage LV-1** (`plans/flight-lift-vector/plan.md`, "The law, in
+words" B-I, the ordinary chain in G): the law now steers a desired 3D
+acceleration -- cyclic tilts the lift vector (feed-forward plus a slow
+trim learnt from the estimator's own measured acceleration), collective
+sets its length (feed-forward from the lift length the desired
+acceleration needs, plus an integrator on vertical-acceleration error),
+and the pedals fly the slip ball, always (U5 reverted: no deliberate
+extra pedal in a turn or break). Every gain below that LV-0 moved
+verbatim and LV-1 does not touch is unchanged; the fields LV-1 replaces
+or adds are marked below. **No floor, no hand-back** (U1/U8, user:
+"remove the limit. Any speed. What does not work, I will bring back and
+we fix."): the only thing that protects low speed is the gain schedule
+`G(V)` (`schedule_gain_min`/`schedule_full_speed_kmh`) and the envelope
+guards that were already here.
+
+**Not yet added** (first needed by LV-2/LV-3, per the plan's own
+staging): the break/low-slow-RPM chains in G (height-gives-first order,
+the recovery re-seating), the hover regime (`λ` blend, ground-speed
+reference, the pedal yaw loop). Adding unused data now risks guessing
+ahead of what those stages actually need.
 
 Behaviour-affecting (every field here changes what Petrovich does), but
 this subproject has no `tuning.py`-equivalent loader (root `CLAUDE.md`:
@@ -44,10 +49,8 @@ local M = {}
 M.PROFILES = {}
 
 M.PROFILES["Mi-24P"] = {
-    -- ---- Moved from `flight_control.lua`'s own module-level locals,
-    -- values unchanged (LV-0). Every field below is read by one or more
-    -- of the five pure law functions, which now take `profile` as an
-    -- explicit trailing parameter.
+    -- ---- Moved from `flight_control.lua`'s own module-level locals
+    -- (LV-0), still read by LV-1's shapers (section B, "kept").
 
     -- Critically-damped-or-overdamped factor for every position/rate
     -- shaper (`a_ref = omega^2*err - 2*zeta*omega*v_ref`) -- zeta>=1 is
@@ -57,8 +60,10 @@ M.PROFILES["Mi-24P"] = {
     law_zeta = 1.0,
 
     -- Shaper bandwidths (rad/s) -- how fast each reference chases its
-    -- own goal, before any rate/accel ceiling clips it. Owed by M0-E
-    -- (the deliberate step-response probe, never flown).
+    -- own goal, before any rate/accel ceiling (itself now scaled by
+    -- `schedule_gain_min`/`schedule_full_speed_kmh` below, LV-1
+    -- section B) clips it. Owed by M0-E (the deliberate step-response
+    -- probe, never flown).
     omega_heading = 0.3,
     omega_alt = 0.5,
     omega_speed = 0.15,
@@ -77,36 +82,129 @@ M.PROFILES["Mi-24P"] = {
 
     -- Altitude/speed channel accel limits, before the commanded
     -- `max_climb_vs_mps`/`max_accel_mps2` ceilings (body-layer
-    -- tunables) clip the resulting rate. Owed by M0-E.
+    -- tunables) clip the resulting rate, and before LV-1's own
+    -- `schedule_gain_min`/`schedule_full_speed_kmh` scale them by
+    -- speed. Owed by M0-E.
     alt_accel_cap_mps2 = 1.0,
     speed_accel_cap_mps2 = 0.5,
 
-    -- Feedback gains (`a_z,d = w_ref_dot + k_w*(w_ref-w) + k_h*(h_ref-h)`,
-    -- `a_x,d = dV_ref_dot + k_v*(V_ref-V)`). Owed by M0-E.
+    -- Feedback gains (`a_u,d = w_ref_dot + k_w*(w_ref-w) + k_h*(h_ref-h)`,
+    -- `a_f,d = dV_ref_dot + k_v*(V_ref-V)`, section C). Owed by M0-E.
     k_vs_error = 0.3,
     k_alt_error = 0.05,
     k_speed_error = 0.2,
 
-    -- Lift-vector correction gains: collective rate per vertical-accel
-    -- error (1/s per m/s^2), fore/aft tilt rate per along-track-accel
-    -- error, and the extra tilt rate added once the collective is
-    -- saturated. Owed by M0-E.
+    -- ---- LV-1 (`plans/flight-lift-vector/plan.md`, "The law, in
+    -- words" B): the gain schedule `G(V)` -- "about 0.3 at hover, 1.0
+    -- from 150 km/h" (first cut; LV-0's card measures the real noise
+    -- floor, not this schedule). `schedule_gain_min` is `G` at/below
+    -- 0 km/h IAS; `G` rises linearly to 1.0 at `schedule_full_speed_
+    -- kmh` and stays there above it. Multiplies the three accel caps
+    -- above (`heading_accel_cap_deg_s2`/`alt_accel_cap_mps2`/`speed_
+    -- accel_cap_mps2`) every frame -- "defined down to 0... gentlest
+    -- value at the low end" (U1/U8: no hand-back, so the schedule is
+    -- the only thing that makes LV-1 gentle below 50 km/h).
+    schedule_gain_min = 0.3,
+    schedule_full_speed_kmh = 150.0,
+
+    -- ---- LV-1 (section D, "Lift-vector direction"): the cyclic's
+    -- feed-forward-plus-trim split. `c_theta` is the fraction of the
+    -- kinematic fore/aft tilt the feed-forward itself supplies (<=1
+    -- per the plan -- "the disc tilt the fuselage needs to balance
+    -- drag is unknown, so it is left to theta_i"); the remainder is
+    -- learnt by the slow trim loop below. `k_phi_trim`/`k_theta_trim`
+    -- give the trim loops a time constant of several seconds -- at
+    -- least 3x slower than the estimator lag (~0.2 s) plus the
+    -- attitude response, the plan's own stability argument (the toy
+    -- plant checks this separation with the plant's gains deliberately
+    -- wrong). First cut, owed by a flight.
+    c_theta = 0.5,
+    k_phi_trim = 0.02,
+    k_theta_trim = 0.02,
+    -- Anti-windup bound (section H): while the measured attitude is
+    -- further than this from its own target (last frame's `phi_d`/
+    -- `theta_d`), the trim loop is not following and holds rather than
+    -- integrating a trajectory error that is really an attitude-loop
+    -- lag.
+    trim_hold_attitude_err_deg = 10.0,
+    -- Anti-windup bound (section H): `phi_i` stops integrating in the
+    -- direction that would push it past this magnitude. Deliberately
+    -- tight -- `phi_i` is a secondary trim correction on top of the
+    -- kinematic feed-forward `phi_ff`, never the primary driver of a
+    -- real turn (a break's own 60-80 deg bank comes from `phi_ff`,
+    -- which is not bounded at all). A wide bound lets a transient
+    -- (e.g. an unpark mid-turn rolling back to level, where the
+    -- measured acceleration lags the desired one for the whole
+    -- roll-out) integrate a one-sided bias that never unwinds on its
+    -- own once the aircraft settles -- confirmed with the toy plant,
+    -- which could not converge within band at `60.0` and does at
+    -- `8.0`. There is no longer a standing bank limit to check this
+    -- against instead (F-M1).
+    phi_i_bound_deg = 8.0,
+
+    -- ---- LV-1 (section G, "Priority under limits", the ordinary
+    -- chain): while the lift length is capped (collective saturated,
+    -- RPM-floored or blade-stall-margined -- the same `collective_
+    -- limited` flag E already computed), the shortfall is handed down
+    -- speed, then turn rate, then height (U3). `k_theta_speed_give` is
+    -- the extra nose-up rate per unit of capped collective rate
+    -- (replaces `K_TILT_FROM_AZ_SATURATED`, "today's idea, now one
+    -- entry in a chain"); `speed_give_capacity` is how much shortfall
+    -- the pitch channel absorbs alone before turn rate also gives;
+    -- `k_phi_give`/`phi_ff_min_scale` shrink the bank feed-forward
+    -- once it does. Height gives last, by construction -- nothing
+    -- here forces it, the vertical integrator (E) simply stops
+    -- tracking once collective cannot rise further. First cut, owed by
+    -- the LV-1/LV-2 cards.
+    k_theta_speed_give = 0.5,
+    speed_give_capacity = 0.05,
+    k_phi_give = 4.0,
+    phi_ff_min_scale = 0.3,
+    -- Sortie 2026-11-20, user, verbatim (section G): "Slowing down is
+    -- always pitch back and also less collective" -- a rule for the
+    -- speed channel generally, not only while the lift length is
+    -- capped: whenever the speed shaper is asking to decelerate
+    -- (`a_f,d < 0`), the collective feed-forward/integrator step is
+    -- biased down by this gain times the deceleration demand, on top
+    -- of (never instead of) the ordinary vertical-error term.
+    k_collective_speed_give = 0.1,
+
+    -- ---- LV-1 (section E, "Lift-vector length"): feed-forward from
+    -- the lift length the desired acceleration needs, plus an
+    -- integrator on vertical-acceleration error (replaces the old `a_z`
+    -- feedback-only `K_COLLECTIVE` loop). `k_lift_ff` (K_L) is
+    -- deliberately small -- "a nudge, not a model": too small is a
+    -- slower settle (the integrator supplies the rest), too large is a
+    -- balloon. The LV-1 card's `K_L = 0` row flies the integrator
+    -- alone, for comparison. `k_collective` (K_c) is reused from LV-0 --
+    -- same field, new role (the vertical-accel-error integrator gain,
+    -- section E, rather than the old `a_z`-feedback-error gain it
+    -- replaced).
+    k_lift_ff = 0.05,
     k_collective = 0.08,
-    k_tilt_from_ax = 0.04,
-    k_tilt_from_az_saturated = 0.03,
+    -- Pedal/RPM/blade-stall collective-rate caps, unchanged from LV-0 --
+    -- still the thresholds `collective_limited`'s own flag (E, G) is
+    -- computed against.
+    pedal_near_limit_margin = 0.1,
+    collective_rate_cap_near_pedal_limit = 0.3,
+    rotor_rpm_near_floor_margin_pct = 5.0,
+    collective_rate_cap_near_rpm_floor = 0.0,
+    retreating_blade_stall_margin_kmh = 20.0,
+    collective_rate_cap_near_blade_stall = 0.0,
+
+    -- Inner tilt loop (section D, kept): `u = T + k_theta*(target-
+    -- measured) - k_q*(Euler pitch rate)`, `T` integrating `k_theta_i*
+    -- (target-measured)`; same form for roll with `k_phi`/`k_phi_i`/
+    -- `k_p`. **LV-1 damps on Euler rates** (`est_euler_rates`, LV-0),
+    -- not the body rates `q`/`p` read directly off the gyro -- "What
+    -- reading the code turned up": a steady turn's own body pitch rate
+    -- `q = psi_dot*sin(phi)` is not zero, so damping on it fights every
+    -- coordinated turn. Units unchanged: axis command per degree of
+    -- attitude error, and axis command per deg/s of Euler rate. Owed
+    -- by M0-E -- the step response this loop closes on was never
+    -- measured.
     theta_min_deg = -15.0,
     theta_max_deg = 15.0,
-
-    -- Lateral-tilt incremental correction gain (`phi_i_dot =
-    -- K_r*(r_d - r)`) -- the kinematic term itself needs no gain, only
-    -- this trim. Owed by M0-E.
-    k_bank_increment = 0.5,
-
-    -- Inner tilt loop: `u = T + k_theta*(target-measured) -
-    -- k_rate*rate`, `T` integrating `k_theta_i*(target-measured)`.
-    -- Units: axis command per degree of attitude error, and axis
-    -- command per deg/s of body rate. Owed by M0-E -- the step
-    -- response this loop closes on was never measured.
     k_theta = 0.03,
     k_theta_i = 0.015,
     k_q = 0.01,
@@ -114,71 +212,54 @@ M.PROFILES["Mi-24P"] = {
     k_phi_i = 0.015,
     k_p = 0.01,
 
-    -- Pedal coordination feedforward: `u_y_dot = K_cy*u_c_dot` (no
-    -- slip-ball feedback term yet -- LV-1's own job). Sign check
-    -- (sortie 2026-11-20): more collective eats further into the
-    -- already-scarce right pedal margin on the Mi-24P; the sign below
-    -- assumes positive command = right, the same unmeasured guess
-    -- `pedal_limit_positive`'s own asymmetry already makes.
+    -- ---- LV-1 (section F, "Pedals: fly the slip ball, always"): one
+    -- integrator, one target, the ball's own centre -- never a heading
+    -- or yaw-rate loop in forward flight (finding 2), and no deliberate
+    -- extra pedal in a turn or break (U5 reverted). `k_ball_pedal`
+    -- (K_beta) is the ball-centring integrator gain; `k_pedal_from_
+    -- collective_rate` (reused from LV-0, unchanged role) is the
+    -- torque feed-forward, `rotor_dir` giving its sign ("more
+    -- collective -> more right pedal on the Mi-24P" is `rotor_dir =
+    -- +1`); `k_turn_coord_pedal` is now a feed-forward nudge toward the
+    -- turn at turn entry (same formula LV-0 had, reframed per F: its
+    -- only job is to help the ball-centring integrator catch up, not
+    -- to hold a deliberate ball offset -- `K_BREAK_PEDAL_BIAS` and its
+    -- own unwind bookkeeping are gone entirely, U5).
+    k_ball_pedal = 0.3,
     k_pedal_from_collective_rate = 0.25,
+    rotor_dir = 1.0,
+    k_turn_coord_pedal = 0.02,
     -- Right pedal is the scarce side (user: "not much right rudder
     -- left"); which *sign* of the axis is physically "right" was never
     -- measured (M0-E) -- magnitude only, applied to the positive side.
     pedal_limit_positive = 0.5,
     pedal_limit_negative = -1.0,
-    -- While the pedal sits within this margin of its own positive
-    -- limit, a rising collective command is rate-capped.
-    pedal_near_limit_margin = 0.1,
-    collective_rate_cap_near_pedal_limit = 0.3,
-
-    -- Rotor RPM floor / retreating blade stall margins -- how much
-    -- slack before the cap engages (the thresholds themselves are
-    -- wire-carried body-layer tunables, `fc_limits.rotor_rpm_floor_pct`/
-    -- `retreating_blade_stall_ias_kmh`).
-    rotor_rpm_near_floor_margin_pct = 5.0,
-    collective_rate_cap_near_rpm_floor = 0.0,
-    retreating_blade_stall_margin_kmh = 20.0,
-    collective_rate_cap_near_blade_stall = 0.0,
-
-    -- Pedal-into-the-turn bias while a break's rate override is active
-    -- -- judgement, owed by a flight.
-    k_break_pedal_bias = 0.2,
-
-    -- Turn-coordination pedal, proportional to the commanded turn rate
-    -- `r_d` (sortie 2026-11-20: "turns but does not use pedals at all.
-    -- Use pedals."). Sign assumption unmeasured (same positive-is-right
-    -- convention as `pedal_limit_positive`'s asymmetry); applied only
-    -- while no break override is active.
-    k_turn_coord_pedal = 0.02,
-
-    -- `a_x`/`a_z` fallback filter time constant (`LoGetAccelerationUnits`'
-    -- own axis-to-body-frame mapping being unconfirmed) -- a filtered
-    -- numerical derivative of IAS/vertical speed. LV-1 replaces this
-    -- channel with the estimator's own acceleration; kept here
-    -- unchanged for LV-0's bit-identical law output.
-    tau_accel_filter_s = 0.3,
 
     -- Below this residual turn rate (deg/s), a turn-mode roll-out
     -- counts as "settled" and the law switches internally to heading
-    -- mode, holding the heading the roll-out stopped at.
+    -- mode, holding the heading the roll-out stopped at; also the
+    -- threshold below which the turn-entry pedal nudge (F) is zero
+    -- rather than a vanishing non-zero value.
     turn_settle_deg_s = 0.3,
 
-    -- ---- New for LV-0's estimator. Nothing in `law_update` reads these
-    -- yet -- they cannot change today's flying behaviour; they govern
-    -- only the shadow estimator and its status/trace output.
+    -- ---- Estimator (LV-0). Nothing here changed by LV-1.
 
     -- Estimator and law update rate (plan, "Update rate, not every
     -- frame", user 2026-11-20 verbatim: "I'd say 30Hz would be plenty").
     -- First cut; LV-0's card measures whether this is too fast/slow for
-    -- the noise floor.
+    -- the noise floor. **LV-1 reads the estimator's own output every
+    -- frame it runs the law (still per-frame, see `flight_control.lua`'s
+    -- own module docstring for why the law's own cadence is not yet
+    -- moved to this rate) -- only the estimator's own `LoGet*` reads
+    -- are gated to `law_hz`.**
     law_hz = 30.0,
 
     -- Which raw telemetry source the estimator differentiates/averages
     -- for world-frame velocity -- `"position"` (least-squares slope of
     -- `LoGetSelfData().Position`) or `"vector"` (running average of
-    -- `LoGetVectorVelocity`). `"position"` is the default until LV-0's
-    -- card row (e) confirms `LoGetVectorVelocity` matches `dP/dt` on
-    -- all three axes (plan, section A).
+    -- `LoGetVectorVelocity`). `"position"` is the default until a card
+    -- confirms `LoGetVectorVelocity` matches `dP/dt` on all three axes
+    -- (plan, section A).
     velocity_source = "position",
 
     -- Running-average window lengths (seconds), chosen as multiples of

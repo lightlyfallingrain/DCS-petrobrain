@@ -223,19 +223,32 @@ flight_profile = {
         k_vs_error = 0.3,
         k_alt_error = 0.05,
         k_speed_error = 0.2,
+        schedule_gain_min = 0.3,
+        schedule_full_speed_kmh = 150.0,
+        c_theta = 0.5,
+        k_phi_trim = 0.02,
+        k_theta_trim = 0.02,
+        trim_hold_attitude_err_deg = 10.0,
+        phi_i_bound_deg = 8.0,
+        k_theta_speed_give = 0.5,
+        speed_give_capacity = 0.05,
+        k_phi_give = 4.0,
+        phi_ff_min_scale = 0.3,
+        k_collective_speed_give = 0.1,
+        k_lift_ff = 0.05,
         k_collective = 0.08,
-        k_tilt_from_ax = 0.04,
-        k_tilt_from_az_saturated = 0.03,
         theta_min_deg = -15.0,
         theta_max_deg = 15.0,
-        k_bank_increment = 0.5,
         k_theta = 0.03,
         k_theta_i = 0.015,
         k_q = 0.01,
         k_phi = 0.03,
         k_phi_i = 0.015,
         k_p = 0.01,
+        k_ball_pedal = 0.3,
         k_pedal_from_collective_rate = 0.25,
+        rotor_dir = 1.0,
+        k_turn_coord_pedal = 0.02,
         pedal_limit_positive = 0.5,
         pedal_limit_negative = -1.0,
         pedal_near_limit_margin = 0.1,
@@ -244,9 +257,6 @@ flight_profile = {
         collective_rate_cap_near_rpm_floor = 0.0,
         retreating_blade_stall_margin_kmh = 20.0,
         collective_rate_cap_near_blade_stall = 0.0,
-        k_break_pedal_bias = 0.2,
-        k_turn_coord_pedal = 0.02,
-        tau_accel_filter_s = 0.3,
         turn_settle_deg_s = 0.3,
         law_hz = 30.0,
         velocity_source = "position",
@@ -537,7 +547,7 @@ ap_seat = "operator"
 ap_parked = true
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
 ap_parked = false
@@ -716,13 +726,17 @@ print(written[2001] == nil)
 
 
 class TestUnparkTakeRefusals:
-    def test_refused_below_min_ias(self) -> None:
+    def test_accepted_below_80_kmh_no_hand_back(self) -> None:
+        """BL-16 lift-vector law, Stage LV-1 (U1/U8): the 80 km/h
+        unpark-take refusal is gone entirely -- `check_unpark_
+        preconditions` no longer reads IAS at all. An unpark at any
+        airspeed is accepted; only on-ground still refuses."""
         driver = """
 ap_parked = true
 ap_seat = "operator"
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.05)
 ias_mps = 20.0 / 3.6
@@ -733,11 +747,8 @@ print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
         status_line = lines[0]
-        assert _field(status_line, "fc_mode") == "off"
-        # `UNPARK_TAKE_ENABLED` now defaults on (M0-J passed), so the
-        # ordinary preconditions are reachable again: below `min_ias_
-        # kmh` refuses with cause "too_slow".
-        assert _field(status_line, "fc_refuse_cause") == "too_slow"
+        assert _field(status_line, "fc_mode") == "active"
+        assert _field(status_line, "fc_refuse_cause") is None
 
     def test_refused_with_a_stale_lease(self) -> None:
         driver = """
@@ -745,7 +756,7 @@ ap_parked = true
 ap_seat = "operator"
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
     0.0)
 flight_control.run_flight_control(0.05)
 ap_parked = false
@@ -790,7 +801,7 @@ ap_parked = true
 ap_stick_park_raw = 1.0
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 -- Self-arms this frame (off -> armed) -- that transition itself
 -- consumes the whole frame (BL-16 Stage 2's own self-arm branch
@@ -830,7 +841,7 @@ ap_parked = true
 ap_stick_park_raw = 1.0
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
 -- No fade -- raw852 stays at 1.0 through the edge.
@@ -857,7 +868,7 @@ ap_parked = true
 ap_stick_park_raw = 1.0
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
 ap_parked = false
@@ -871,7 +882,7 @@ ap_parked = true
 ap_stick_park_raw = 0.5
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.4)
 flight_control.run_flight_control(0.4)
 ap_parked = false
@@ -922,7 +933,7 @@ ap_held = { heading_deg = 45.0 }
 set_desired(1, { heading_deg = 45.0 })
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
 ap_parked = false
@@ -1180,12 +1191,17 @@ print(string.format("%.6f", written[2002]))
 
 
 class TestEnvelopeRelease:
-    def test_sustained_low_ias_releases_after_the_hold(self) -> None:
+    """BL-16 lift-vector law, Stage LV-1 (U1/U8): the low-IAS envelope
+    release is gone entirely -- `check_envelope` only ever releases on
+    `"dead"`/`"nan"` any more. What used to be `TestEnvelopeRelease`'s
+    own positive case (`test_sustained_low_ias_releases_after_the_hold`)
+    is now the negative one below."""
+
+    def test_sustained_low_ias_never_releases_no_hand_back(self) -> None:
         # Every frame advances by 0.2 s (well under `DT_CAP`, so no
-        # frame is ever treated as a pause) across more than `ENV_HOLD_S`
-        # (3.0 s) of sustained low IAS -- a single large time jump would
-        # hit the pause/huge-jump branch instead of the envelope check
-        # (see `TestPauseRowHolds`), so this drives real small steps.
+        # frame is ever treated as a pause), well past what used to be
+        # `ENV_HOLD_S` (3.0 s) of sustained low IAS -- LV-1 has no
+        # release left to trigger here at all.
         driver = """
 pilot_args.pitch = 0.5
 ap_parked = false
@@ -1200,15 +1216,14 @@ flight_control.push_flight_control_state(0.1 + 20 * 0.2)
 print(sent_lines[#sent_lines])
 """
         lines = _run(driver)
-        assert _field(lines[0], "fc_mode") == "off"
-        assert _field(lines[0], "fc_release_reason") == "envelope"
+        assert _field(lines[0], "fc_mode") == "active"
+        assert _field(lines[0], "fc_release_reason") is None
 
     def test_sustained_high_bank_never_releases(self) -> None:
         """F-M1 (mode-1 batch): "remove the 30 degree limit. Set no
         limit for now" -- there is no bank-triggered release any more
         at all. A bank well past the old 30 deg ceiling, held for well
-        past `ENV_HOLD_S`, never releases -- IAS alone governs release
-        now."""
+        past the old `ENV_HOLD_S`, never releases."""
         driver = """
 pilot_args.pitch = 0.5
 ap_parked = false
@@ -1420,7 +1435,7 @@ print(sent_lines[#sent_lines])
         driver = """
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":1.0}}',
     0.0)
 ap_parked = true
 flight_control.run_flight_control(5.0)  -- well past the 1 s lease
@@ -1437,7 +1452,7 @@ print(sent_lines[#sent_lines])
         apply."""
         driver = """
 flight_control.handle_flight_lease_command(
-    '{"op":"flight_lease","epoch":1,"limits":{"min_ias_kmh":999.0}}', 0.0)
+    '{"op":"flight_lease","epoch":1,"limits":{"max_ias_kmh":999.0}}', 0.0)
 ap_parked = true
 ias_mps = 150.0 / 3.6
 flight_control.run_flight_control(0.1)
@@ -1445,7 +1460,8 @@ flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
 """
         line = _run(driver)[0]
-        # The out-of-bounds `min_ias_kmh` rejected the whole lease
+        # The out-of-bounds `max_ias_kmh` (LV-1 removed `min_ias_kmh`
+        # from `FC_LIMIT_BOUNDS` entirely, U8) rejected the whole lease
         # message, so `fc_arm_last_t` was never set by it -- off stays
         # off (no self-arm), same as "no lease ever sent".
         assert _field(line, "fc_mode") == "off"
@@ -1465,7 +1481,7 @@ print(sent_lines[#sent_lines])
         driver = """
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 ap_parked = true
 flight_control.run_flight_control(0.1)
@@ -1478,7 +1494,7 @@ print(sent_lines[#sent_lines])  -- [2] off again, still parked
 
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":2,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     2.0)
 -- still parked, no unpark edge in between
 flight_control.run_flight_control(2.1)
@@ -1505,11 +1521,12 @@ print(sent_lines[#sent_lines])  -- [4] a real unpark+re-park self-arms again
 
 
 class TestStage2VoiceTakePrecondition:
-    """BL-16 Stage 2: a voice take now re-checks IAS/AGL itself
-    (`check_unpark_preconditions`), rather than trusting body-layer's
-    own pre-send refusal alone."""
+    """BL-16 Stage 2: a voice take re-checks AGL itself (`check_unpark_
+    preconditions`), rather than trusting body-layer's own pre-send
+    refusal alone. **LV-1 (U1/U8)**: the IAS half of that check is gone
+    -- a voice take is accepted at any airspeed now."""
 
-    def test_a_voice_take_too_slow_is_refused_and_stays_off(self) -> None:
+    def test_a_voice_take_below_80_kmh_is_accepted_no_hand_back(self) -> None:
         driver = """
 ias_mps = 20.0 / 3.6
 ap_parked = false
@@ -1519,8 +1536,8 @@ flight_control.push_flight_control_state(0.0)
 print(sent_lines[#sent_lines])
 """
         line = _run(driver)[0]
-        assert _field(line, "fc_mode") == "off"
-        assert _field(line, "fc_refuse_cause") == "too_slow"
+        assert _field(line, "fc_mode") == "taking"
+        assert _field(line, "fc_refuse_cause") is None
 
     def test_a_voice_take_on_the_ground_is_refused_and_stays_off(self) -> None:
         driver = """
@@ -1632,7 +1649,7 @@ ap_parked = true
 set_desired(1, { heading_deg = 90.0, turn_rate_deg_s = 20.0, turn_style = "break" })
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
+    .. '"limits":{"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
 ap_parked = false
@@ -1653,29 +1670,30 @@ print(sent_lines[#sent_lines])
 class TestUnparkTakeSeedClampsToMode1Limits:
     """Review-fix round (`plans/flight-desired-state/review-s3.md`
     Required Fix 1, U2): mode 1 cannot fly every value mode 2 can hold
-    -- `build_take_seed`'s unpark branch now clamps the seed to `fc_
-    limits.min_ias_kmh`/`max_ias_kmh`/`floor_agl_m`, the same bounds
-    `belief.flight_control.clamp_speed`/`clamp_altitude` enforce body-
-    side. `desired` itself is never touched, only the seed fed to `law_
-    init_at_take` -- the plan's own Q1a ("the desired state keeps the
-    exact value; what's flown is clamped")."""
+    -- `build_take_seed`'s unpark branch clamps the speed seed to `fc_
+    limits.max_ias_kmh` (the altitude seed keeps its own `floor_agl_m`
+    clamp, unaffected by this stage). **LV-1 (U1/U8): the speed seed's
+    own lower bound (`min_ias_kmh`) is gone entirely** -- a carried
+    speed below 0 is impossible, but any low, carried speed now flies
+    exactly as commanded, no floor. `desired` itself is never touched,
+    only the seed fed to `law_init_at_take`."""
 
-    def test_speed_0_in_m2_then_unpark_flies_the_minimum_not_zero(self) -> None:
-        """The plan's own worked example. Measured IAS is set to exactly
-        `min_ias_kmh` (80) so the clamped goal and the (unmoving, mocked)
-        measured value agree immediately -- an unclamped goal of 0 would
-        never agree with a measured 80, so `fc_in_band_speed` only reads
-        `true` here if the seed was actually clamped up to 80."""
+    def test_speed_0_in_m2_then_unpark_flies_exactly_0_no_floor(self) -> None:
+        """The plan's own worked example, U8's final answer: measured
+        IAS is set to exactly 0 so the (unclamped) seed and the
+        (unmoving, mocked) measured value agree immediately -- `fc_in_
+        band_speed` only reads `true` here if the seed was flown
+        exactly as commanded, with no floor clamping it up."""
         driver = """
 heading_rad = math.rad(0.0)
 bank_rad = math.rad(2.0)
-ias_mps = 80.0 / 3.6
+ias_mps = 0.0
 ap_seat = "operator"
 ap_parked = true
 set_desired(1, { ias_kmh = 0.0 })
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"limits":{"max_ias_kmh":280.0,'
     .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -1702,7 +1720,7 @@ ap_parked = true
 set_desired(1, { ias_kmh = 400.0 })
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"limits":{"max_ias_kmh":280.0,'
     .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
@@ -1718,8 +1736,8 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fc_in_band_speed") == "true"
 
     def test_an_in_range_speed_is_carried_unclamped(self) -> None:
-        """Control: a value already inside `[min_ias_kmh, max_ias_kmh]`
-        is seeded verbatim, same as before this fix."""
+        """Control: a value already inside `[0, max_ias_kmh]` is seeded
+        verbatim, same as before this fix."""
         driver = """
 heading_rad = math.rad(0.0)
 bank_rad = math.rad(2.0)
@@ -1729,7 +1747,7 @@ ap_parked = true
 set_desired(1, { ias_kmh = 150.0 })
 flight_control.handle_flight_lease_command(
     '{"op":"flight_lease","epoch":1,'
-    .. '"limits":{"min_ias_kmh":80.0,"max_ias_kmh":280.0,'
+    .. '"limits":{"max_ias_kmh":280.0,'
     .. '"on_ground_agl_threshold_m":10.0,"arm_lease_s":3.0}}',
     0.0)
 flight_control.run_flight_control(0.1)
