@@ -158,6 +158,10 @@ local ACK_RING_SIZE = 8
 local fd_acks = {}
 
 local function push_ack(seq, status, detail)
+    -- Testing aid (sortie 2026-11-23): every accept/refuse, so a voice
+    -- command answered "unable" can be traced to its cause.
+    debug_log("flight ack seq=" .. tostring(seq) .. " " .. tostring(status)
+        .. ":" .. tostring(detail) .. " mode=" .. tostring(fd_mode))
     table.insert(fd_acks, { seq = seq, status = status, detail = detail })
     while #fd_acks > ACK_RING_SIZE do
         table.remove(fd_acks, 1)
@@ -572,6 +576,9 @@ local function handle_flight_command(data, t)
         debug_log("ignoring malformed flight command (missing epoch/seq/until/kind)")
         return
     end
+    debug_log(string.format(
+        "flight cmd kind=%s seq=%.0f epoch=%.0f fd_epoch=%s last_seq=%s until=%.3f t=%.3f mode=%s",
+        kind, seq, epoch, tostring(fd_epoch), tostring(fd_last_seq), until_t, t, tostring(fd_mode)))
 
     if epoch ~= fd_epoch then
         push_ack(seq, "r", "epoch")
@@ -753,6 +760,7 @@ end
 -- explicit reset" posture `flight_control.lua`'s own `fc_last_cmd_seq`
 -- has), only by this function, which `on_stop` is a strict subset of.
 local function reset(epoch)
+    debug_log("flight reset epoch=" .. string.format("%.0f", epoch) .. " (was " .. tostring(fd_epoch) .. ")")
     on_stop()
     fd_mode_cause = "reset"
     fd_reset_epoch = epoch
