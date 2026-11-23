@@ -1368,10 +1368,12 @@ end
 -- Pushes one (t, value) sample and evicts whatever has aged out of
 -- `window_s`, updating the incremental sums in O(1) amortized (add the
 -- newest sample, subtract each sample that ages out this call -- never
--- a refit over the stored window). `ring.t0` rebases every timestamp
--- to the ring's own first sample so the sums stay well-conditioned
--- over a long mission (model time keeps growing; the sums never see
--- more than `window_s` seconds of absolute magnitude).
+-- a refit over the stored window). `ring.t0` rebases timestamps to the
+-- ring's first sample since the last reset, which removes the absolute
+-- model-time offset only: `rt` still grows over a long run between
+-- resets, so cancellation error in the slope denominator grows with it.
+-- Negligible for LV-0's shadow output; re-check before LV-1 closes the
+-- loop on it (rebase per window, or periodic refit).
 local function est_ring_push(ring, t, value, window_s)
     if ring.t0 == nil then
         ring.t0 = t
@@ -1556,6 +1558,7 @@ local function flight_trace_log(line)
         flight_trace_file = f
     end
     flight_trace_file:write(line .. "\n")
+    flight_trace_file:flush()
 end
 
 -- Every `LoGet*` read the estimator needs for one step -- called only
