@@ -224,3 +224,206 @@ actually exists and was actually needed:
   own "Removed and kept" table assigns them to `[[BL-18]]` ("owns the per-module arg/cmd map"), a
   different, not-yet-built mechanism, so moving them now would pre-empt that decision rather than
   follow it.
+
+---
+
+## LV-1 (2026-11-23, continuing from LV-0, tip `6fa74373`)
+
+Forward-flight law, no hand-back (`plans/flight-lift-vector/plan.md`, "The law, in words" B–I,
+G's ordinary chain, H's anti-windup). Built directly on the feature branch worktree
+(`impl/lv1`, tip `6fa74373`), no separate agent worktree was needed for this pass.
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_profile.lua` — new LV-1 fields: the gain schedule
+  (`schedule_gain_min`/`schedule_full_speed_kmh`), the trim loops (`c_theta`/`k_phi_trim`/
+  `k_theta_trim`/`trim_hold_attitude_err_deg`/`phi_i_bound_deg`), the ordinary priority chain
+  (`k_theta_speed_give`/`speed_give_capacity`/`k_phi_give`/`phi_ff_min_scale`/
+  `k_collective_speed_give`), the lift-length feed-forward (`k_lift_ff`), the ball-centring pedal
+  loop (`k_ball_pedal`/`rotor_dir`). Removed (dead, per the plan's "Removed and kept" table):
+  `k_bank_increment`, `k_tilt_from_ax`, `k_tilt_from_az_saturated`, `tau_accel_filter_s`,
+  `k_break_pedal_bias`. `k_collective`/`k_pedal_from_collective_rate`/`k_turn_coord_pedal` reused
+  (same field, new role — see each one's own updated comment).
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — the law itself: `law_phi_ff_deg`/
+  `law_theta_ff_deg`/`law_lift_length_g` (new shared helpers, sections D/E); `law_init_at_take`
+  rewritten (phi_i/theta_i/u_c_i seeded from the estimator's own measured acceleration, section I);
+  `law_update` rewritten (C–H); `law_outputs` damps on Euler rates
+  (`measured.theta_dot_deg_s`/`phi_dot_deg_s`, falling back to the body rate only while the
+  estimator has not primed). The estimator's own output (`a_f`/`a_r`/`a_u`/the three Euler rates/
+  `ball`) is merged onto `measured` in `run_active_frame`, gated on a new `fc_est.primed` flag
+  (set once the acceleration ring itself has a real window — section A's "the law must not feed
+  un-primed values" requirement); while not primed, `law_update` is skipped for that frame (shapers/
+  integrators hold) and `law_outputs` still reacts to the current attitude against the frozen
+  target, never a literally-frozen axis value. `check_unpark_preconditions` lost its IAS check
+  (AGL only); `check_envelope` lost the low-IAS release (`ENV_IAS_MARGIN_KMH`/`ENV_HOLD_S`/
+  `fc_env_low_ias_since_t` removed entirely); `fc_limits`/`FC_LIMIT_BOUNDS` lost `min_ias_kmh`;
+  `build_take_seed`'s unpark clamp lost its speed floor (kept the ceiling).
+- `aircraft-layer/tests/test_flight_control_law.py` — `_PROFILE` updated to LV-1's field set;
+  every shared bank-lag toy-plant driver gained a real `measured.a_r = g*tan(bank)` feedback line
+  (see Notable Discoveries); the altitude-channel overshoot test gained a real `measured.a_u` from
+  the plant's own `w_mps` delta; `TestBreakPedalBiasUnwinds` removed outright (the mechanism it
+  tested is gone, U5); `TestTurnCoordinationPedal`'s break-suppression test rewritten to assert
+  the opposite (no suppression exists any more); `TestCollectiveHoldsAltitudeInABankedTurn` re-pins
+  `state.phi_d` every loop iteration (see Notable Discoveries); two new test classes added
+  (`TestAntiWindupPreventsTheRetestDivergence`, `TestTakeIsBumpless` — see Tests Added).
+- `aircraft-layer/tests/test_flight_control_lua.py` — the `flight_profile` global stub updated to
+  LV-1's field set; every `"min_ias_kmh":80.0,` wire literal removed; `TestUnparkTakeRefusals`'s
+  low-IAS-refusal test rewritten to assert acceptance; `TestStage2VoiceTakePrecondition`'s
+  too-slow test rewritten to assert acceptance; `TestEnvelopeRelease`'s sustained-low-IAS-release
+  test rewritten to assert no release; `TestUnparkTakeSeedClampsToMode1Limits`'s speed-0 test
+  rewritten to assert the exact (unclamped) value flies, not the old floor.
+- `body-layer/src/belief/flight_control.py` — `MIN_IAS_KMH` removed; `take_controls` lost its
+  `too_slow` parameter and `"TOO_SLOW"` branch; `clamp_speed`'s lower bound is `0.0`;
+  `flight_control_limits()` no longer sends `min_ias_kmh`.
+- `body-layer/src/belief/crew_console.py` — the `MIN_IAS_KMH` import and the now-dead `ias_kmh`
+  field (and its only reader, the `too_slow` computation in `take_controls`) removed.
+- `body-layer/src/belief/speech.py` — the `"TOO_SLOW"` template line removed.
+- `body-layer/src/belief/flight_authority.py` — `decide_carried_value_speech`'s own docstring
+  updated (no `min_ias_kmh` on the wire any more).
+- `body-layer/src/body.py` — the `crew_console.ias_kmh = runner.last_ias_kmh` assignment and its
+  comment removed; `Runner.last_ias_kmh`'s own docstring updated (the field stays — `belief.
+  ai_pilot_wheel`'s IAS-ceiling recovery check still reads it).
+- `body-layer/config/rules/README.md` — `flight.take_controls`'s row no longer lists `"TOO_SLOW"`.
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`);
+  `MIN_IAS_KMH`'s entry is gone.
+- `body-layer/tests/test_flight_control.py`, `test_flight_authority.py`,
+  `test_rules_flight_actions.py` — `MIN_IAS_KMH` imports and every `too_slow=`/`ias_kmh=` fixture
+  line tied to the removed floor/refusal rewritten or removed (see Tests Added for the new
+  assertions each one now carries).
+- `body-layer/ROADMAP/BL-16.md`, `body-layer/CLAUDE.md`, `aircraft-layer/CLAUDE.md` — status/
+  docs updated (LV-0 reviewed, LV-1 built; the floor removal noted where each file's own earlier
+  text described it).
+- `docs/acceptance/2026-11-23-bl16-lv1-card.md` — new, the LV-1 card.
+
+### Deviations from the plan
+
+- **The law's own cadence stays per-frame; only the estimator's `LoGet*` reads are gated to
+  `LAW_HZ` (unchanged from LV-0).** The plan's "Update rate, not every frame" asks for the full
+  law (not only the estimator) to move to the scheduled/interleaved cadence from LV-1 on. Not
+  built here: splitting `law_update`'s own state machine (bit-exact take, anti-windup, the
+  take-seed subtleties) across interleaved execution phases is a materially larger, separately
+  risky change, and the estimator's own `LAW_HZ` gating (LV-0) already removes the bulk of the
+  per-frame `LoGet*` cost the user's own reasoning (performance headroom at ~140 Hz) was aimed at
+  — `law_update` itself makes no `LoGet*` call at all. Flagged for the architect's own review,
+  same posture as LV-0's own analogous deviation (which this one directly continues).
+- **The ordinary priority chain (G) is a simplified single-shortfall model, not a fully sequenced
+  speed→turn→height solve.** One scalar `shortfall` (how much of the nominal collective rate the
+  RPM/stall/pedal-limit/anti-windup guards would not allow this frame) feeds both the pitch
+  "speed gives" term and, once a `speed_give_capacity` threshold is crossed, the bank "turn gives"
+  scale — height gives last, implicitly, because nothing forces it (the vertical integrator simply
+  stops tracking once collective cannot rise further). This matches the user's own ordering
+  (speed, then turn rate, then height) but is a first-cut approximation of the hand-off between
+  the first two steps, not a measured one — same "first cut, the flights tune" posture every other
+  gain in this law already carries.
+- **`K_L`/`K_c`/`K_phi_trim`/`K_theta_trim`/`K_ball_pedal` are flat gains, not scheduled by speed**
+  (`G(V)` itself — the one schedule the plan's own Tests section names explicitly — IS built, and
+  multiplies the three shaper accel caps). The plan's prose names `K_L(V)`/`K_c(V)`/`K_beta(V)` as
+  speed-scheduled; building a second per-gain schedule for each of five gains, untested until a
+  future card, was judged to add profile surface without proportionate value at this stage — the
+  one schedule that the Tests section explicitly requires is the one that is built.
+
+### Tests Added
+
+- `test_flight_control_law.py::TestAntiWindupPreventsTheRetestDivergence` — a take from a bad
+  initial attitude (30° bank, 10° nose down, mid-turn: `r_deg_s = 8.0`) must converge, with the
+  roll rate staying well below a real-divergence bound (100 deg/s, the retest's own crash reached
+  536 deg/s) and bank/pitch never saturating toward ±90° — the main-loop task's own required
+  anti-windup/divergence test, directly modelled on the LV-0 debug pass's retest crash
+  (`debug-2026-11-23.md`, problem 3).
+- `test_flight_control_law.py::TestTakeIsBumpless` — the take seeds the *target* (`phi_d`/
+  `theta_d`/`u_c`) from the measured attitude/collective, not a zeroed integrator that would only
+  coincidentally cancel out on the first frame.
+- `test_flight_control_lua.py` — `TestUnparkTakeRefusals::test_accepted_below_80_kmh_no_hand_back`,
+  `TestStage2VoiceTakePrecondition::test_a_voice_take_below_80_kmh_is_accepted_no_hand_back`,
+  `TestEnvelopeRelease::test_sustained_low_ias_never_releases_no_hand_back`,
+  `TestUnparkTakeSeedClampsToMode1Limits::test_speed_0_in_m2_then_unpark_flies_exactly_0_no_floor`
+  — the no-hand-back/no-floor behaviour, at the whole-module level (wire-shaped `limits`, real
+  `request_take`/`run_flight_control` dispatch), not only the pure-function toy plant.
+- `test_flight_control.py::TestClampHelpers::test_clamp_speed_has_no_floor_only_a_ceiling`,
+  `TestWireHelpers::test_flight_control_limits_carries_the_given_on_ground_threshold` (extended) —
+  `clamp_speed` and the wire `limits` bundle, body-layer side.
+- `test_flight_authority.py::test_a_carried_speed_of_0_is_flown_exactly_no_floor_no_announcement`,
+  `test_only_altitude_is_carried_badly_now_speed_has_no_floor` — the carried-value speech no
+  longer announces a speed clamp that no longer happens.
+- `test_rules_flight_actions.py::test_you_have_controls_accepted_below_80_kmh_no_hand_back` — the
+  rule-dispatch level.
+
+### Checks
+
+(both touched subprojects — `world-model/` untouched)
+
+- `aircraft-layer`: `ruff format --check src tests` — pass (90 files); `ruff check src tests` —
+  pass; `cd aircraft-layer && .venv/bin/mypy src` — pass (29 files, no issues); `pytest tests -q`
+  (full suite) — pass, 1137 passed; `luac5.1 -p` on both touched Lua files — pass; the
+  `luac5.1 -l -p` GETGLOBAL check on `flight_control.lua`/`flight_profile.lua` — clean (every
+  global is stdlib, a genuine DCS API, or a legitimate cross-module global; `flight_profile.lua`
+  reads no global at all).
+- `body-layer`: `ruff format --check src tests` — pass (230 files); `ruff check src tests` — pass;
+  `cd body-layer && .venv/bin/mypy src` — pass (93 files, no issues); `pytest tests -q -p xdist
+  -n auto` (full suite) — pass, 2968 passed, 4 xfailed (one pre-existing `too_slow`-adjacent test,
+  `TestDecideCarriedValueSpeech::test_both_parts_carried_badly_announce_both_in_one_call`, found
+  broken by the floor removal via `fast-tests.sh body-layer` before the full run, and rewritten —
+  see Notable Discoveries).
+
+### Test-impact check (role instruction 1b)
+
+The plan's own per-stage test list for LV-1 names no specific files (the plan's "Tests" section is
+written for the whole feature). Checked beyond what LV-0's implementer already confirmed in scope
+(`test_export_lua_constants_parity.py` out of scope, `test_dcs_export_lua_local_order.py`
+auto-discovering): **`test_flight_authority.py`, `test_rules_flight_actions.py` and
+`test_flight_control.py` were not named anywhere and turned out to need rewrites** — each held a
+fixture or assertion built directly on the 80 km/h floor (`MIN_IAS_KMH`, `too_slow`, the
+carried-value-speech clamp), which U8's "no floor" removes. `grep -rn "MIN_IAS_KMH\|too_slow\|
+TOO_SLOW"` across both subprojects' `src/` and `tests/` after the Lua/Python removal is what found
+all of them — the kind of miss the role's own instructions warn is silent (the suite still passes
+once rewritten; nothing failed loudly until each fixture's own assumption was checked against the
+new behaviour).
+
+### Notable Discoveries
+
+- **The toy-plant tests needed real acceleration feedback (`measured.a_r`/`a_u`), not the `law_*`
+  functions' own nil-safe fallback to `0.0`, to converge at all.** LV-1's trim loops (`phi_i`/
+  `theta_i`) integrate on *measured minus desired* acceleration, replacing the old law's
+  turn-rate-based trim; a toy plant that never sets the measured-acceleration fields leaves that
+  error permanently equal to the desired value (never shrinking as the plant's own attitude
+  converges), so the trim loop either winds up on a real transient and never unwinds (the
+  mid-break unpark scenario reached a standing +17° `phi_i` with 100 s to settle, at the original
+  `phi_i_bound_deg = 60.0`) or, for the altitude/collective double-integrator plant, oscillates
+  outright (`measured.w_mps` swung to ±30 m/s with no `a_u` feedback at all, independent of
+  `k_lift_ff`, confirmed by setting it to `0.0` and seeing the oscillation persist). Fixed by
+  giving each shared toy-plant driver the real feedback a production estimator would supply
+  (`a_r = g·tan(bank)`, `a_u` from the plant's own `w_mps` backward difference) rather than treating
+  the fallback as "good enough for a toy plant."
+- **`phi_i_bound_deg` tightened from 60° to 8°, with the production default changed to match.**
+  Measured directly: the mid-break-unpark scenario would not converge into the heading band at
+  60°, 20°, 15° or 12° (residual heading error 11–25°), and did at 8° and below. This is also the
+  more defensible design point independent of the measurement — `phi_i` is a secondary trim on top
+  of the kinematic feed-forward `phi_ff` (which is unbounded, and alone carries a break's 60–80°
+  bank), not meant to be a primary driver of a large bank itself.
+- **The anti-windup freeze and the collective-rate guards (RPM floor/blade stall/pedal limit) must
+  cap the *combined* feed-forward-plus-integrator rate, not the integrator's own rate alone** — a
+  real bug found by `TestRotorEnvelopeGuards` going from "capped" to "uncapped" partway through
+  this implementation. `u_c = u_c,ff(n_d) + u_c,i`, and `u_c,ff` is recomputed fresh every frame
+  from the desired state (never itself rate-limited) — capping only `u_c,i`'s own nominal step let
+  a jump in `n_d` (e.g. a big climb goal) walk straight through the RPM-floor guard via the
+  feed-forward term instead. Fixed by computing the guards against the *candidate combined* rate
+  (`u_c_candidate - state.u_c) / dt`) and backing `u_c_i` out of whatever capped value actually
+  lands, every frame, rather than capping `c_dot` (the old, pre-feed-forward variable name) and
+  adding the feed-forward on top uncapped.
+- **`TestCollectiveHoldsAltitudeInABankedTurn`'s externally-fixed-bank fixture needed `state.phi_d`
+  re-pinned every loop iteration, not just once at take.** `law_update` recomputes `phi_d` fresh
+  every frame from `phi_ff + phi_i`; since this specific toy plant never commands a turn (it fixes
+  `measured.bank_deg = 40.0` as an environmental condition, to isolate the altitude/collective-vs-
+  pitch split from bank-tracking physics), `phi_ff ≈ phi_i ≈ 0` and `law_update`'s own next frame
+  overwrites the test's one-time `state.phi_d = 40.0` override straight back to ~0 — tripping
+  section H's "attitude not following" anti-windup gate (a genuine 40° mismatch) and freezing every
+  trim integrator the test means to exercise. Re-pinning `phi_d` after every `law_update` call
+  (not just once) keeps the gate satisfied for the duration the fixture's own premise requires.
+- **One pre-existing test outside both files' own obvious scope broke silently**:
+  `test_flight_authority.py::TestDecideCarriedValueSpeech::test_both_parts_carried_badly_announce_
+  both_in_one_call` expected two carried-value announcements (speed *and* altitude) from an unpark
+  at `ias_kmh=0.0`/`alt_m=0.0` — the speed half no longer fires (no floor to clamp up to), so the
+  full-suite run (`pytest -p xdist -n auto`, this project's own DoD command) found exactly one
+  failure where `fast-tests.sh`'s targeted selection also caught it, confirming the full run adds
+  no further surprises for this change. Rewritten to assert the one remaining (altitude)
+  announcement.
