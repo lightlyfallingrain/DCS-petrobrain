@@ -116,14 +116,24 @@ class TestResolveCommandReset:
         assert runner.command_reset_confirmed is False
         assert client.reset_calls == [42]
 
-    def test_already_confirmed_is_a_true_no_op(self) -> None:
-        runner, client = _runner(command_reset_confirmed=True)
-        console = _console(None)
+    def test_already_confirmed_with_both_echoes_still_matching_is_a_true_no_op(
+        self,
+    ) -> None:
+        """Debug-2026-11-23 -- confirmed and *still* echoed (the common
+        case for the rest of a sortie) sends nothing, unlike a confirmed
+        state whose echo has gone stale (see `TestCommandResetResync`
+        below)."""
+        runner, client = _runner(
+            command_reset_confirmed=True,
+            parked_flight_state=replace(ParkedFlightState(), lua_reset_epoch=42),
+        )
+        console = _console(42)
 
         _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
 
         assert client.reset_calls == []
         assert runner.command_reset_last_sent_wall is None
+        assert runner.command_reset_confirmed is True
 
     def test_resend_is_bounded_by_the_interval(self) -> None:
         """A send within `COMMAND_RESET_RESEND_INTERVAL_S` of the last
@@ -163,6 +173,122 @@ class TestResolveCommandReset:
 
         assert runner.command_reset_confirmed is False
         assert runner.command_reset_last_sent_wall is not None
+
+
+class TestCommandResetResync:
+    """Debug-2026-11-23 -- a DCS mission (re)start re-runs `Export.lua`'s
+    module init code, re-nilling every seq-carrying channel's own
+    echoed epoch; the previous one-shot latch (`if runner.command_
+    reset_confirmed: return`) never noticed this and kept gating
+    `_apply_flight_requests`/`_apply_ai_pilot_wheel_goal` open with a
+    now-stale `runner.command_reset_epoch`, which `flight_desired.lua`
+    then refused `r:epoch` on every send -- the sortie's "unable, not
+    ready" on "you have controls" after a mission restart."""
+
+    def test_a_confirmed_reset_whose_echo_goes_stale_is_resent_and_unconfirmed(
+        self,
+    ) -> None:
+        """Confirmed, then one channel's echo reverts to `None` (the
+        reload) -- resent, and `command_reset_confirmed` flips back to
+        `False` rather than staying a stale `True`."""
+        runner, client = _runner(
+            command_reset_confirmed=True,
+            parked_flight_state=replace(ParkedFlightState(), lua_reset_epoch=42),
+        )
+        console = _console(42)
+        # Both channels confirmed once -- now the reload nils one of
+        # them back out (`fc_reset_epoch` -> nil).
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=None
+        )
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_confirmed is False
+        assert client.reset_calls == [42]
+
+    def test_a_confirmed_reset_whose_echo_changes_to_a_different_epoch_is_resent(
+        self,
+    ) -> None:
+        """Same mismatch, but the echoed value is a different (non-null)
+        epoch rather than `None` -- still a mismatch, same resend."""
+        runner, client = _runner(
+            command_reset_confirmed=True,
+            parked_flight_state=replace(ParkedFlightState(), lua_reset_epoch=42),
+        )
+        console = _console(42)
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=7
+        )
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_confirmed is False
+        assert client.reset_calls == [42]
+
+    def test_resync_restarts_the_unconfirmed_since_clock_rather_than_firing_the_warning_immediately(
+        self,
+    ) -> None:
+        """A mismatch that reappears long after the original startup
+        handshake confirmed must not fire the slow-confirm warning on
+        its very next poll -- `command_reset_unconfirmed_since_wall` is
+        reset to `None` on the un-confirming edge (this test's own
+        assertion), so the timeout clock starts counting from *this*
+        mismatch, same as a fresh process start would."""
+        runner, client = _runner(
+            command_reset_confirmed=True,
+            parked_flight_state=replace(ParkedFlightState(), lua_reset_epoch=42),
+            # Simulate a stale cursor left over from long before this
+            # process's original (successful) handshake.
+            command_reset_unconfirmed_since_wall=time.monotonic() - 10_000.0,
+            command_reset_warned=True,
+        )
+        console = _console(42, lua_mode="off")
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=None
+        )
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_confirmed is False
+        assert runner.command_reset_warned is False
+        assert console.command_reset_slow_pending is False
+        # The clock restarted this call (aircraft layer already up, a
+        # sample exists) rather than carrying the ancient cursor
+        # forward.
+        assert runner.command_reset_unconfirmed_since_wall is not None
+        assert time.monotonic() - runner.command_reset_unconfirmed_since_wall < 1.0
+
+    def test_resync_then_reconfirming_restores_confirmed_and_the_right_epoch(
+        self,
+    ) -> None:
+        """Confirmed -> echo goes stale (unconfirmed, resent) -> Lua
+        echoes the (unchanged) `command_reset_epoch` again -- confirms
+        once more, with `runner.command_reset_epoch` itself never having
+        changed, so the very next `_apply_flight_requests`/`_apply_ai_
+        pilot_wheel_goal` send after this call carries the same, correct
+        epoch Lua now actually holds."""
+        runner, client = _runner(
+            command_reset_confirmed=True,
+            parked_flight_state=replace(ParkedFlightState(), lua_reset_epoch=42),
+        )
+        console = _console(42)
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=None
+        )
+
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+        assert runner.command_reset_confirmed is False
+
+        # Lua re-echoes this process's own (unchanged) epoch, e.g. once
+        # the resent reset lands.
+        console.flight_control_state = replace(
+            console.flight_control_state, lua_reset_epoch=42
+        )
+        _resolve_command_reset(runner, console, client)  # type: ignore[arg-type]
+
+        assert runner.command_reset_confirmed is True
+        assert runner.command_reset_epoch == 42
 
 
 class TestResolveCommandResetFailLoud:

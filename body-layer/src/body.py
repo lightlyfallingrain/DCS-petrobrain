@@ -3464,14 +3464,53 @@ def _resolve_command_reset(
     `_apply_flight_requests` (both gated on `runner.command_reset_
     confirmed`, set here): while unconfirmed, this (re)sends the reset
     itself, bounded by `COMMAND_RESET_RESEND_INTERVAL_S` so a DCS/
-    collector not yet up never spams the log. A true no-op once
-    confirmed -- the common case for the rest of the process's life.
+    collector not yet up never spams the log.
 
     Reads `runner.parked_flight_state.lua_reset_epoch`/`crew_console.
     flight_control_state.lua_reset_epoch` as they stand *this* call --
     the caller places this before both channels' own refresh runs each
     poll, so a confirmation landing this exact poll is only ever noticed
     one poll later, not lost.
+
+    **Debug-2026-11-23 -- re-checked every poll, not a one-shot latch.**
+    A DCS mission (re)start re-runs `Export.lua`'s module-level init
+    code (confirmed from the sortie's own debug log: "connected to
+    collector"/"command listener bound" logged again mid-sortie, the
+    exact lines `core.lua` logs on first load), which re-nils every
+    seq-carrying channel's own echoed epoch
+    (`flight_control.lua`'s/`ai_pilot_wheel.lua`'s/`flight_desired.
+    lua`'s own `local ..._reset_epoch = nil`) -- the previous version of
+    this function returned immediately once `command_reset_confirmed`
+    was `True`, so it never noticed the echo going stale and kept
+    gating `_apply_flight_requests`/`_apply_ai_pilot_wheel_goal` open:
+    every later numbered send still carried `runner.command_reset_
+    epoch`, which no longer matched Lua's own (now-nil) `fd_epoch`, so
+    `flight_desired.lua`'s `handle_flight_command` refused every one of
+    them `r:epoch` -- the sortie's "unable, not ready" on "you have
+    controls" after a mission restart. Now checked on *every* call: a
+    confirmed epoch that stops echoing flips `command_reset_confirmed`
+    back to `False` and restarts the resend/warning clocks from this
+    mismatch (not from whatever stale cursor the original startup
+    handshake left behind), so an ordinary mission restart confirms
+    again within one or two resends exactly as a fresh process start
+    does, and the slow-confirm warning does not fire merely because the
+    *first* handshake happened a long time ago.
+
+    **The gap before it reconfirms is not silently lost.** While
+    unconfirmed, `_apply_flight_requests`/`_apply_ai_pilot_wheel_goal`
+    stay gated off (unchanged), so nothing is ever sent carrying the
+    stale epoch -- a dispatched handover/goal's one-shot transition
+    field simply waits, staged, until the next poll finds the epoch
+    reconfirmed and sends it with the *right* epoch, which is either
+    acted on or truthfully refused/timed out once Lua actually answers.
+    No readback is ever spoken for a request that was not actually
+    applied. (An unrelated command dispatched in that same narrow gap
+    still clears the one-shot field at the top of `handle_command`,
+    same as it always has while the very first startup handshake is
+    pending -- a pre-existing, narrow window this debugging pass does
+    not close; see `docs/acceptance/2026-11-23-sortie-feedback.md`'s
+    "stand by" answer, filed as `[[BL-B134]]`, for the follow-on that
+    would give the player something to hear during it.)
 
     **Loud when it cannot confirm (BL-16 fail-loud, 2026-11-20).** Once
     either status feed has produced at least one sample this process --
@@ -3480,13 +3519,12 @@ def _resolve_command_reset(
     naming the likely cause and queues one spoken system-error line
     (`CrewConsole.command_reset_slow_pending`, drained once the SPU-8
     intercom gate opens, same shape as `drain_config_error`) -- once per
-    process, and cancelled, unspoken, if the reset confirms before that
-    drain ever runs. Stays quiet for as long as neither feed has
-    produced a sample at all: the aircraft layer simply not being up yet
-    is not an error, and starting the clock from process start instead
-    of first-sample would fire this on every ordinary slow DCS launch."""
-    if runner.command_reset_confirmed:
-        return
+    mismatch window, and cancelled, unspoken, if the reset confirms
+    before that drain ever runs. Stays quiet for as long as neither feed
+    has produced a sample at all: the aircraft layer simply not being up
+    yet is not an error, and starting the clock from process start
+    instead of first-sample would fire this on every ordinary slow DCS
+    launch."""
     now_wall = time.monotonic()
     if (
         runner.parked_flight_state.lua_reset_epoch == runner.command_reset_epoch
@@ -3495,7 +3533,16 @@ def _resolve_command_reset(
     ):
         runner.command_reset_confirmed = True
         crew_console.command_reset_slow_pending = False
+        runner.command_reset_unconfirmed_since_wall = None
+        runner.command_reset_warned = False
         return
+    if runner.command_reset_confirmed:
+        # The echo just went stale after having been confirmed -- a
+        # genuine Export.lua reload, not the original startup
+        # handshake. Flip back and restart both clocks from here.
+        runner.command_reset_confirmed = False
+        runner.command_reset_unconfirmed_since_wall = None
+        runner.command_reset_warned = False
     aircraft_layer_up = (
         crew_console.flight_control_state.lua_mode is not None
         or runner.parked_flight_state.ai_mode is not None

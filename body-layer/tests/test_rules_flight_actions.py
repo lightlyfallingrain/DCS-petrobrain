@@ -40,7 +40,11 @@ from belief.ai_pilot_wheel import (
 )
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
-from belief.flight_authority import PendingFlightReadback
+from belief.flight_authority import (
+    HANDOVER_ACK_TIMEOUT_S,
+    PendingFlightReadback,
+    PendingTake,
+)
 from belief.speech import render_unable
 from rules.actions import ACTION_NAMESPACES, ActionContext
 from rules.engine import RuleSet, run_rule
@@ -971,6 +975,60 @@ class TestHandoverActions:
         lines = console.handle_command("i_have_controls", now_sim=0.0)
         assert lines == []
         assert console.flight_control_transition is None
+
+
+class TestDrainFlightControlReleaseAck:
+    """Review-debug-1123.md's required fix -- `drain_flight_control`'s
+    release-resolution block (`crew_console.py`, `flight_pending_
+    release`) had no test exercising it directly: a mutation disabling
+    the block left the full body-layer suite green. Mirrors
+    `TestResolvePendingTake`'s three cases (`test_flight_authority.py`)
+    but drives them through `drain_flight_control` itself, the same
+    way `test_i_have_controls_releases_while_flying_on_the_axes` above
+    populates `flight_pending_release` via the dispatch path -- here
+    populated directly, the way `_apply_flight_requests` leaves it
+    after sending the release."""
+
+    def test_accepted_speaks_you_have_controls_urgently_and_clears(self) -> None:
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client)
+        console.flight_pending_release = PendingTake(
+            seq=1, says="You have controls.", sent_at_sim=0.0
+        )
+        console.flight_authority_state = replace(
+            console.flight_authority_state, acks="1:a:m1"
+        )
+        lines = console.drain_flight_control(now_sim=0.5)
+        assert lines == ["You have controls."]
+        assert console.flight_pending_release is None
+        assert speech_client.pushed == [("You have controls.", True)]
+
+    def test_refused_does_not_speak_you_have_controls(self) -> None:
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client)
+        console.flight_pending_release = PendingTake(
+            seq=1, says="You have controls.", sent_at_sim=0.0
+        )
+        console.flight_authority_state = replace(
+            console.flight_authority_state, acks="1:r:precondition"
+        )
+        lines = console.drain_flight_control(now_sim=0.5)
+        assert lines == ["Unable, not ready."]
+        assert "You have controls." not in lines
+        assert console.flight_pending_release is None
+        assert speech_client.pushed == [("Unable, not ready.", False)]
+
+    def test_timeout_does_not_speak_you_have_controls(self) -> None:
+        speech_client = _RecordingSpeechClient()
+        console = _dispatching_console(speech_client=speech_client)
+        console.flight_pending_release = PendingTake(
+            seq=1, says="You have controls.", sent_at_sim=0.0
+        )
+        lines = console.drain_flight_control(now_sim=HANDOVER_ACK_TIMEOUT_S)
+        assert lines == ["Unable, not ready."]
+        assert "You have controls." not in lines
+        assert console.flight_pending_release is None
+        assert speech_client.pushed == [("Unable, not ready.", False)]
 
 
 class TestSeatNeverGatesMode1:
