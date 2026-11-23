@@ -30,6 +30,7 @@ Skips cleanly without a Lua interpreter on `PATH`."""
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -1742,6 +1743,70 @@ print(sent_lines[#sent_lines])
         line = lines[0]
         assert _field(line, "fc_mode") == "active"
         assert _field(line, "fc_in_band_speed") == "true"
+
+
+class TestEstimatorStatusFields:
+    """BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/
+    plan.md`) -- the estimator runs every frame in every mode, so its
+    `fc_est_*` status fields must show up on the wire even while
+    `fc_mode == "off"` (no take ever requested), the thing the toy-plant
+    harness (`test_flight_control_law.py`/`test_flight_control_
+    estimator.py`) cannot exercise since it never drives the whole
+    module end to end."""
+
+    def test_est_fields_are_present_and_finite_while_off(self) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+flight_control.run_flight_control(0.0)
+flight_control.run_flight_control(0.033)
+flight_control.run_flight_control(0.066)
+flight_control.push_flight_control_state(0.066)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "off"
+        for field in (
+            "fc_est_a_f",
+            "fc_est_a_r",
+            "fc_est_a_u",
+            "fc_est_v_g",
+            "fc_est_v_g_f",
+            "fc_est_phi_dot",
+            "fc_est_theta_dot",
+            "fc_est_psi_dot",
+            "fc_est_ball",
+            "fc_est_lambda",
+        ):
+            value = _field(line, field)
+            assert value is not None, f"{field} was null"
+            assert math.isfinite(float(value))
+
+    def test_est_v_g_tracks_a_straight_northbound_leg_while_off(self) -> None:
+        """The estimator does not need `fc_mode == "active"` to produce
+        a real reading -- a pilot-flown calibration leg (no take ever
+        requested) must still show ground speed, the same "works in
+        every mode, including a pilot flying it" posture the slip-ball
+        readout already has."""
+        driver = """
+heading_rad = math.rad(0.0)
+for i = 0, 30 do
+    local t = i * (1.0 / 30.0)
+    flight_control.run_flight_control(t)
+end
+flight_control.push_flight_control_state(1.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fc_mode") == "off"
+        # No real `LoGetSelfData().Position` is ever supplied by this
+        # mock (it reads a `Heading` only, same shape as before LV-0 --
+        # see `_PREAMBLE`'s own `LoGetSelfData`) -- so this only pins
+        # that the field is present, finite, and non-negative (a
+        # magnitude), not a specific value the mock cannot produce.
+        v_g = float(_field(line, "fc_est_v_g"))
+        assert v_g >= 0.0
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

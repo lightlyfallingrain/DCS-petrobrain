@@ -142,6 +142,41 @@ class TestFlightControlState:
         assert sample.slip_ball_operator_raw == pytest.approx(-0.25)
         assert sample.slip_ball_lo_api is None
 
+    def test_est_fields_are_optional_and_absent_parses_as_none(self) -> None:
+        """BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/
+        plan.md`) -- the estimator's own shadow fields, same optional
+        posture as `fc_slip_ball_*` above."""
+        sample = FlightControlState.from_json_line(_LINE, received_wall_clock_s=99.0)
+        assert sample.est_a_f is None
+        assert sample.est_a_r is None
+        assert sample.est_a_u is None
+        assert sample.est_v_g is None
+        assert sample.est_v_g_f is None
+        assert sample.est_phi_dot is None
+        assert sample.est_theta_dot is None
+        assert sample.est_psi_dot is None
+        assert sample.est_ball is None
+        assert sample.est_lambda is None
+
+    def test_est_fields_parse_when_present(self) -> None:
+        line = _LINE[:-1] + (
+            ',"fc_est_a_f":0.1,"fc_est_a_r":-0.2,"fc_est_a_u":0.05,'
+            '"fc_est_v_g":41.6,"fc_est_v_g_f":40.1,'
+            '"fc_est_phi_dot":1.5,"fc_est_theta_dot":-0.5,"fc_est_psi_dot":3.2,'
+            '"fc_est_ball":0.031,"fc_est_lambda":1.0}'
+        )
+        sample = FlightControlState.from_json_line(line, received_wall_clock_s=99.0)
+        assert sample.est_a_f == pytest.approx(0.1)
+        assert sample.est_a_r == pytest.approx(-0.2)
+        assert sample.est_a_u == pytest.approx(0.05)
+        assert sample.est_v_g == pytest.approx(41.6)
+        assert sample.est_v_g_f == pytest.approx(40.1)
+        assert sample.est_phi_dot == pytest.approx(1.5)
+        assert sample.est_theta_dot == pytest.approx(-0.5)
+        assert sample.est_psi_dot == pytest.approx(3.2)
+        assert sample.est_ball == pytest.approx(0.031)
+        assert sample.est_lambda == pytest.approx(1.0)
+
     def test_to_api_dict_carries_every_field(self) -> None:
         sample = FlightControlState.from_json_line(_LINE, received_wall_clock_s=99.0)
         assert sample.to_api_dict() == {
@@ -168,6 +203,16 @@ class TestFlightControlState:
             "fc_slip_ball_pilot_raw": None,
             "fc_slip_ball_operator_raw": None,
             "fc_slip_ball_lo_api": None,
+            "fc_est_a_f": None,
+            "fc_est_a_r": None,
+            "fc_est_a_u": None,
+            "fc_est_v_g": None,
+            "fc_est_v_g_f": None,
+            "fc_est_phi_dot": None,
+            "fc_est_theta_dot": None,
+            "fc_est_psi_dot": None,
+            "fc_est_ball": None,
+            "fc_est_lambda": None,
         }
 
 

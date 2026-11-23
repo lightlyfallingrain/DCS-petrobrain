@@ -32,6 +32,21 @@ are the ADI ball draw args (943/784), `fc_slip_ball_lo_api` is
 `LoGetSlipBallPosition()` as a cross-check. Not consulted by `Export.
 lua`'s own control law; sign/scale is unmeasured.
 
+**`fc_est_*`** (BL-16 lift-vector law, Stage LV-0,
+`plans/flight-lift-vector/plan.md`) are the estimator's own shadow
+fields, sent in every `fc_mode` since the estimator itself runs in
+every mode (warm at a take). `fc_est_a_f`/`fc_est_a_r`/`fc_est_a_u` are
+kinematic acceleration in the heading frame (forward/right/up, m/s^2,
+no gravity, no body frame -- `a_u` reads near zero in a level turn);
+`fc_est_v_g`/`fc_est_v_g_f` are ground speed (horizontal magnitude, and
+along the nose), m/s; `fc_est_phi_dot`/`fc_est_theta_dot`/
+`fc_est_psi_dot` are Euler rates (deg/s), not the body rates
+`LoGetAngularVelocity` returns; `fc_est_ball` is the running-averaged
+slip-ball reading; `fc_est_lambda` is a first-cut 0..1 blend curve on
+ground speed (LV-0 reports it for the card, nothing reads it yet --
+LV-3's own job). Not consulted by `Export.lua`'s own control law at
+this stage -- "instruments and shadow, no behaviour change."
+
 **`fc_reset_epoch`** (BL-16 sortie 2026-11-20, `docs/acceptance/
 2026-11-20-sortie-feedback.md`) is `Export.lua`'s own echo of the last
 body-layer process-start reset it actually applied (`flight_control.
@@ -79,6 +94,16 @@ class FlightControlState:
     slip_ball_pilot_raw: float | None
     slip_ball_operator_raw: float | None
     slip_ball_lo_api: float | None
+    est_a_f: float | None
+    est_a_r: float | None
+    est_a_u: float | None
+    est_v_g: float | None
+    est_v_g_f: float | None
+    est_phi_dot: float | None
+    est_theta_dot: float | None
+    est_psi_dot: float | None
+    est_ball: float | None
+    est_lambda: float | None
     reset_epoch: int | None = None
 
     @staticmethod
@@ -184,6 +209,16 @@ class FlightControlState:
             slip_ball_pilot_raw=slip_ball_pilot_raw,
             slip_ball_operator_raw=slip_ball_operator_raw,
             slip_ball_lo_api=slip_ball_lo_api,
+            est_a_f=_optional_number("fc_est_a_f"),
+            est_a_r=_optional_number("fc_est_a_r"),
+            est_a_u=_optional_number("fc_est_a_u"),
+            est_v_g=_optional_number("fc_est_v_g"),
+            est_v_g_f=_optional_number("fc_est_v_g_f"),
+            est_phi_dot=_optional_number("fc_est_phi_dot"),
+            est_theta_dot=_optional_number("fc_est_theta_dot"),
+            est_psi_dot=_optional_number("fc_est_psi_dot"),
+            est_ball=_optional_number("fc_est_ball"),
+            est_lambda=_optional_number("fc_est_lambda"),
             reset_epoch=_optional_int("fc_reset_epoch"),
         )
 
@@ -227,4 +262,14 @@ class FlightControlState:
             "fc_slip_ball_pilot_raw": self.slip_ball_pilot_raw,
             "fc_slip_ball_operator_raw": self.slip_ball_operator_raw,
             "fc_slip_ball_lo_api": self.slip_ball_lo_api,
+            "fc_est_a_f": self.est_a_f,
+            "fc_est_a_r": self.est_a_r,
+            "fc_est_a_u": self.est_a_u,
+            "fc_est_v_g": self.est_v_g,
+            "fc_est_v_g_f": self.est_v_g_f,
+            "fc_est_phi_dot": self.est_phi_dot,
+            "fc_est_theta_dot": self.est_theta_dot,
+            "fc_est_psi_dot": self.est_psi_dot,
+            "fc_est_ball": self.est_ball,
+            "fc_est_lambda": self.est_lambda,
         }

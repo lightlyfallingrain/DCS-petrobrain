@@ -2443,7 +2443,24 @@ local function push_flight_control_state(t)
         .. ',"fc_axes_collective":' .. tostring(FC_AXES_ENABLED.collective)
         .. ',"fc_slip_ball_pilot_raw":' .. fmt_num_or_null(slip_ball_pilot_raw)
         .. ',"fc_slip_ball_operator_raw":' .. fmt_num_or_null(slip_ball_operator_raw)
-        .. ',"fc_slip_ball_lo_api":' .. fmt_num_or_null(slip_ball_lo_api) .. '}\n')
+        .. ',"fc_slip_ball_lo_api":' .. fmt_num_or_null(slip_ball_lo_api)
+        -- BL-16 lift-vector law, LV-0 (`plans/flight-lift-vector/
+        -- plan.md`, Implementation Plan item 1) -- the estimator's own
+        -- shadow fields, in every `fc_mode` (the estimator runs
+        -- unconditionally, same reasoning as the slip-ball readout
+        -- above). Never `null` in practice -- `fc_est`'s fields start
+        -- at `0.0` and only ever get overwritten with a finite number
+        -- (`fmt_num_or_null` only matters here for a stray NaN).
+        .. ',"fc_est_a_f":' .. fmt_num_or_null(fc_est.a.f)
+        .. ',"fc_est_a_r":' .. fmt_num_or_null(fc_est.a.r)
+        .. ',"fc_est_a_u":' .. fmt_num_or_null(fc_est.a.u)
+        .. ',"fc_est_v_g":' .. fmt_num_or_null(fc_est.v_g)
+        .. ',"fc_est_v_g_f":' .. fmt_num_or_null(fc_est.v_g_f)
+        .. ',"fc_est_phi_dot":' .. fmt_num_or_null(fc_est.euler.phi_dot)
+        .. ',"fc_est_theta_dot":' .. fmt_num_or_null(fc_est.euler.theta_dot)
+        .. ',"fc_est_psi_dot":' .. fmt_num_or_null(fc_est.euler.psi_dot)
+        .. ',"fc_est_ball":' .. fmt_num_or_null(fc_est.ball)
+        .. ',"fc_est_lambda":' .. fmt_num_or_null(fc_est.lambda) .. '}\n')
     if not ok then
         debug_log("flight-control send failed: " .. tostring(err))
         client:close()
