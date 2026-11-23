@@ -503,6 +503,20 @@ class TestFlightCommandEndpoint:
         assert resp_body == {"ok": True}
         assert sender.sent == [(7, 1, pytest.approx(10.5), "take", {})]
 
+    def test_a_real_millisecond_epoch_is_accepted(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """Body-layer's epoch is wall-clock milliseconds (~1.8e12), the
+        same value `/command/reset` and `/command/flight_lease` carry --
+        a 2**31 bound here 400'd every take (sortie 2026-11-23)."""
+        server, sender = running_server_with_sender
+        epoch = 1_795_430_000_000
+        body = {"epoch": epoch, "seq": 1, "until": 10.5, "kind": "take"}
+        status, _body = _post(server, "/command/flight", body)
+        assert status == 200
+        assert sender.sent == [(epoch, 1, pytest.approx(10.5), "take", {})]
+
     def test_a_set_message_forwards_only_its_present_fields(
         self,
         running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],

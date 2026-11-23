@@ -530,7 +530,12 @@ _AI_PILOT_GOAL_VALID_CBTM_ACTIONS: tuple[str, ...] = (
 #: `_FLIGHT_CONTROL_VALID_CMDS`/`_FLIGHT_CONTROL_GOAL_BOUNDS` (the old
 #: `flight_control` op, retired this stage).
 _FLIGHT_SEQ_MAX = 2**31 - 1
-_FLIGHT_EPOCH_MAX = 2**31 - 1
+#: Same ceiling as `_RESET_EPOCH_MAX` below: the epoch IS body-layer's
+#: reset epoch (`ConsolePerceptionRunner.command_reset_epoch`, wall-clock
+#: milliseconds, ~1.8e12), so a 2**31 bound rejected every real message
+#: with a 400 (sortie 2026-11-23, "you have controls" -> "Unable, not
+#: ready."). Lua encodes it with `%.0f`, so 2**53 is safe end to end.
+_FLIGHT_EPOCH_MAX = 2**53 - 1
 _FLIGHT_VALID_KINDS: tuple[str, ...] = (
     "set",
     "take",
