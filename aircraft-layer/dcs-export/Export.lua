@@ -319,12 +319,16 @@ core.init(EXPORT_SCRIPT_VERSION)
 -- `flight_control` (BL-16 mode 1, Stage M1) loads after `ai_pilot_wheel`
 -- -- it reads that module's `is_parked`/`player_seat` getters
 -- (Decision 25), read-only, and must itself exist before `commands`
--- registers its handler.
+-- registers its handler. `flight_profile` (BL-16 lift-vector law, LV-0,
+-- `plans/flight-lift-vector/plan.md`) loads right before `flight_
+-- control` -- the law reads `flight_profile.ACTIVE` at call time, so
+-- the profile only needs to exist by then, not any earlier.
 local telemetry = load_module("telemetry")
 local petrovich = load_module("petrovich")
 local sight = load_module("sight")
 local flight_desired = load_module("flight_desired")
 local ai_pilot_wheel = load_module("ai_pilot_wheel")
+local flight_profile = load_module("flight_profile")
 local flight_control = load_module("flight_control")
 local effectors = load_module("effectors")
 local ptt_ics = load_module("ptt_ics")

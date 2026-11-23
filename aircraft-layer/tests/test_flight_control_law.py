@@ -87,6 +87,64 @@ local LIMITS = {
 }
 """
 
+#: BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/plan.md`)
+#: -- the five `law_*` pure functions now take `profile` as an explicit
+#: trailing parameter (`flight_profile.lua`'s `PROFILES["Mi-24P"]`
+#: table). Values below are copied verbatim from that profile table, not
+#: re-derived -- this is what "bit-identical before and after the move"
+#: means operationally: every toy-plant scenario below exercises the law
+#: exactly as before, only reading these numbers through `profile.*`
+#: instead of a module-level `local`.
+_PROFILE = """
+local PROFILE = {
+    law_zeta = 1.0,
+    omega_heading = 0.3,
+    omega_alt = 0.5,
+    omega_speed = 0.15,
+    t_roll = 2.0,
+    heading_accel_cap_deg_s2 = 6.0,
+    k_heading_track = 0.3,
+    alt_accel_cap_mps2 = 1.0,
+    speed_accel_cap_mps2 = 0.5,
+    k_vs_error = 0.3,
+    k_alt_error = 0.05,
+    k_speed_error = 0.2,
+    k_collective = 0.08,
+    k_tilt_from_ax = 0.04,
+    k_tilt_from_az_saturated = 0.03,
+    theta_min_deg = -15.0,
+    theta_max_deg = 15.0,
+    k_bank_increment = 0.5,
+    k_theta = 0.03,
+    k_theta_i = 0.015,
+    k_q = 0.01,
+    k_phi = 0.03,
+    k_phi_i = 0.015,
+    k_p = 0.01,
+    k_pedal_from_collective_rate = 0.25,
+    pedal_limit_positive = 0.5,
+    pedal_limit_negative = -1.0,
+    pedal_near_limit_margin = 0.1,
+    collective_rate_cap_near_pedal_limit = 0.3,
+    rotor_rpm_near_floor_margin_pct = 5.0,
+    collective_rate_cap_near_rpm_floor = 0.0,
+    retreating_blade_stall_margin_kmh = 20.0,
+    collective_rate_cap_near_blade_stall = 0.0,
+    k_break_pedal_bias = 0.2,
+    k_turn_coord_pedal = 0.02,
+    tau_accel_filter_s = 0.3,
+    turn_settle_deg_s = 0.3,
+    law_hz = 30.0,
+    velocity_source = "position",
+    w_v_s = 0.1,
+    w_a_s = 0.2,
+    w_a2_s = 0.1,
+    w_b = 0.2,
+    ball_centre = 0.03,
+    ball_usable_range = 0.5,
+}
+"""
+
 
 def _run(driver: str) -> list[str]:
     """Loads the whole module (no mocks -- the law functions touch no
@@ -103,6 +161,8 @@ def _run(driver: str) -> list[str]:
         + module_source
         + "\nend)()\n"
         + _LIMITS
+        + "\n"
+        + _PROFILE
         + "\n"
         + driver
     )
@@ -167,8 +227,8 @@ class TestBitExactAtTake:
         driver = f"""
 local measured = {_measured(pitch_deg=2.0, bank_deg=-3.0, q_deg_s=1.5, p_deg_s=-0.8)}
 local command = {{ pitch = 0.321, roll = -0.154, pedals = 0.05, collective = 0.2 }}
-local state = flight_control.law_init_at_take(measured, LIMITS, command)
-local outputs = flight_control.law_outputs(state, measured)
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+local outputs = flight_control.law_outputs(state, measured, PROFILE)
 print(string.format("%.9f", outputs.pitch))
 print(string.format("%.9f", outputs.roll))
 print(string.format("%.9f", outputs.pedals))
@@ -188,7 +248,7 @@ print(string.format("%.9f", outputs.collective))
         driver = f"""
 local measured = {_measured()}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured, LIMITS, command)
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
 print(state.u_c)
 """
         lines = _run(driver)
@@ -199,8 +259,7 @@ class TestTakeoverModeSelection:
     def test_4_9_degrees_picks_heading_mode(self) -> None:
         driver = f"""
 local measured = {_measured(bank_deg=4.9)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
 print(tostring(state.turn_mode))
 """
         lines = _run(driver)
@@ -209,8 +268,7 @@ print(tostring(state.turn_mode))
     def test_5_1_degrees_picks_turn_mode(self) -> None:
         driver = f"""
 local measured = {_measured(bank_deg=5.1)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
 print(tostring(state.turn_mode))
 """
         lines = _run(driver)
@@ -234,8 +292,7 @@ local measured = {
             _measured(bank_deg=10.0, psi_deg=270.0, h_m=500.0, w_mps=3.0, ias_mps=50.0)
         }
 local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
-local state = flight_control.law_init_at_take(measured, LIMITS, command,
-    {{ heading_deg = 45.0, alt_m = 700.0, alt_ref = "B", speed_kmh = 180.0 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, command, {{ heading_deg = 45.0, alt_m = 700.0, alt_ref = "B", speed_kmh = 180.0 }}, PROFILE)
 print(tostring(state.turn_mode))
 print(string.format("%.6f", state.heading_goal_deg))
 print(string.format("%.6f", state.alt_goal_m))
@@ -263,9 +320,8 @@ local measured = {
             _measured(bank_deg=2.0, psi_deg=123.0, h_m=400.0, w_mps=0.0, ias_mps=60.0)
         }
 local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
-local with_seed = flight_control.law_init_at_take(measured, LIMITS, command,
-    {{ heading_deg = nil, alt_m = nil, alt_ref = nil, speed_kmh = nil }})
-local without_seed = flight_control.law_init_at_take(measured, LIMITS, command)
+local with_seed = flight_control.law_init_at_take(measured, LIMITS, command, {{ heading_deg = nil, alt_m = nil, alt_ref = nil, speed_kmh = nil }}, PROFILE)
+local without_seed = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
 print(tostring(with_seed.turn_mode == without_seed.turn_mode))
 print(tostring(with_seed.heading_goal_deg == without_seed.heading_goal_deg))
 print(tostring(with_seed.alt_goal_m == without_seed.alt_goal_m))
@@ -287,13 +343,13 @@ local measured = {
             )
         }
 local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
-local state = flight_control.law_init_at_take(measured, LIMITS, command)
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
 print(tostring(state.turn_mode))
 local dt = 0.05
 local tau = 1.0
 for i = 1, 2000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -327,14 +383,13 @@ local measured = {
             )
         }
 local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
-local state = flight_control.law_init_at_take(measured, LIMITS, command,
-    {{ heading_deg = 0.0 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, command, {{ heading_deg = 0.0 }}, PROFILE)
 print(tostring(state.turn_mode))
 local dt = 0.05
 local tau = 1.0
 for i = 1, 2000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -360,16 +415,15 @@ print(string.format("%.6f", measured.bank_deg))
 #: least internally consistent with what the law assumes a turn does).
 _HEADING_PLANT_DRIVER = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(state, {{ heading_deg = {goal} }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = {goal} }}, LIMITS, PROFILE)
 local dt = 0.05
 local tau = 1.0
 local errs = {{}}
 local signs = {{}}
 for i = 1, {steps} do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -423,16 +477,14 @@ class TestHeadingChannel:
 #: steep the bank gets, not just whether the heading converges.
 _BREAK_PLANT_DRIVER = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = {goal}, turn_rate_deg_s = {rate} }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = {goal}, turn_rate_deg_s = {rate} }}, LIMITS, PROFILE)
 local dt = 0.05
 local tau = 1.0
 local max_bank = 0.0
 for i = 1, {steps} do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     if math.abs(measured.bank_deg) > max_bank then max_bank = math.abs(measured.bank_deg) end
@@ -552,10 +604,8 @@ class TestRateOverrideClearing:
     def test_heading_goal_with_a_rate_sets_both_fields(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=300.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS, PROFILE)
 print(state.rate_override_deg_s)
 print(state.break_entry_h_m)
 """
@@ -569,11 +619,9 @@ print(state.break_entry_h_m)
         whatever override an earlier break left standing."""
         driver = f"""
 local measured = {_measured(h_m=300.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS)
-state = flight_control.law_apply_goal(state, {{ heading_deg = 180.0 }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 180.0 }}, LIMITS, PROFILE)
 print(tostring(state.rate_override_deg_s))
 print(tostring(state.break_entry_h_m))
 """
@@ -584,11 +632,9 @@ print(tostring(state.break_entry_h_m))
     def test_a_continuous_turn_goal_also_clears_a_standing_override(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=300.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS)
-state = flight_control.law_apply_goal(state, {{ turn = 1 }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = -40.0 }}, LIMITS, PROFILE)
+state = flight_control.law_apply_goal(state, {{ turn = 1 }}, LIMITS, PROFILE)
 print(tostring(state.rate_override_deg_s))
 print(tostring(state.break_entry_h_m))
 """
@@ -608,17 +654,15 @@ class TestBreakHeightFloor:
     ) -> None:
         driver = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0, roll = 0, pedals = 0, collective = 0.2 })
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
 -- Force a far-below floor so the shaper would chase it if the break
 -- floor did not intervene.
 state.alt_goal_m = 0.0
-state = flight_control.law_apply_goal(
-    state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS)
+state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
 local dt = 0.05
 local min_h_ref = state.h_ref
 for i = 1, 400 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     if state.h_ref < min_h_ref then min_h_ref = state.h_ref end
 end
 print(string.format("%.6f", min_h_ref))
@@ -637,16 +681,14 @@ print(string.format("%.6f", state.alt_goal_m))
         applying and `h_ref` is free to continue toward `alt_goal_m`."""
         driver = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0, roll = 0, pedals = 0, collective = 0.2 })
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
 state.alt_goal_m = 0.0
-state = flight_control.law_apply_goal(
-    state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS)
+state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
 local dt = 0.05
 local tau = 1.0
 for i = 1, 3000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -673,11 +715,10 @@ class TestRotorEnvelopeGuards:
     def test_low_rotor_rpm_caps_a_rising_collective(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=100.0, w_mps=-5.0, rotor_rpm_pct=88.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 -- A big positive altitude error asks for a large rising c_dot.
 state.alt_goal_m = 1000.0
-local next_state = flight_control.law_update(state, 0.05, measured, LIMITS)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
@@ -689,10 +730,9 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
     def test_a_falling_collective_is_untouched_by_the_rpm_floor(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=1000.0, w_mps=5.0, rotor_rpm_pct=88.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 0.0
-local next_state = flight_control.law_update(state, 0.05, measured, LIMITS)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
@@ -701,10 +741,9 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
     def test_near_retreating_blade_stall_caps_a_rising_collective(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=100.0, w_mps=-5.0, ias_mps=235.0 / 3.6, v_t_mps=235.0 / 3.6)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
-local next_state = flight_control.law_update(state, 0.05, measured, LIMITS)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
@@ -715,10 +754,9 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
     def test_well_clear_of_both_guards_collective_rises_freely(self) -> None:
         driver = f"""
 local measured = {_measured(h_m=100.0, w_mps=-5.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
-local next_state = flight_control.law_update(state, 0.05, measured, LIMITS)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
@@ -734,13 +772,12 @@ class TestVrsDescentCap:
     def test_slow_flight_descent_never_exceeds_the_vrs_cap(self) -> None:
         driver = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0, roll = 0, pedals = 0, collective = 0.2 })
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
 state.alt_goal_m = -10000.0
 local dt = 0.05
 local min_w_ref = 0.0
 for i = 1, 400 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     if state.w_ref < min_w_ref then min_w_ref = state.w_ref end
 end
 print(string.format("%.6f", min_w_ref))
@@ -751,13 +788,12 @@ print(string.format("%.6f", min_w_ref))
     def test_cruise_speed_descent_is_not_capped_by_vrs(self) -> None:
         driver = """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0, roll = 0, pedals = 0, collective = 0.2 })
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
 state.alt_goal_m = -10000.0
 local dt = 0.05
 local min_w_ref = 0.0
 for i = 1, 400 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     if state.w_ref < min_w_ref then min_w_ref = state.w_ref end
 end
 print(string.format("%.6f", min_w_ref))
@@ -782,8 +818,7 @@ class TestClimbTakeoverStoppingHeight:
     ) -> None:
         driver = f"""
 local measured = {_measured(w_mps=4.0, h_m=200.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 print(string.format("%.6f", state.alt_goal_m))
 """
         lines = _run(driver)
@@ -795,8 +830,7 @@ print(string.format("%.6f", state.alt_goal_m))
     def test_descending_takeover_goal_is_below_capture(self) -> None:
         driver = f"""
 local measured = {_measured(w_mps=-3.0, h_m=200.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 print(string.format("%.6f", state.alt_goal_m))
 """
         lines = _run(driver)
@@ -815,14 +849,13 @@ print(string.format("%.6f", state.alt_goal_m))
         driver = """
 local measured = {measured}
 local trim_collective = 0.2
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0, roll = 0, pedals = 0, collective = trim_collective })
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = trim_collective }, nil, PROFILE)
 local dt = 0.05
 local plant_w_gain = 15.0  -- m/s^2 per unit collective deflection
 local max_h_ref = state.h_ref
 for i = 1, 4000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     local w_dot = plant_w_gain * (outputs.collective - trim_collective)
     measured.w_mps = measured.w_mps + w_dot * dt
     measured.h_m = measured.h_m + measured.w_mps * dt
@@ -846,14 +879,13 @@ class TestSpeedChannel:
         driver = """
 local measured = {measured}
 local trim_pitch = -3.0
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    { pitch = 0.15, roll = 0, pedals = 0, collective = 0.2 })
-state = flight_control.law_apply_goal(state, { ias_kmh = 180.0 }, LIMITS)  -- 50 m/s
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0.15, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 180.0 }, LIMITS, PROFILE)  -- 50 m/s
 local dt = 0.05
 local plant_ax_gain = 2.0  -- m/s^2 per degree of nose-down pitch past trim
 for i = 1, 6000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     local tau = 1.5
     measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
     measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
@@ -880,14 +912,13 @@ class TestLevelOffSettlesToHeadingMode:
         rolled out."""
         driver = f"""
 local measured = {_measured(bank_deg=20.0, psi_deg=0.0)}
-local state = flight_control.law_init_at_take(measured, LIMITS,
-    {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }})
-state = flight_control.law_apply_goal(state, {{ turn = 0 }}, LIMITS)
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ turn = 0 }}, LIMITS, PROFILE)
 local dt = 0.05
 local tau = 1.0
 for i = 1, 3000 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
-    local outputs = flight_control.law_outputs(state, measured)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
     measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
     measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
     local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
@@ -921,14 +952,14 @@ class TestPedalDoesNotDriftWithCollectiveDisabled:
         driver = f"""
 local measured_take = {_measured(h_m=200.0, w_mps=0.0, collective_enabled=False)}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 local t_y_at_take = state.t_y
 -- The real aircraft sits 5 m above the stopping height captured at
 -- take, and never moves from there (nothing is flying the collective)
 -- -- a sustained, never-resolving altitude error.
 for i = 1, 200 do
     local m = {_measured(h_m=205.0, w_mps=0.0, collective_enabled=False)}
-    state = flight_control.law_update(state, 0.1, m, LIMITS)
+    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
 end
 print(string.format("%.6f", t_y_at_take))
 print(string.format("%.6f", state.t_y))
@@ -954,10 +985,10 @@ print(string.format("%.6f", state.t_y))
         driver = f"""
 local measured_take = {_measured(h_m=200.0, w_mps=0.0, collective_enabled=True)}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 for i = 1, 200 do
     local m = {_measured(h_m=205.0, w_mps=0.0, collective_enabled=True)}
-    state = flight_control.law_update(state, 0.1, m, LIMITS)
+    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
 end
 print(string.format("%.6f", state.t_y))
 """
@@ -984,20 +1015,16 @@ class TestBreakPedalBiasUnwinds:
         driver = f"""
 local measured_take = {_measured(collective_enabled=False)}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 local t_y_before_break = state.t_y
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = 90.0, turn_rate_deg_s = 15.0 }}, LIMITS)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = 15.0 }}, LIMITS, PROFILE)
 for i = 1, 400 do
     local m = {_measured(psi_deg=0.0, collective_enabled=False)}
     -- psi_deg is overwritten below, per-frame, to the law's own
     -- current psi_ref (the idealised plant).
-    state = flight_control.law_update(
-        state, 0.1,
-        {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
+    state = flight_control.law_update(state, 0.1, {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
            v_t_mps = 42.0, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
-           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }},
-        LIMITS)
+           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}, LIMITS, PROFILE)
 end
 print(string.format("%.6f", t_y_before_break))
 print(string.format("%.6f", state.t_y))
@@ -1028,7 +1055,7 @@ class TestCollectiveHoldsAltitudeInABankedTurn:
         driver = f"""
 local measured_take = {_measured()}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.2 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 local measured = {_measured(bank_deg=40.0)}
 local dt = 0.1
 local max_theta = 0.0
@@ -1037,7 +1064,7 @@ local max_theta = 0.0
 -- the thing collective (or, lacking that, pitch) has to counter.
 local lift_loss = 1.0 - math.cos(math.rad(40.0))
 for i = 1, 600 do
-    state = flight_control.law_update(state, dt, measured, LIMITS)
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     local target_w
     if {"true" if collective_effective else "false"} then
         -- Collective actually reaches the plant: vertical speed chases
@@ -1099,8 +1126,8 @@ print(string.format("%.6f", measured.h_m))
 _TURN_PEDAL_DRIVER = """
 local measured_take = {measured_take}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
-local outputs_before = flight_control.law_outputs(state, measured_take)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
+local outputs_before = flight_control.law_outputs(state, measured_take, PROFILE)
 {goal_apply}
 local min_pedal, max_pedal = 0.0, 0.0
 local m
@@ -1108,12 +1135,12 @@ for i = 1, {steps} do
     m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 40.0,
            v_t_mps = 42.0, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
            q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
-    state = flight_control.law_update(state, 0.1, m, LIMITS)
-    local out = flight_control.law_outputs(state, m)
+    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
+    local out = flight_control.law_outputs(state, m, PROFILE)
     if out.pedals < min_pedal then min_pedal = out.pedals end
     if out.pedals > max_pedal then max_pedal = out.pedals end
 end
-local outputs_after = flight_control.law_outputs(state, m)
+local outputs_after = flight_control.law_outputs(state, m, PROFILE)
 print(string.format("%.6f", outputs_before.pedals))
 print(string.format("%.6f", min_pedal))
 print(string.format("%.6f", max_pedal))
@@ -1148,7 +1175,7 @@ class TestTurnCoordinationPedal:
     def test_right_turn_pulls_positive_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
-            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 90.0 }, LIMITS)",
+            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 90.0 }, LIMITS, PROFILE)",
             steps=400,
         )
         lines = _run(driver)
@@ -1166,7 +1193,7 @@ class TestTurnCoordinationPedal:
     def test_left_turn_pulls_negative_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
-            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 270.0 }, LIMITS)",
+            goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 270.0 }, LIMITS, PROFILE)",
             steps=400,
         )
         lines = _run(driver)
@@ -1188,15 +1215,14 @@ class TestTurnCoordinationPedal:
         driver = f"""
 local measured_take = {_measured(collective_enabled=False)}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
-local state = flight_control.law_init_at_take(measured_take, LIMITS, command)
-state = flight_control.law_apply_goal(
-    state, {{ heading_deg = 90.0, turn_rate_deg_s = 40.0 }}, LIMITS)
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0, turn_rate_deg_s = 40.0 }}, LIMITS, PROFILE)
 local max_t_y = 0.0
 for i = 1, 100 do
     local m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 150.0 / 3.6,
            v_t_mps = 150.0 / 3.6, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
            q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false }}
-    state = flight_control.law_update(state, 0.1, m, LIMITS)
+    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
     if state.t_y > max_t_y then max_t_y = state.t_y end
 end
 print(string.format("%.6f", max_t_y))

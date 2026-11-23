@@ -200,6 +200,64 @@ end
 
 local function debug_log(msg) end
 
+-- BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/plan.md`)
+-- -- `flight_control.lua`'s own orchestration code (`run_active_frame`/
+-- `request_take`) now reads `flight_profile.ACTIVE` at every `law_*`
+-- call site, the same cross-module-global pattern as `flight_desired`/
+-- `ai_pilot_wheel` below. Values copied verbatim from `flight_profile.
+-- lua`'s own `PROFILES["Mi-24P"]` table -- this harness exercises the
+-- whole module end to end (`run_flight_control`), so a mismatched value
+-- here would show up as a changed `fc_*` wire field, not a Lua error.
+flight_profile = {
+    ACTIVE = {
+        law_zeta = 1.0,
+        omega_heading = 0.3,
+        omega_alt = 0.5,
+        omega_speed = 0.15,
+        t_roll = 2.0,
+        heading_accel_cap_deg_s2 = 6.0,
+        k_heading_track = 0.3,
+        alt_accel_cap_mps2 = 1.0,
+        speed_accel_cap_mps2 = 0.5,
+        k_vs_error = 0.3,
+        k_alt_error = 0.05,
+        k_speed_error = 0.2,
+        k_collective = 0.08,
+        k_tilt_from_ax = 0.04,
+        k_tilt_from_az_saturated = 0.03,
+        theta_min_deg = -15.0,
+        theta_max_deg = 15.0,
+        k_bank_increment = 0.5,
+        k_theta = 0.03,
+        k_theta_i = 0.015,
+        k_q = 0.01,
+        k_phi = 0.03,
+        k_phi_i = 0.015,
+        k_p = 0.01,
+        k_pedal_from_collective_rate = 0.25,
+        pedal_limit_positive = 0.5,
+        pedal_limit_negative = -1.0,
+        pedal_near_limit_margin = 0.1,
+        collective_rate_cap_near_pedal_limit = 0.3,
+        rotor_rpm_near_floor_margin_pct = 5.0,
+        collective_rate_cap_near_rpm_floor = 0.0,
+        retreating_blade_stall_margin_kmh = 20.0,
+        collective_rate_cap_near_blade_stall = 0.0,
+        k_break_pedal_bias = 0.2,
+        k_turn_coord_pedal = 0.02,
+        tau_accel_filter_s = 0.3,
+        turn_settle_deg_s = 0.3,
+        law_hz = 30.0,
+        velocity_source = "position",
+        w_v_s = 0.1,
+        w_a_s = 0.2,
+        w_a2_s = 0.1,
+        w_b = 0.2,
+        ball_centre = 0.03,
+        ball_usable_range = 0.5,
+    },
+}
+
 ai_pilot_wheel = {
     is_parked = function()
         if ap_parked == nil then return nil end

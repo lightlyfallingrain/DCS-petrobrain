@@ -279,167 +279,21 @@ local FC_LIMIT_BOUNDS = {
     vrs_max_descent_mps = { lo = 0.0, hi = 50.0 },
 }
 
---[[ M2 control law constants (plan: "The control law, as a first
-implementation should follow it" -- "written against an unmeasured
-plant... the gains, limits and signs are placeholders until M0-E and
-M0-A give real numbers"). One commented block, per the plan's own
-"Behaviour constants" table ("Export.lua, one commented block... how
-the loop closes, not what he does. Would want the X-T26 mechanism;
-outside body-layer it does not exist"). M0-A (`aircraft-layer/research/
-2026-11-18-bl16-m0-flight-axes-findings.md`) measured pedal tau~=0.25s
-and collective tau~=0.1s, but gave no step-response data for pitch/
-roll/pedal-yaw/collective-vs-VS gain, and M0-E (the deliberate step-
-response probe) was never flown -- every gain below is a first-cut
-guess sized only so the toy-plant tests show convergence without
-ringing, not a measurement. All flagged "owed by M0-E" in the
-Implementer's report; Flight M-A and M5 retune them. ]]--
-
--- Critically-damped-or-overdamped factor for every position/rate
--- shaper (`a_ref = omega^2*err - 2*zeta*omega*v_ref`) -- zeta>=1 is
--- what the plan's own formula requires for "no overshoot" (page 3's
--- S-curve). Kept at exactly 1 (critically damped, the fastest
--- non-overshooting response) rather than over-damped, a judgement
--- call, not a measurement.
-local LAW_ZETA = 1.0
-
--- Shaper bandwidths (rad/s) -- how fast each reference chases its own
--- goal, before any rate/accel ceiling clips it. Owed by M0-E.
-local OMEGA_HEADING = 0.3
-local OMEGA_ALT = 0.5
-local OMEGA_SPEED = 0.15
-
--- Heading/turn channel's own accel limit is derived from this roll-in
--- time (the plan's own "r_max / T_ROLL") rather than declared directly,
--- so a tighter/looser `max_turn_bank_deg` (body-layer tunable) does not
--- need a matching accel-limit edit here. Owed by M0-E (the airborne
--- yaw/roll response to a pedal/cyclic step was never flown).
-local T_ROLL = 2.0
-local HEADING_ACCEL_CAP_DEG_S2 = 6.0
--- How hard the law pulls the real heading back onto its own reference
--- path (plan step 2: `r_d = r_ref + k_psi*wrap(psi_ref - psi)`), in
--- deg/s commanded per degree of drift. Owed by M0-E.
-local K_HEADING_TRACK = 0.3
-
--- Altitude/speed channel accel limits, before the commanded `max_
--- climb_vs_mps`/`max_accel_mps2` ceilings (body-layer tunables) clip
--- the resulting rate. Owed by M0-E.
-local ALT_ACCEL_CAP_MPS2 = 1.0
-local SPEED_ACCEL_CAP_MPS2 = 0.5
-
--- Plan step 2's own feedback gains (`a_z,d = w_ref_dot + k_w*(w_ref-w) +
--- k_h*(h_ref-h)`, `a_x,d = dV_ref_dot + k_v*(V_ref-V)`). Owed by M0-E.
-local K_VS_ERROR = 0.3
-local K_ALT_ERROR = 0.05
-local K_SPEED_ERROR = 0.2
-
--- Lift-vector correction gains (plan step 3): collective rate per
--- vertical-accel error (1/s per m/s^2), fore/aft tilt rate per along-
--- track-accel error, and the extra tilt rate step 3 adds once the
--- collective is saturated (same-sign error) -- "the lift vector is the
--- only control if collective is at limit". Owed by M0-E.
-local K_COLLECTIVE = 0.08
-local K_TILT_FROM_AX = 0.04
-local K_TILT_FROM_AZ_SATURATED = 0.03
-local THETA_MIN_DEG = -15.0
-local THETA_MAX_DEG = 15.0
-
--- Lateral-tilt kinematic term (plan step 3: `phi_d = atan(V_t*r_d/g) +
--- phi_i`) needs no gain of its own -- it is turn kinematics, not a fit
--- -- but the incremental correction `phi_i` does: `phi_i_dot = K_r*(r_d
--- - r)`. Owed by M0-E.
-local K_BANK_INCREMENT = 0.5
+-- M2 control law constants -- **moved to `flight_profile.lua`'s
+-- `PROFILES["Mi-24P"]` table, BL-16 lift-vector law Stage LV-0**
+-- (`plans/flight-lift-vector/plan.md`): every gain/time-constant the
+-- five pure law functions below read is now a `profile` field, values
+-- unchanged (confirmed bit-identical by the toy-plant and whole-module
+-- test suites). `flight_profile.lua`'s own header carries what each one
+-- is owed/unmeasured against -- not duplicated here. `GRAVITY_MPS2`
+-- stays a plain local (physics, not a tunable gain).
 local GRAVITY_MPS2 = 9.81
 
--- Inner tilt loop (plan step 4): `u = T + k_theta*(target-measured) -
--- k_rate*rate`, with `T` integrating `k_theta_i*(target-measured)`.
--- Units: axis command per degree of attitude error, and axis command
--- per deg/s of body rate. Owed by M0-E -- the step response this loop
--- closes on was never measured.
-local K_THETA = 0.03
-local K_THETA_I = 0.015
-local K_Q = 0.01
-local K_PHI = 0.03
-local K_PHI_I = 0.015
-local K_P = 0.01
-
--- Pedal coordination (plan step 5): `u_y_dot = K_beta*beta + K_cy*u_c_
--- dot`. `K_beta`'s own term is NOT implemented -- `LoGetSlipBallPosition`
--- exists (confirmed in the DCS Control API reference) but its return
--- shape/units were never measured by any probe (M0-A did not read it;
--- `aircraft-layer/research/2026-10-26-bl16-flight-control-desk-recon.md`
--- names this an open item), so guessing a unit conversion here risks a
--- wrong-sign pedal command, worse than omitting the term. The pedal
--- axis therefore runs on the collective-coupling feedforward alone
--- until a probe measures the slip ball. Owed by M0-E and a slip-ball
--- probe both.
--- Sign check (sortie 2026-11-20, collective now written): `plans/
--- flight-control/explore-notes.md` (2026-10-26), user -- "due to the
--- angular momentum forces of engine turning the rotor, the hind yaws
--- much easier to left. At hover and slow flight a lot of right rudder
--- is needed... not much right rudder left" -- i.e. more torque (higher
--- collective) eats further into the *already-scarce right* pedal
--- margin. Positive `c_dot` here already means "more collective" (the
--- same sign `law_update`'s own altitude step assumes), and the sign
--- below (positive gain, feeding `t_y` positive) only matches that
--- physics if positive `t_y` is "right" -- which is itself an unmeasured
--- guess, the same one `PEDAL_LIMIT_POSITIVE`'s own asymmetry below
--- already makes. Consistent with that guess, not independently
--- confirmed; kept at this same conservative magnitude rather than
--- tuned, pending M0-E and a slip-ball probe.
-local K_PEDAL_FROM_COLLECTIVE_RATE = 0.25
--- The right-pedal limit is smaller than the left one (user: "not much
--- right rudder left"), but which *sign* of the pedal axis is
--- physically "right" was never measured (M0-E) -- this asymmetry is
--- therefore a guess at the magnitude only, applied to the
--- positive-command side; Flight M-A confirms or flips it.
-local PEDAL_LIMIT_POSITIVE = 0.5
-local PEDAL_LIMIT_NEGATIVE = -1.0
--- While the pedal sits within this margin of its own positive limit, a
--- rising collective command is rate-capped (plan step 5: "a collective
--- increase is rate-limited while the right pedal is near its limit").
-local PEDAL_NEAR_LIMIT_MARGIN = 0.1
-local COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT = 0.3
-
--- Rotor RPM floor and retreating blade stall (mode-1 batch, explore-
--- notes 2026-11-18/19) -- "the rotor rpm drop below minimum and
--- retreating blade stall are things to avoid in any Mode 1 state,
--- whatever we are doing... high collective leads to RPM drop... high
--- blade angle and high speed lead to retreating blade stall." Both
--- margins are judgement (how much slack before the cap engages), same
--- class as `ENV_IAS_MARGIN_KMH`/`K_*` above -- the thresholds
--- themselves (the RPM floor, the stall IAS) are the user's own
--- numbers, wire-carried, in `limits` (`ROTOR_RPM_FLOOR_PCT`/
--- `RETREATING_BLADE_STALL_IAS_KMH`, body-layer's `tuning.py`).
-local ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT = 5.0
-local COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR = 0.0
-local RETREATING_BLADE_STALL_MARGIN_KMH = 20.0
-local COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL = 0.0
-
--- Mode-1 batch, Decision 27's own pedal-into-the-turn bias while a
--- break's rate override is active -- judgement, owed by Flight M-A.
-local K_BREAK_PEDAL_BIAS = 0.2
-
--- Turn-coordination pedal (sortie 2026-11-20, user: "turn right 50 ->
--- turns but does not use pedals at all. Use pedals. All the axis are
--- interdependent in helicopter flight." -- `docs/acceptance/2026-11-20-
--- sortie-feedback.md`). Proportional to the commanded turn rate `r_d`,
--- so an ordinary turn (not only a break) carries pedal too -- a
--- placeholder pending the same slip-ball probe `K_PEDAL_FROM_
--- COLLECTIVE_RATE` is already owed to (module header, step 5): no
--- `LoGetSlipBallPosition` reading exists yet to tell which way the ball
--- actually slides in a turn. **Sign assumption, unmeasured**: pedal in
--- the *same* sign as the turn (a right turn, `r_d > 0`, pulls positive/
--- "right" pedal) -- the same positive-command-is-right convention
--- `PEDAL_LIMIT_POSITIVE`'s own asymmetry already guesses, kept
--- consistent with it rather than independently chosen. Applied only
--- while no break rate-override is active (`state.rate_override_deg_s
--- == nil`, step 5 below) so this term and `K_BREAK_PEDAL_BIAS` never
--- both feed the same frame -- the break already has its own
--- turn-direction pedal bias, tuned/owed separately. Sized small and
--- conservative: at the ordinary turn ceiling (`max_turn_bank_deg`,
--- 20 deg, around 5-10 deg/s of `r_d` at cruise IAS) this contributes at
--- most ~0.1-0.2 of pedal travel, well inside the axis range.
-local K_TURN_COORD_PEDAL = 0.02
+-- Rotor-RPM-floor/retreating-blade-stall margins and the pedal-bias
+-- gains (`K_BREAK_PEDAL_BIAS`/`K_TURN_COORD_PEDAL`) -- **moved to
+-- `flight_profile.lua`** (LV-0, same move as the block above; the RPM-
+-- floor/stall *thresholds* themselves stay wire-carried in `limits`,
+-- body-layer's `tuning.py`, a different mechanism from this profile).
 
 -- Rotor RPM proxy (mode-1 batch, explore-notes 2026-11-18/19, Q-M1-1).
 -- "dummy": a fixed stand-in value, the user's own fallback. "arg_
@@ -472,12 +326,8 @@ local function read_rotor_rpm_pct()
     return raw * ROTOR_RPM_ARG_SCALE_MAX_PCT, true -- calibration unconfirmed -- owed by the next flight
 end
 
--- Accelerations are not read from a dedicated sensor (M0-A: `LoGet
--- AccelerationUnits`' own axis-to-body-frame mapping is unconfirmed) --
--- `a_x`/`a_z` are a filtered numerical derivative of IAS/vertical speed
--- instead (plan's own fallback: "filtered dV/dt and dw/dt"). This is
--- the filter's own time constant.
-local TAU_ACCEL_FILTER_S = 0.3
+-- `TAU_ACCEL_FILTER_S` (the `a_x`/`a_z` fallback-derivative filter
+-- constant) -- **moved to `flight_profile.lua`** (LV-0).
 
 -- Output-stage rate limit (axis units per second) -- a defensive cap
 -- on how fast any written axis value may move frame to frame, on top
@@ -486,12 +336,8 @@ local TAU_ACCEL_FILTER_S = 0.3
 -- producing a jump), so kept generous.
 local OUTPUT_RATE_LIMIT_PER_S = 4.0
 
--- Below this residual turn rate (deg/s), `level_off`'s own turn-mode
--- roll-out counts as "settled" and the law switches internally to
--- heading mode, holding the heading the roll-out stopped at (plan:
--- "`level_off` goes through turn mode at 0. When `r_ref` reaches 0,
--- Lua switches to heading mode").
-local TURN_SETTLE_DEG_S = 0.3
+-- `TURN_SETTLE_DEG_S` -- **moved to `flight_profile.lua`** (LV-0; read
+-- inside `law_update`, a pure function, so it travels with `profile`).
 
 -- Mode-1 law state, nil whenever `fc_mode` is not "active" (created at
 -- `law_init_at_take`, discarded on release/self-release/park). A plain
@@ -541,9 +387,9 @@ local function law_stopping_height(h, w, max_accel_mps2)
     return h + w * math.abs(w) / (2.0 * max_accel_mps2)
 end
 
---[[ `law_apply_goal(state, goal, limits)` -- Decision 21/the plan's
-"Wire" section's own one-shot goal application, called once when a
-`goal` command is applied or a take/unpark-take happens (never
+--[[ `law_apply_goal(state, goal, limits, profile)` -- Decision 21/the
+plan's "Wire" section's own one-shot goal application, called once when
+a `goal` command is applied or a take/unpark-take happens (never
 re-applied every frame from the wire echo -- that would re-trigger
 `level_off`'s own turn-mode request every poll and undo the internal
 settle-to-heading transition below). `goal` fields mirror the wire's
@@ -551,8 +397,13 @@ own shape (`heading_deg`/`turn`/`alt_m`/`alt_ref`/`ias_kmh`, any subset
 present). Returns a new state; never mutates `state` in place (every
 `law_*` function in this module follows that convention, so the toy-
 plant tests can hold a reference to the state before a call and compare
-it against the state after). ]]--
-local function law_apply_goal(state, goal, limits)
+it against the state after). `profile` (BL-16 lift-vector law, LV-0,
+`flight_profile.lua`) carries this function's own gains -- currently
+only `law_turn_rate_at_bank` (unchanged signature, reads the plain
+`GRAVITY_MPS2` local) is called from here, so `profile` is accepted for
+signature consistency with the other four `law_*` functions but not yet
+read directly. ]]--
+local function law_apply_goal(state, goal, limits, profile)
     local next_state = {}
     for k, v in pairs(state) do next_state[k] = v end
 
@@ -608,7 +459,7 @@ local function law_apply_goal(state, goal, limits)
     return next_state
 end
 
--- `law_init_at_take(measured, limits, command, seed)` -- Decision 24's
+-- `law_init_at_take(measured, limits, command, seed, profile)` -- Decision 24's
 -- "At take" section. `command` is the already SIGN-mapped (per
 -- `SIGN.*`) captured axis value for every axis, in the same domain the
 -- output stage writes (so `law_outputs` on this very state, with zero
@@ -638,7 +489,7 @@ end
 -- target takes heading mode unconditionally (never turn mode), since
 -- the dial is the deliberate state to resume, not the bank the AI
 -- wheel happened to be at the instant of the unpark.
-local function law_init_at_take(measured, limits, command, seed)
+local function law_init_at_take(measured, limits, command, seed, profile)
     seed = seed or {}
     local heading_mode = math.abs(measured.bank_deg) < limits.takeover_level_bank_deg
     local heading_goal_deg = measured.psi_deg
@@ -647,14 +498,14 @@ local function law_init_at_take(measured, limits, command, seed)
         heading_goal_deg = seed.heading_deg
     end
     -- `A_v` in the plan's own "h + w*|w|/(2*A_v)" is the channel's
-    -- deceleration capability (`ALT_ACCEL_CAP_MPS2`), not the
+    -- deceleration capability (`profile.alt_accel_cap_mps2`), not the
     -- velocity ceiling `max_climb_vs_mps` -- confirmed a real bug
     -- here by the toy-plant suite, which drove an actual climb
     -- through this formula and found the shaper overshoot-then-
     -- reverse the velocity-ceiling version produces (the wrong
     -- stopping height asks for more deceleration than the channel
     -- can deliver).
-    local alt_goal_m = law_stopping_height(measured.h_m, measured.w_mps, ALT_ACCEL_CAP_MPS2)
+    local alt_goal_m = law_stopping_height(measured.h_m, measured.w_mps, profile.alt_accel_cap_mps2)
     local alt_goal_ref = "agl"
     if type(seed.alt_m) == "number" then
         alt_goal_m = seed.alt_m
@@ -686,8 +537,8 @@ local function law_init_at_take(measured, limits, command, seed)
         theta_d = measured.pitch_deg,
         phi_d = measured.bank_deg,
         phi_i = 0.0,
-        t_p = command.pitch + K_Q * measured.q_deg_s,
-        t_r = command.roll + K_P * measured.p_deg_s,
+        t_p = command.pitch + profile.k_q * measured.q_deg_s,
+        t_r = command.roll + profile.k_p * measured.p_deg_s,
         t_y = command.pedals,
         u_c = command.collective,
         prev_v_mps = measured.ias_mps,
@@ -721,13 +572,13 @@ local function law_init_at_take(measured, limits, command, seed)
     }
 end
 
--- `law_update(state, dt, measured, limits)` -- one frame of "The
+-- `law_update(state, dt, measured, limits, profile)` -- one frame of "The
 -- control law" (plan steps 1-5 plus the pedal/collective halves of
 -- step 3/5), advancing every shaper reference and integrator. Pure:
 -- returns a new state, never mutates `state`. `law_outputs` (below)
 -- reads the result out; this function does not itself produce an axis
 -- command.
-local function law_update(state, dt, measured, limits)
+local function law_update(state, dt, measured, limits, profile)
     local next_state = {}
     for k, v in pairs(state) do next_state[k] = v end
 
@@ -735,9 +586,9 @@ local function law_update(state, dt, measured, limits)
     local r_max = law_turn_rate_at_bank(limits.max_turn_bank_deg, measured.v_t_mps)
     if state.turn_mode then
         local r_goal = state.turn_goal_deg_s
-        local accel_limit = HEADING_ACCEL_CAP_DEG_S2
+        local accel_limit = profile.heading_accel_cap_deg_s2
         if r_max > 0.0 then
-            accel_limit = math.min(HEADING_ACCEL_CAP_DEG_S2, r_max / T_ROLL)
+            accel_limit = math.min(profile.heading_accel_cap_deg_s2, r_max / profile.t_roll)
         end
         local dr = law_clamp(r_goal - state.r_ref, -accel_limit * dt, accel_limit * dt)
         next_state.r_ref = state.r_ref + dr
@@ -746,7 +597,7 @@ local function law_update(state, dt, measured, limits)
         -- Lua switches to heading mode with psi_goal = psi_ref" --
         -- the stopping point, not the heading at the moment "level off"
         -- was spoken.
-        if math.abs(r_goal) < 1e-6 and math.abs(next_state.r_ref) < TURN_SETTLE_DEG_S then
+        if math.abs(r_goal) < 1e-6 and math.abs(next_state.r_ref) < profile.turn_settle_deg_s then
             next_state.turn_mode = false
             next_state.heading_goal_deg = next_state.psi_ref
         end
@@ -755,21 +606,23 @@ local function law_update(state, dt, measured, limits)
         -- rate ceiling and accel-limit (roll-in time) both come from
         -- it instead of the ordinary `max_turn_bank_deg`-derived rate;
         -- the accel limit uses the same roll-in formula (`r_max /
-        -- T_ROLL`) `turn_mode` above already uses, just against the
+        -- t_roll`) `turn_mode` above already uses, just against the
         -- override's own magnitude.
         local rate_limit = r_max > 0.0 and r_max or 30.0
-        local accel_limit = HEADING_ACCEL_CAP_DEG_S2
+        local accel_limit = profile.heading_accel_cap_deg_s2
         if state.rate_override_deg_s ~= nil then
             rate_limit = math.abs(state.rate_override_deg_s)
-            accel_limit = rate_limit / T_ROLL
+            accel_limit = rate_limit / profile.t_roll
         end
         local err = law_wrap180(state.heading_goal_deg - state.psi_ref)
-        local a_ref = OMEGA_HEADING * OMEGA_HEADING * err - 2.0 * LAW_ZETA * OMEGA_HEADING * state.r_ref
+        local a_ref = profile.omega_heading * profile.omega_heading * err
+            - 2.0 * profile.law_zeta * profile.omega_heading * state.r_ref
         a_ref = law_clamp(a_ref, -accel_limit, accel_limit)
         next_state.r_ref = law_clamp(state.r_ref + a_ref * dt, -rate_limit, rate_limit)
         next_state.psi_ref = law_wrap360(state.psi_ref + next_state.r_ref * dt)
     end
-    local r_d = next_state.r_ref + K_HEADING_TRACK * law_wrap180(next_state.psi_ref - measured.psi_deg)
+    local r_d = next_state.r_ref
+        + profile.k_heading_track * law_wrap180(next_state.psi_ref - measured.psi_deg)
 
     -- Step 1 (altitude): position+rate shaper towards the AGL-
     -- equivalent goal. A barometric goal is converted every frame via
@@ -793,8 +646,9 @@ local function law_update(state, dt, measured, limits)
         alt_goal_agl = math.max(alt_goal_agl, break_floor)
     end
     local err_h = alt_goal_agl - state.h_ref
-    local a_ref_h = OMEGA_ALT * OMEGA_ALT * err_h - 2.0 * LAW_ZETA * OMEGA_ALT * state.w_ref
-    a_ref_h = law_clamp(a_ref_h, -ALT_ACCEL_CAP_MPS2, ALT_ACCEL_CAP_MPS2)
+    local a_ref_h = profile.omega_alt * profile.omega_alt * err_h
+        - 2.0 * profile.law_zeta * profile.omega_alt * state.w_ref
+    a_ref_h = law_clamp(a_ref_h, -profile.alt_accel_cap_mps2, profile.alt_accel_cap_mps2)
     next_state.w_ref = law_clamp(state.w_ref + a_ref_h * dt, -limits.max_climb_vs_mps, limits.max_climb_vs_mps)
     -- Decision 31 -- vortex ring state, every mode-1 state (not only a
     -- break): below the VRS IAS threshold, the descent-rate reference
@@ -807,20 +661,21 @@ local function law_update(state, dt, measured, limits)
 
     -- Step 1 (speed).
     local err_v = state.speed_goal_mps - state.v_ref
-    local a_ref_v = OMEGA_SPEED * OMEGA_SPEED * err_v - 2.0 * LAW_ZETA * OMEGA_SPEED * state.dv_ref
-    a_ref_v = law_clamp(a_ref_v, -SPEED_ACCEL_CAP_MPS2, SPEED_ACCEL_CAP_MPS2)
+    local a_ref_v = profile.omega_speed * profile.omega_speed * err_v
+        - 2.0 * profile.law_zeta * profile.omega_speed * state.dv_ref
+    a_ref_v = law_clamp(a_ref_v, -profile.speed_accel_cap_mps2, profile.speed_accel_cap_mps2)
     next_state.dv_ref = law_clamp(state.dv_ref + a_ref_v * dt, -limits.max_accel_mps2, limits.max_accel_mps2)
     next_state.v_ref = state.v_ref + next_state.dv_ref * dt
 
     -- Step 2: desired accelerations.
-    local a_z_d = a_ref_h + K_VS_ERROR * (next_state.w_ref - measured.w_mps)
-        + K_ALT_ERROR * (next_state.h_ref - measured.h_m)
-    local a_x_d = a_ref_v + K_SPEED_ERROR * (next_state.v_ref - measured.ias_mps)
+    local a_z_d = a_ref_h + profile.k_vs_error * (next_state.w_ref - measured.w_mps)
+        + profile.k_alt_error * (next_state.h_ref - measured.h_m)
+    local a_x_d = a_ref_v + profile.k_speed_error * (next_state.v_ref - measured.ias_mps)
 
     -- Filtered actual accelerations (dV/dt, dw/dt -- plan's own
     -- fallback, `LoGetAccelerationUnits`'s body-frame mapping being
     -- unconfirmed, module header).
-    local alpha = math.min(1.0, dt / TAU_ACCEL_FILTER_S)
+    local alpha = math.min(1.0, dt / profile.tau_accel_filter_s)
     local raw_a_z = (measured.w_mps - state.prev_w_mps) / dt
     next_state.a_z_f = state.a_z_f + (raw_a_z - state.a_z_f) * alpha
     local raw_a_x = (measured.ias_mps - state.prev_v_mps) / dt
@@ -850,29 +705,29 @@ local function law_update(state, dt, measured, limits)
     -- not a change to this split itself.
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
     local rotor_rpm_limited = measured.rotor_rpm_pct
-        <= (limits.rotor_rpm_floor_pct + ROTOR_RPM_NEAR_FLOOR_MARGIN_PCT)
+        <= (limits.rotor_rpm_floor_pct + profile.rotor_rpm_near_floor_margin_pct)
     local blade_stall_limited = (measured.ias_mps * 3.6)
-        >= (limits.retreating_blade_stall_ias_kmh - RETREATING_BLADE_STALL_MARGIN_KMH)
+        >= (limits.retreating_blade_stall_ias_kmh - profile.retreating_blade_stall_margin_kmh)
     local collective_limited = collective_saturated or rotor_rpm_limited or blade_stall_limited
-    local d_theta = -K_TILT_FROM_AX * (a_x_d - next_state.a_x_f)
+    local d_theta = -profile.k_tilt_from_ax * (a_x_d - next_state.a_x_f)
     if collective_limited then
-        d_theta = d_theta + K_TILT_FROM_AZ_SATURATED * (a_z_d - next_state.a_z_f)
+        d_theta = d_theta + profile.k_tilt_from_az_saturated * (a_z_d - next_state.a_z_f)
     end
-    next_state.theta_d = law_clamp(state.theta_d + d_theta * dt, THETA_MIN_DEG, THETA_MAX_DEG)
+    next_state.theta_d = law_clamp(state.theta_d + d_theta * dt, profile.theta_min_deg, profile.theta_max_deg)
 
-    local c_dot = K_COLLECTIVE * (a_z_d - next_state.a_z_f)
+    local c_dot = profile.k_collective * (a_z_d - next_state.a_z_f)
     if c_dot > 0.0 then
-        if state.t_y >= (PEDAL_LIMIT_POSITIVE - PEDAL_NEAR_LIMIT_MARGIN) then
-            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT)
+        if state.t_y >= (profile.pedal_limit_positive - profile.pedal_near_limit_margin) then
+            c_dot = math.min(c_dot, profile.collective_rate_cap_near_pedal_limit)
         end
         -- Only a further *increase* is ever capped by either guard --
         -- neither forces collective down, so level flight with
         -- collective already low is untouched.
         if rotor_rpm_limited then
-            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR)
+            c_dot = math.min(c_dot, profile.collective_rate_cap_near_rpm_floor)
         end
         if blade_stall_limited then
-            c_dot = math.min(c_dot, COLLECTIVE_RATE_CAP_NEAR_BLADE_STALL)
+            c_dot = math.min(c_dot, profile.collective_rate_cap_near_blade_stall)
         end
     end
     next_state.u_c = law_clamp(state.u_c + c_dot * dt, -1.0, 1.0)
@@ -881,7 +736,7 @@ local function law_update(state, dt, measured, limits)
     if measured.v_t_mps > 1.0 then
         phi_kinematic_deg = math.deg(math.atan(measured.v_t_mps * math.rad(r_d) / GRAVITY_MPS2))
     end
-    local d_phi_i = K_BANK_INCREMENT * (r_d - measured.r_deg_s)
+    local d_phi_i = profile.k_bank_increment * (r_d - measured.r_deg_s)
     next_state.phi_i = state.phi_i + d_phi_i * dt
     -- F-M1 (mode-1 batch): "remove the 30 degree limit. Set no limit
     -- for now" -- no clamp against `limits.max_bank_deg` any more (the
@@ -892,8 +747,8 @@ local function law_update(state, dt, measured, limits)
     next_state.phi_d = phi_kinematic_deg + next_state.phi_i
 
     -- Step 4: inner tilt-loop integrators.
-    next_state.t_p = state.t_p + K_THETA_I * (next_state.theta_d - measured.pitch_deg) * dt
-    next_state.t_r = state.t_r + K_PHI_I * (next_state.phi_d - measured.bank_deg) * dt
+    next_state.t_p = state.t_p + profile.k_theta_i * (next_state.theta_d - measured.pitch_deg) * dt
+    next_state.t_r = state.t_r + profile.k_phi_i * (next_state.phi_d - measured.bank_deg) * dt
 
     -- Step 5: pedal (collective-coupling feedforward, Decision 27's own
     -- pedal-into-the-turn bias while a break's rate override is active
@@ -921,7 +776,7 @@ local function law_update(state, dt, measured, limits)
     -- live without this term going unstable again.
     local d_t_y = 0.0
     if measured.collective_enabled then
-        d_t_y = K_PEDAL_FROM_COLLECTIVE_RATE * c_dot
+        d_t_y = profile.k_pedal_from_collective_rate * c_dot
     end
     -- BL-16 sortie 2026-11-20: `break_bias` is tallied separately from
     -- `d_t_y` so it can be unwound exactly once the break settles
@@ -931,10 +786,11 @@ local function law_update(state, dt, measured, limits)
     local break_bias = 0.0
     if state.rate_override_deg_s ~= nil then
         local break_sign = state.rate_override_deg_s > 0.0 and 1.0 or -1.0
-        break_bias = K_BREAK_PEDAL_BIAS * break_sign
+        break_bias = profile.k_break_pedal_bias * break_sign
     end
     local t_y_before_break_step = state.t_y
-    next_state.t_y = law_clamp(state.t_y + (d_t_y + break_bias) * dt, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+    next_state.t_y = law_clamp(
+        state.t_y + (d_t_y + break_bias) * dt, profile.pedal_limit_negative, profile.pedal_limit_positive)
     -- Tracks the *actually applied* change to `t_y` (post-saturation),
     -- not the nominal `break_bias * dt` -- the pedal axis saturates
     -- well before a sustained break settles (confirmed with the
@@ -975,17 +831,17 @@ local function law_update(state, dt, measured, limits)
     -- frame), and cannot by itself defeat the take-time pedal-drift fix
     -- above (it adds nothing at `law_init_at_take`, below).
     --
-    -- Zero below `TURN_SETTLE_DEG_S` (step 1's own "effectively stopped
-    -- turning" threshold, reused here) rather than a bare `~= 0.0`
-    -- check -- a critically-damped heading error asymptotically
+    -- Zero below `profile.turn_settle_deg_s` (step 1's own "effectively
+    -- stopped turning" threshold, reused here) rather than a bare `~=
+    -- 0.0` check -- a critically-damped heading error asymptotically
     -- approaches zero and never quite bit-exactly reaches it, so a bare
     -- check would leave a vanishingly small but nonzero pedal forever.
     -- Suppressed while a break's rate override is active
-    -- (`K_BREAK_PEDAL_BIAS` above already supplies a turn-direction
+    -- (`k_break_pedal_bias` above already supplies a turn-direction
     -- bias for that case) so the two never both feed the same frame --
-    -- see `K_TURN_COORD_PEDAL`'s own comment for the sign assumption.
-    if state.rate_override_deg_s == nil and math.abs(r_d) >= TURN_SETTLE_DEG_S then
-        next_state.turn_coord_pedal = K_TURN_COORD_PEDAL * r_d
+    -- see `k_turn_coord_pedal`'s own comment for the sign assumption.
+    if state.rate_override_deg_s == nil and math.abs(r_d) >= profile.turn_settle_deg_s then
+        next_state.turn_coord_pedal = profile.k_turn_coord_pedal * r_d
     else
         next_state.turn_coord_pedal = 0.0
     end
@@ -1017,18 +873,20 @@ local function law_update(state, dt, measured, limits)
         -- that it has settled -- without this the bias stood forever,
         -- carried into whatever the pilot/Petrovich did next.
         next_state.t_y = law_clamp(
-            next_state.t_y - next_state.break_pedal_bias_accum, PEDAL_LIMIT_NEGATIVE, PEDAL_LIMIT_POSITIVE)
+            next_state.t_y - next_state.break_pedal_bias_accum,
+            profile.pedal_limit_negative, profile.pedal_limit_positive)
         next_state.break_pedal_bias_accum = 0.0
     end
 
     return next_state
 end
 
--- `law_outputs(state, measured)` -- reads the four axis commands out
--- of `state`, already in the sign-mapped domain the output stage
--- writes (clamped defensively; `law_update`'s own saturation already
--- keeps `u_c`/`t_y` in range, but the pitch/roll inner-loop terms below
--- are not themselves saturated upstream). Pure, no mutation.
+-- `law_outputs(state, measured, profile)` -- reads the four axis
+-- commands out of `state`, already in the sign-mapped domain the output
+-- stage writes (clamped defensively; `law_update`'s own saturation
+-- already keeps `u_c`/`t_y` in range, but the pitch/roll inner-loop
+-- terms below are not themselves saturated upstream). Pure, no
+-- mutation.
 --
 -- `pedals` adds `state.turn_coord_pedal` (sortie 2026-11-20, step 5) on
 -- top of `t_y` -- the one deliberate exception to "every output comes
@@ -1039,9 +897,11 @@ end
 -- comment). `law_init_at_take` sets it to `0.0`, so Decision 24's
 -- bit-exact-at-take guarantee is untouched: calling this on a take
 -- state (before any `law_update` has run) adds exactly zero.
-local function law_outputs(state, measured)
-    local u_pitch = state.t_p + K_THETA * (state.theta_d - measured.pitch_deg) - K_Q * measured.q_deg_s
-    local u_roll = state.t_r + K_PHI * (state.phi_d - measured.bank_deg) - K_P * measured.p_deg_s
+local function law_outputs(state, measured, profile)
+    local u_pitch = state.t_p + profile.k_theta * (state.theta_d - measured.pitch_deg)
+        - profile.k_q * measured.q_deg_s
+    local u_roll = state.t_r + profile.k_phi * (state.phi_d - measured.bank_deg)
+        - profile.k_p * measured.p_deg_s
     return {
         pitch = law_clamp(u_pitch, -1.0, 1.0),
         roll = law_clamp(u_roll, -1.0, 1.0),
@@ -1448,6 +1308,437 @@ local function read_measured()
     }
 end
 
+-- ============================================================
+-- BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/
+-- plan.md`, section A): the estimator. Runs every frame, in every
+-- mode (warm at a take), gated internally to `profile.law_hz` on DCS
+-- model time (never wall clock -- user, 2026-11-20: "DCS may be paused
+-- by user"). Lives OUTSIDE `fc_law` -- reset by a model-time gap,
+-- `on_stop`/`reset`, and the first sample, never by a mode change.
+-- Nothing in `law_*` reads its output yet (LV-1's own job) -- it only
+-- writes the new `fc_est_*` status fields and the per-frame trace, so
+-- it cannot change today's flying behaviour (the "shadow" half of
+-- LV-0's "instruments and shadow").
+--
+-- **Mutates its own state table in place, unlike `law_*`'s "always
+-- return a new state" convention** -- a deliberate departure: the ring
+-- buffers below are fixed-size, preallocated arrays, and a `law_*`-
+-- style full copy every tick would itself be the O(window) allocation
+-- this design exists to avoid (perf-plan-review: "ring buffers are
+-- fixed size, preallocated once... never a per-frame `table.insert`").
+-- Tests call `est_sample`/`est_ring_*` repeatedly on one state table
+-- and read the fields back after each call.
+-- ============================================================
+
+-- Ring capacity: generous headroom over any window this profile uses
+-- today (`w_v_s`/`w_a_s`/`w_a2_s`/`w_b` are all <= 0.2 s; at `law_hz`
+-- = 30 that is <= 6 samples) -- fixed, never resized, so a later
+-- profile change within this bound needs no code change.
+local EST_RING_CAPACITY = 64
+
+-- A fixed-size ring buffer of (t, value) samples plus the incremental
+-- least-squares sums (sum_t, sum_t2, sum_v, sum_tv) that let
+-- `est_ring_slope`/`est_ring_mean` read the current window's slope/
+-- mean in O(1), without ever refitting over the stored samples.
+local function est_ring_new()
+    local t_arr, v_arr = {}, {}
+    for i = 1, EST_RING_CAPACITY do
+        t_arr[i] = 0.0
+        v_arr[i] = 0.0
+    end
+    return {
+        t = t_arr, v = v_arr, head = 0, count = 0,
+        sum_t = 0.0, sum_t2 = 0.0, sum_v = 0.0, sum_tv = 0.0, t0 = nil,
+    }
+end
+
+-- Re-primes a ring from empty -- used on a `dt > DT_CAP` gap, the
+-- first sample ever, and `on_stop`/`reset` (plan, "Reset/priming": "a
+-- stall must never produce an acceleration spike").
+local function est_ring_reset(ring)
+    ring.head = 0
+    ring.count = 0
+    ring.sum_t = 0.0
+    ring.sum_t2 = 0.0
+    ring.sum_v = 0.0
+    ring.sum_tv = 0.0
+    ring.t0 = nil
+end
+
+-- Pushes one (t, value) sample and evicts whatever has aged out of
+-- `window_s`, updating the incremental sums in O(1) amortized (add the
+-- newest sample, subtract each sample that ages out this call -- never
+-- a refit over the stored window). `ring.t0` rebases every timestamp
+-- to the ring's own first sample so the sums stay well-conditioned
+-- over a long mission (model time keeps growing; the sums never see
+-- more than `window_s` seconds of absolute magnitude).
+local function est_ring_push(ring, t, value, window_s)
+    if ring.t0 == nil then
+        ring.t0 = t
+    end
+    local rt = t - ring.t0
+    ring.head = (ring.head % EST_RING_CAPACITY) + 1
+    ring.t[ring.head] = rt
+    ring.v[ring.head] = value
+    ring.count = math.min(ring.count + 1, EST_RING_CAPACITY)
+    ring.sum_t = ring.sum_t + rt
+    ring.sum_t2 = ring.sum_t2 + rt * rt
+    ring.sum_v = ring.sum_v + value
+    ring.sum_tv = ring.sum_tv + rt * value
+
+    while ring.count > 1 do
+        -- The oldest live sample sits `count - 1` slots behind `head`
+        -- (`head` itself, 0 back, is the newest): index =
+        -- `((head - 1 - (count - 1)) % CAPACITY) + 1`, i.e.
+        -- `((head - count) % CAPACITY) + 1`.
+        local oldest_idx = ((ring.head - ring.count) % EST_RING_CAPACITY) + 1
+        local oldest_t = ring.t[oldest_idx]
+        if rt - oldest_t <= window_s then
+            break
+        end
+        ring.sum_t = ring.sum_t - oldest_t
+        ring.sum_t2 = ring.sum_t2 - oldest_t * oldest_t
+        ring.sum_v = ring.sum_v - ring.v[oldest_idx]
+        ring.sum_tv = ring.sum_tv - oldest_t * ring.v[oldest_idx]
+        ring.count = ring.count - 1
+    end
+end
+
+-- Least-squares slope (dv/dt) of the ring's current window -- 0.0 with
+-- fewer than 2 samples or a degenerate (zero-span) window.
+local function est_ring_slope(ring)
+    if ring.count < 2 then
+        return 0.0
+    end
+    local n = ring.count
+    local denom = n * ring.sum_t2 - ring.sum_t * ring.sum_t
+    if denom == 0.0 then
+        return 0.0
+    end
+    return (n * ring.sum_tv - ring.sum_t * ring.sum_v) / denom
+end
+
+-- Running mean of the ring's current window -- 0.0 with no samples.
+local function est_ring_mean(ring)
+    if ring.count < 1 then
+        return 0.0
+    end
+    return ring.sum_v / ring.count
+end
+
+local function est_ring_update_slope(ring, t, value, window_s)
+    est_ring_push(ring, t, value, window_s)
+    return est_ring_slope(ring)
+end
+
+local function est_ring_update_mean(ring, t, value, window_s)
+    est_ring_push(ring, t, value, window_s)
+    return est_ring_mean(ring)
+end
+
+-- Standard kinematic Euler-rate transform from body rates (deg/s,
+-- `p`/`q`/`r` already in the project's own roll/pitch/yaw convention --
+-- `read_measured()`'s own `p_deg_s`/`q_deg_s`/`r_deg_s`) and attitude
+-- (deg) -- the rates an attitude indicator would show, as opposed to
+-- the body rates a rate gyro reads, which differ whenever the aircraft
+-- is banked (plan's own worked example: a steady 60 deg bank turn
+-- reads `q ~= psi_dot*sin(phi)` in body rates, `~= 0` in Euler rates --
+-- `TestEulerRateTransform` below pins exactly this). The `cos(theta)`
+-- division (near-vertical pitch) is guarded the same fail-soft way the
+-- rest of this module guards divisions -- returns `0.0` for `psi_dot`
+-- rather than a NaN/inf blow-up.
+local function est_euler_rates(p_deg_s, q_deg_s, r_deg_s, phi_deg, theta_deg)
+    local p = math.rad(p_deg_s)
+    local q = math.rad(q_deg_s)
+    local r = math.rad(r_deg_s)
+    local phi = math.rad(phi_deg)
+    local theta = math.rad(theta_deg)
+    local cos_theta = math.cos(theta)
+    local tan_theta = math.tan(theta)
+    local phi_dot = p + q * math.sin(phi) * tan_theta + r * math.cos(phi) * tan_theta
+    local theta_dot = q * math.cos(phi) - r * math.sin(phi)
+    local psi_dot = 0.0
+    if math.abs(cos_theta) > 1e-3 then
+        psi_dot = (q * math.sin(phi) + r * math.cos(phi)) / cos_theta
+    end
+    return math.deg(phi_dot), math.deg(theta_dot), math.deg(psi_dot)
+end
+
+-- Module-level estimator state -- lives for the whole Lua session, not
+-- reset by a mode change (it runs in every mode). `est_reset` (below)
+-- is the only thing that re-primes it.
+local fc_est = {
+    sample_t = nil,
+    last_law_t = nil,
+    rings = {
+        pos_n = est_ring_new(), pos_u = est_ring_new(), pos_e = est_ring_new(),
+        vec_n = est_ring_new(), vec_u = est_ring_new(), vec_e = est_ring_new(),
+        acc1_n = est_ring_new(), acc1_u = est_ring_new(), acc1_e = est_ring_new(),
+        acc2_n = est_ring_new(), acc2_u = est_ring_new(), acc2_e = est_ring_new(),
+        ball = est_ring_new(),
+    },
+    v = { n = 0.0, u = 0.0, e = 0.0 },
+    v_unselected = { n = 0.0, u = 0.0, e = 0.0 },
+    a = { n = 0.0, u = 0.0, e = 0.0, f = 0.0, r = 0.0 },
+    euler = { phi_dot = 0.0, theta_dot = 0.0, psi_dot = 0.0 },
+    ball = 0.0,
+    v_g = 0.0, v_g_f = 0.0, v_g_r = 0.0,
+    lambda = 0.0,
+}
+
+-- Re-primes every ring and derived field -- `dt > DT_CAP` (pause,
+-- stall), `on_stop`/`reset`, and the first sample ever (Co-moving
+-- Fields: "estimator ring buffers and running averages... re-primed
+-- from the current sample; next `a` is finite and near zero").
+local function est_reset(est)
+    est.sample_t = nil
+    est.last_law_t = nil
+    for _, ring in pairs(est.rings) do
+        est_ring_reset(ring)
+    end
+    est.v = { n = 0.0, u = 0.0, e = 0.0 }
+    est.v_unselected = { n = 0.0, u = 0.0, e = 0.0 }
+    est.a = { n = 0.0, u = 0.0, e = 0.0, f = 0.0, r = 0.0 }
+    est.euler = { phi_dot = 0.0, theta_dot = 0.0, psi_dot = 0.0 }
+    est.ball = 0.0
+    est.v_g = 0.0
+    est.v_g_f = 0.0
+    est.v_g_r = 0.0
+    est.lambda = 0.0
+end
+
+-- Cheap pre-check, no `LoGet*` reads -- the caller (`run_flight_
+-- control`) calls this BEFORE `read_estimator_raw` so an off-due frame
+-- (most of them, at ~140 Hz DCS frames against `law_hz`'s 30) never
+-- even builds the raw-reading table (perf-plan-review: "gate the
+-- read, not only the use").
+local function est_due(est, t, profile)
+    return est.last_law_t == nil or (t - est.last_law_t) >= (1.0 / profile.law_hz)
+end
+
+-- Separate from `core.lua`'s own `aircraft_layer_debug.flag`/`DEBUG`
+-- -- the plan names a distinct flag for this per-frame trace
+-- (`aircraft_layer_flight_debug.flag` -> `aircraft_layer_flight_
+-- trace.log`), checked far more often than the general debug log.
+-- Wrapped in a bare `pcall` (not `core.lua`'s own `safe_call` global --
+-- this line runs at module-load time, before `safe_call` is guaranteed
+-- to exist as a global in every harness that loads this file whole,
+-- e.g. the toy-plant suite, which never mocks a single DCS/cross-
+-- module global by design) so a test harness with no `lfs` global
+-- never crashes at load time -- `lfs` always exists inside a real DCS
+-- process. `pcall` only catches an error raised *inside* the function
+-- it is given, and `lfs.writedir()` is evaluated as part of building
+-- that function's body here, not as a bare top-level expression, so
+-- the index-of-nil error (if any) happens inside the pcall, not
+-- before it. Checked once at load time, not per-frame, same posture
+-- as `DEBUG`.
+local flight_trace_ok, flight_trace_check = pcall(function()
+    local f = io.open(lfs.writedir() .. "Scripts\\aircraft_layer_flight_debug.flag", "r")
+    if f == nil then
+        return false
+    end
+    f:close()
+    return true
+end)
+local FLIGHT_TRACE_ENABLED = flight_trace_ok and flight_trace_check == true
+
+local flight_trace_file = nil
+
+local function flight_trace_log(line)
+    if not FLIGHT_TRACE_ENABLED then
+        return
+    end
+    if flight_trace_file == nil then
+        local ok, f = pcall(io.open, lfs.writedir() .. "Logs\\aircraft_layer_flight_trace.log", "a")
+        if not ok or f == nil then
+            return
+        end
+        flight_trace_file = f
+    end
+    flight_trace_file:write(line .. "\n")
+end
+
+-- Every `LoGet*` read the estimator needs for one step -- called only
+-- when `est_due` says a step is actually due, so an off-due frame
+-- costs nothing here. `velocity_source` decides whether the vector-
+-- velocity getter is read at all; the trace flag (not passed in,
+-- `FLIGHT_TRACE_ENABLED` is a module-level local, same as every other
+-- trace-gated read in this function) decides whether the *other*
+-- source, and the logged-only channels, are read too (perf-plan-
+-- review: the unselected source and the logged-only channels must not
+-- cost a read forever once LV-0 settles `velocity_source`).
+local function read_estimator_raw(t, velocity_source)
+    local self_data = safe_call(LoGetSelfData)
+    local pos_n, pos_u, pos_e = 0.0, 0.0, 0.0
+    local psi_deg = 0.0
+    if type(self_data) == "table" then
+        if type(self_data.Position) == "table" then
+            local p = self_data.Position
+            if type(p.x) == "number" then pos_n = p.x end
+            if type(p.y) == "number" then pos_u = p.y end
+            if type(p.z) == "number" then pos_e = p.z end
+        end
+        if type(self_data.Heading) == "number" then
+            psi_deg = law_wrap360(math.deg(self_data.Heading))
+        end
+    end
+    local pitch_rad, bank_rad = safe_call(LoGetADIPitchBankYaw)
+    local theta_deg = (type(pitch_rad) == "number") and math.deg(pitch_rad) or 0.0
+    local phi_deg = (type(bank_rad) == "number") and math.deg(bank_rad) or 0.0
+    local ang = safe_call(LoGetAngularVelocity)
+    local p_deg_s, q_deg_s, r_deg_s = 0.0, 0.0, 0.0
+    if type(ang) == "table" then
+        if type(ang.x) == "number" then p_deg_s = math.deg(ang.x) end
+        if type(ang.z) == "number" then q_deg_s = math.deg(ang.z) end
+        if type(ang.y) == "number" then r_deg_s = -math.deg(ang.y) end
+    end
+    local ball_raw = safe_call(function() return GetDevice(0):get_argument_value(SLIP_BALL_ARGS.pilot) end)
+    if type(ball_raw) ~= "number" or ball_raw ~= ball_raw then
+        ball_raw = nil
+    end
+
+    local raw = {
+        pos_n = pos_n, pos_u = pos_u, pos_e = pos_e,
+        psi_deg = psi_deg, phi_deg = phi_deg, theta_deg = theta_deg,
+        p_deg_s = p_deg_s, q_deg_s = q_deg_s, r_deg_s = r_deg_s,
+        ball_raw = ball_raw,
+        vec_n = nil, vec_u = nil, vec_e = nil,
+    }
+
+    if velocity_source == "vector" or FLIGHT_TRACE_ENABLED then
+        local vv = safe_call(LoGetVectorVelocity)
+        if type(vv) == "table" then
+            if type(vv.x) == "number" then raw.vec_n = vv.x end
+            if type(vv.y) == "number" then raw.vec_u = vv.y end
+            if type(vv.z) == "number" then raw.vec_e = vv.z end
+        end
+    end
+
+    -- Logged only, trace-gated (plan, section A: "Logged only... None
+    -- of them closes a loop"). `LoGetAccelerationUnits`'s own return
+    -- shape is undocumented (`Sim_ControlAPI.md` lists the name with no
+    -- args/results); read defensively the same way `LoGetAngularVelocity`
+    -- already is, expecting an `{x,y,z}` table -- a wrong guess here
+    -- shows up as an always-nil trace field, never a crash.
+    if FLIGHT_TRACE_ENABLED then
+        local accel_units = safe_call(LoGetAccelerationUnits)
+        if type(accel_units) == "table" then
+            raw.accel_units_x = accel_units.x
+            raw.accel_units_y = accel_units.y
+            raw.accel_units_z = accel_units.z
+        end
+        raw.aoa = safe_call(LoGetAngleOfAttack)
+        raw.aoss = safe_call(LoGetAngleOfSideSlip)
+    end
+
+    return raw
+end
+
+local function format_trace_line(t, est, raw)
+    return string.format(
+        "t=%.3f v_n=%.3f v_u=%.3f v_e=%.3f a_f=%.4f a_r=%.4f a_u=%.4f vg=%.3f vgf=%.3f vgr=%.3f "
+        .. "phidot=%.3f thetadot=%.3f psidot=%.3f ball=%.4f lambda=%.3f "
+        .. "vec_n=%s vec_u=%s vec_e=%s au_x=%s au_y=%s au_z=%s aoa=%s aoss=%s",
+        t, est.v.n, est.v.u, est.v.e, est.a.f, est.a.r, est.a.u, est.v_g, est.v_g_f, est.v_g_r,
+        est.euler.phi_dot, est.euler.theta_dot, est.euler.psi_dot, est.ball, est.lambda,
+        tostring(raw.vec_n), tostring(raw.vec_u), tostring(raw.vec_e),
+        tostring(raw.accel_units_x), tostring(raw.accel_units_y), tostring(raw.accel_units_z),
+        tostring(raw.aoa), tostring(raw.aoss))
+end
+
+-- Runs one estimator step (plan, section A). `raw` is `read_estimator_
+-- raw`'s own table -- this function makes no `LoGet*` call of its
+-- own. Mutates `est` in place (module header above) and returns
+-- whether a step actually ran -- `false` only when the reset/priming
+-- branch itself decided there is nothing yet to compute from (never
+-- happens in practice since the caller only invokes this when `est_
+-- due` already said yes, but kept as an honest return value rather
+-- than assuming the caller got it right).
+local function est_sample(est, t, raw, profile)
+    local dt_since_last = nil
+    if est.sample_t ~= nil then
+        dt_since_last = t - est.sample_t
+    end
+    -- Reset/priming (plan, "Reset/priming"): a pause/stall gap, a
+    -- clock that went backwards, or the very first sample re-primes
+    -- every ring from here rather than differencing across the gap --
+    -- "a stall must never produce an acceleration spike."
+    if dt_since_last == nil or dt_since_last > DT_CAP or dt_since_last < 0 then
+        est_reset(est)
+    end
+    est.sample_t = t
+    est.last_law_t = t
+
+    local selected_n, selected_u, selected_e
+    if profile.velocity_source == "vector" and raw.vec_n ~= nil then
+        selected_n = est_ring_update_mean(est.rings.vec_n, t, raw.vec_n, profile.w_v_s)
+        selected_u = est_ring_update_mean(est.rings.vec_u, t, raw.vec_u, profile.w_v_s)
+        selected_e = est_ring_update_mean(est.rings.vec_e, t, raw.vec_e, profile.w_v_s)
+        if FLIGHT_TRACE_ENABLED then
+            est.v_unselected.n = est_ring_update_slope(est.rings.pos_n, t, raw.pos_n, profile.w_v_s)
+            est.v_unselected.u = est_ring_update_slope(est.rings.pos_u, t, raw.pos_u, profile.w_v_s)
+            est.v_unselected.e = est_ring_update_slope(est.rings.pos_e, t, raw.pos_e, profile.w_v_s)
+        end
+    else
+        selected_n = est_ring_update_slope(est.rings.pos_n, t, raw.pos_n, profile.w_v_s)
+        selected_u = est_ring_update_slope(est.rings.pos_u, t, raw.pos_u, profile.w_v_s)
+        selected_e = est_ring_update_slope(est.rings.pos_e, t, raw.pos_e, profile.w_v_s)
+        if FLIGHT_TRACE_ENABLED and raw.vec_n ~= nil then
+            est.v_unselected.n = est_ring_update_mean(est.rings.vec_n, t, raw.vec_n, profile.w_v_s)
+            est.v_unselected.u = est_ring_update_mean(est.rings.vec_u, t, raw.vec_u, profile.w_v_s)
+            est.v_unselected.e = est_ring_update_mean(est.rings.vec_e, t, raw.vec_e, profile.w_v_s)
+        end
+    end
+    est.v.n = selected_n
+    est.v.u = selected_u
+    est.v.e = selected_e
+
+    est.v_g = math.sqrt(est.v.n * est.v.n + est.v.e * est.v.e)
+    local psi_rad = math.rad(raw.psi_deg)
+    local sin_psi, cos_psi = math.sin(psi_rad), math.cos(psi_rad)
+    est.v_g_f = est.v.n * cos_psi + est.v.e * sin_psi
+    est.v_g_r = -est.v.n * sin_psi + est.v.e * cos_psi
+
+    -- Acceleration: least-squares slope of `v` over `w_a_s`, then one
+    -- more running mean over `w_a2_s` (plan, section A). `a_u` is the
+    -- slope of `v_u` directly -- no gravity, no body frame, so it reads
+    -- zero in a level turn exactly as the altimeter says.
+    local a1_n = est_ring_update_slope(est.rings.acc1_n, t, est.v.n, profile.w_a_s)
+    local a1_u = est_ring_update_slope(est.rings.acc1_u, t, est.v.u, profile.w_a_s)
+    local a1_e = est_ring_update_slope(est.rings.acc1_e, t, est.v.e, profile.w_a_s)
+    est.a.n = est_ring_update_mean(est.rings.acc2_n, t, a1_n, profile.w_a2_s)
+    est.a.u = est_ring_update_mean(est.rings.acc2_u, t, a1_u, profile.w_a2_s)
+    est.a.e = est_ring_update_mean(est.rings.acc2_e, t, a1_e, profile.w_a2_s)
+    est.a.f = est.a.n * cos_psi + est.a.e * sin_psi
+    est.a.r = -est.a.n * sin_psi + est.a.e * cos_psi
+
+    local phi_dot, theta_dot, psi_dot = est_euler_rates(
+        raw.p_deg_s, raw.q_deg_s, raw.r_deg_s, raw.phi_deg, raw.theta_deg)
+    est.euler.phi_dot = phi_dot
+    est.euler.theta_dot = theta_dot
+    est.euler.psi_dot = psi_dot
+
+    est.ball = est_ring_update_mean(est.rings.ball, t, raw.ball_raw or profile.ball_centre, profile.w_b)
+
+    -- `lambda` -- a trivial first-cut curve (0 at/below 25 km/h, 1
+    -- at/above 50 km/h, linear between), reported for the status/card
+    -- even though nothing reads it yet (LV-3's own job, which is also
+    -- where the blend breakpoints join the profile -- see `flight_
+    -- profile.lua`'s header on why they are not there yet). Hard-coded
+    -- here rather than in the profile for exactly that reason: this is
+    -- a placeholder, not the real schedule.
+    local v_g_kmh = est.v_g * 3.6
+    if v_g_kmh <= 25.0 then
+        est.lambda = 0.0
+    elseif v_g_kmh >= 50.0 then
+        est.lambda = 1.0
+    else
+        est.lambda = (v_g_kmh - 25.0) / (50.0 - 25.0)
+    end
+
+    return true
+end
+
 -- `heading_ref_to_true`/`heading_ref_from_true` -- thin call-throughs to
 -- `flight_desired.lua`'s own conversion (that module owns `HEADING_REF`,
 -- section 1: "Lua owns the choice"). A missing `flight_desired` (load
@@ -1523,7 +1814,7 @@ local function apply_desired_changes_to_law(measured_true_deg)
         end
     end
     if changed then
-        fc_law = law_apply_goal(fc_law, goal, fc_limits)
+        fc_law = law_apply_goal(fc_law, goal, fc_limits, flight_profile.ACTIVE)
     end
 end
 
@@ -1774,7 +2065,7 @@ local function run_active_frame(t, dt, just_took)
         -- `desired` verbatim (Decision 32/Q4), a voice take only the
         -- parts stamped after this take's own seq.
         local seed, desired_at_take = build_take_seed(measured.psi_deg)
-        fc_law = law_init_at_take(measured, fc_limits, command, seed)
+        fc_law = law_init_at_take(measured, fc_limits, command, seed, flight_profile.ACTIVE)
         -- A standing break carried into the unpark (`desired.turn_
         -- rate_deg_s`/`turn_style`) has no field of its own on `law_
         -- init_at_take`'s seed -- layered on top via an ordinary `law_
@@ -1789,7 +2080,7 @@ local function run_active_frame(t, dt, just_took)
             fc_law = law_apply_goal(fc_law, {
                 heading_deg = seed.heading_deg,
                 turn_rate_deg_s = desired_at_take.turn_rate_deg_s,
-            }, fc_limits)
+            }, fc_limits, flight_profile.ACTIVE)
         end
         -- This take's own law state already reflects every part of
         -- `desired` the seed above considered -- record those stamps
@@ -1802,13 +2093,13 @@ local function run_active_frame(t, dt, just_took)
             fc_applied_stamp_alt = desired_at_take.stamp_alt
             fc_applied_stamp_spd = desired_at_take.stamp_spd
         end
-        write_outputs(law_outputs(fc_law, measured), nil)
+        write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), nil)
         return
     end
     apply_desired_changes_to_law(measured.psi_deg)
     local prev_turn_mode = fc_law.turn_mode
     local prev_rate_override = fc_law.rate_override_deg_s
-    fc_law = law_update(fc_law, dt, measured, fc_limits)
+    fc_law = law_update(fc_law, dt, measured, fc_limits, flight_profile.ACTIVE)
     -- BL-16 Stage 3 (section 1, "Heading reference" / Co-moving table) --
     -- the roll-out settle (turn -> heading) and the break settle (the
     -- rate override clearing) each write the settled heading back into
@@ -1833,7 +2124,7 @@ local function run_active_frame(t, dt, just_took)
             end)
         end
     end
-    write_outputs(law_outputs(fc_law, measured), dt)
+    write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), dt)
 end
 
 -- Every frame, from `LuaExportBeforeNextFrame` (Decision 23).
@@ -1843,6 +2134,23 @@ local function run_flight_control(t)
         dt = t - fc_last_frame_t
     end
     fc_last_frame_t = t
+
+    -- BL-16 lift-vector law, Stage LV-0 (`plans/flight-lift-vector/
+    -- plan.md`): the estimator runs here, every frame, in every mode
+    -- (so it is warm at a take) -- unlike everything below this point,
+    -- which is gated on `fc_mode`. `est_due` is checked BEFORE any of
+    -- the estimator's own `LoGet*` reads (`read_estimator_raw`) so an
+    -- off-due frame (most of them, at ~140 Hz against `law_hz`'s 30)
+    -- costs only the two comparisons inside `est_due` -- the
+    -- perf-plan-review's own "gate the read, not only the use."
+    local flight_profile_active = flight_profile.ACTIVE
+    if est_due(fc_est, t, flight_profile_active) then
+        local raw = read_estimator_raw(t, flight_profile_active.velocity_source)
+        local ran = est_sample(fc_est, t, raw, flight_profile_active)
+        if ran and FLIGHT_TRACE_ENABLED then
+            flight_trace_log(format_trace_line(t, fc_est, raw))
+        end
+    end
 
     -- `is_parked()` unknown (ai_pilot_wheel failed to load) is treated
     -- the same as "stay off" -- never a licence to assume unparked
@@ -2169,6 +2477,13 @@ local function on_stop()
     fc_applied_stamp_hdg = nil
     fc_applied_stamp_alt = nil
     fc_applied_stamp_spd = nil
+    -- BL-16 lift-vector law, LV-0 (Co-moving Fields: "estimator ring
+    -- buffers and running averages... dt > DT_CAP, mission stop,
+    -- reset(epoch), first frame") -- the estimator lives outside `fc_
+    -- law` and is never reset by an ordinary mode change (it runs in
+    -- every mode), but a mission stop/restart is a genuine discontinuity
+    -- the same way a model-time gap inside `est_sample` is.
+    est_reset(fc_est)
 end
 
 -- Body-layer process-start reset (BL-16 sortie 2026-11-20, `docs/
@@ -2225,5 +2540,17 @@ M.law_turn_rate_at_bank = law_turn_rate_at_bank
 -- `TestReadRotorRpmPct`) needs to call it directly rather than only
 -- indirectly through `read_measured()`/the full per-frame loop.
 M.read_rotor_rpm_pct = read_rotor_rpm_pct
+
+-- BL-16 lift-vector law, LV-0 -- the estimator's own ring-buffer math
+-- and Euler-rate transform, exported for a dedicated real-Lua suite
+-- (`tests/test_flight_control_estimator.py`) to drive directly, no DCS
+-- mock needed (none of these read a `LoGet*` global).
+M.est_ring_new = est_ring_new
+M.est_ring_push = est_ring_push
+M.est_ring_slope = est_ring_slope
+M.est_ring_mean = est_ring_mean
+M.est_euler_rates = est_euler_rates
+M.est_reset = est_reset
+M.est_sample = est_sample
 
 return M
