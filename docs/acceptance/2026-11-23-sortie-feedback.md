@@ -238,3 +238,28 @@ Retest, both logs on (`aircraft_layer_debug.log`, `aircraft_layer_flight_trace.l
 So after "you have controls", the player switching the AI overlay on is itself a handover to
 Petrovich in mode 2 (the existing park rule). Mode 2 flies through ED's AI wheel and writes no raw
 axes, so "never write the axis values" still holds; only a fresh take puts mode 1 back on the axes.
+
+## Row (e) answered: LoGetVectorVelocity vs position-derived velocity (main loop, from the trace)
+
+Source: the user's `aircraft_layer_flight_trace.log` from this sortie (last mission segment,
+t = 0–749 s), `vec_n/u/e` (DCS `LoGetVectorVelocity`) against `v_n/u/e` (position slope).
+Mean difference / standard deviation, m/s, per axis n, u, e:
+
+| row | n | u | e |
+|---|---|---|---|
+| B east, 150 km/h | −0.12 / 0.04 | +0.00 / 0.02 | +0.11 / 0.02 |
+| B north | −0.03 / 0.02 | 0.00 / 0.01 | +0.02 / 0.02 |
+| C 30° right | +0.18 / 0.01 | 0.00 / 0.00 | +0.03 / 0.01 |
+| C 60° right | +0.10 / 0.21 | 0.00 / 0.05 | +0.41 / 0.07 |
+| C 30° left | −0.18 / 0.01 | 0.00 / 0.00 | +0.02 / 0.02 |
+| C 60° left | −0.24 / 0.19 | −0.04 / 0.02 | +0.40 / 0.14 |
+| D slow / fast | ≤0.05 | ≤0.05 | ≤0.08 |
+| E sideslip right | +0.02 / 0.02 | +0.01 / 0.01 | −0.03 / 0.02 |
+| E sideslip left | +0.01 / 0.01 | +0.01 / 0.01 | +0.01 / 0.03 |
+| F hands off | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+
+Same axes and signs on all three, including sideslip. The only offsets (~0.2–0.4 m/s) are in
+turns, where the position slope lags by its window (centre-of-window delay, ~30 ms at 12 m/s²);
+`LoGetVectorVelocity` has no such lag. Turn check: `a_r` = speed × turn rate within ~5% in all five
+turns. **Decision (main loop, from this data): `VELOCITY_SOURCE = "vector"` for LV-1**, "position"
+kept selectable.
