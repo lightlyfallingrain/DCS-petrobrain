@@ -195,3 +195,10 @@ Speeding up
 
 > "I have contorls" -> "unable AI overlay" -> AI overlay off: If AI overlay is switched off in, say
 > 5s, after unable, release controls on exit from AI overlay and say "you have controls".
+
+## Clarification (user, 2026-11-23, verbatim)
+
+On the main loop's restatement "once he says 'you have controls', nothing he does afterwards may
+move the stick until you hand it back to him":
+
+> Not only move, but he must never *write* the axis values
