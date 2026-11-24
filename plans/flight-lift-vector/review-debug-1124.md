@@ -152,3 +152,74 @@ real Lua law (not just by reading), using the existing test harness's `_run`/`_m
 plus a standalone driver. Did not independently verify the `rotor_dir` physical claim itself (main
 rotor rotation sense) — no source for it exists in this repo, and the debug pass already discloses
 it as open rather than settled, so there is nothing further for this review to check there.
+
+## Re-review, 2026-11-24 (fix round)
+
+Reviewed `46059f41` + `7c4f7fd6` on top of `844213f1`/`d0b4d6cc` (the commits this review required a
+fix against), plus the "Fix round" section appended to `debug-2026-11-24.md`. Worktree created at
+`7c4f7fd6` (`git rev-parse HEAD` matched before anything else).
+
+**The required fix is correct and matches the recommended "more robust" option** — the guard now
+derives which limit to watch from `law_sign(profile.k_pedal_from_collective_rate *
+profile.rotor_dir)` (new helper `law_sign`, next to `law_clamp`,
+`aircraft-layer/dcs-export/Petrobrain/flight_control.lua`) rather than hard-coding
+`pedal_limit_positive`: a positive sign still checks `pedal_limit_positive -
+pedal_near_limit_margin` (pre-fix behaviour, for a future sign that reverts to it), a negative sign
+(the current post-fix convention) checks `pedal_limit_negative + pedal_near_limit_margin`. This is
+exactly the "derive the side from the actual direction ... pushes rather than hard-coding
+`pedal_limit_positive`" fix this review asked for, and ties the guard to the same coefficient
+Section F's own `d_t_y` formula already reads (line 984), so a future sign correction moves both
+together.
+
+**Confirmed red under the pre-fix guard, independently** — reverted the guard to its exact pre-fix
+form (single `if state.t_y >= (profile.pedal_limit_positive - profile.pedal_near_limit_margin)
+then` with no `law_sign`/`pedal_push_sign`), re-ran `TestCollectiveRateCapNearPedalLimit` alone:
+both tests fail — `t_y = -0.42` reads `0.3` where the test demands `<= 0.3` fails the "caps" case in
+the sense the report describes (uncapped), and `t_y = 0.92` reads exactly `0.3` where the test
+demands `> 0.3` for "does not cap" — matching the debug report's own claim of this exact mutation
+result. Restored the fix immediately after; `git diff` against the committed
+`flight_control.lua` is empty.
+
+**No other pedal-side consumer was left behind** — re-grepped `pedal_limit|rotor_dir|t_y\b` across
+`aircraft-layer/dcs-export/` outside `tests/`: the anti-windup clamp (lines 986-992,
+`(state.t_y >= profile.pedal_limit_positive and d_t_y > 0.0) or (state.t_y <=
+profile.pedal_limit_negative and d_t_y < 0.0)`) and the `pedals` output (line 1085) are already
+symmetric over both limits, as the original review found; this guard was the only asymmetric
+consumer, and it is now fixed.
+
+**Optional comment items**: both done sanely. `flight_profile.lua`'s `rotor_dir` comment now points
+to `debug-2026-11-24.md`'s "What remains unproven" section rather than stating the physical claim as
+settled narrative — a one-line addition, not a rewrite. `body-layer/ROADMAP/BL-16.md`'s pre-fix
+"Open" bullet gets a dated `**Superseded 2026-11-24**` paragraph recording that "positive pedal
+command = right" is now known wrong — the original bullet is **retained, not deleted**, per the
+project's supersession convention; the correction is appended below it with its own date and a
+pointer to the debug report.
+
+**Checks** (own run, not taken on trust): `ruff format --check`/`ruff check` clean (90 files, `aircraft-layer/.venv`
+symlinked from the main checkout), `cd aircraft-layer && .venv/bin/mypy src` clean (29 files),
+`luac5.1 -p` clean on every `.lua` file in `dcs-export/` and `dcs-export/Petrobrain/`,
+`.claude/scripts/fast-tests.sh aircraft-layer` — 1000 passed. `GETGLOBAL` leak check on the modified
+`flight_control.lua` lists only genuine DCS APIs, Lua stdlib, and the project's own dofile-composed
+module names (`ai_pilot_wheel`, `flight_desired`, `flight_profile`) — no leak from `law_sign` or
+`pedal_push_sign` (both locals, never referenced before declaration).
+
+**One thing noted, not required**: `law_sign`'s zero case (`v == 0.0`, i.e.
+`k_pedal_from_collective_rate * rotor_dir` exactly zero) returns `0.0`, and neither `if` branch in
+the guard fires — a rising collective would go uncapped near *either* pedal limit in that case. Not
+reachable with the profile's current non-zero gain and `rotor_dir = -1.0`, and not a regression (the
+pre-fix guard had no equivalent concept of "no push direction" at all), so this is not a required
+fix — flagging it only so a future profile that zeroes `k_pedal_from_collective_rate` does not
+silently lose this guard's protection on both sides at once.
+
+### Verdict
+
+**APPROVED.**
+
+### Review Confidence
+
+Full read of both fix-round commits and the appended debug-report section. Verified the guard fix
+by independent mutation against the real Lua law (reverted to pre-fix form, confirmed both new
+tests fail, restored), re-ran the full checklist (format/lint/type/Lua-syntax/fast-tests) myself
+rather than taking the debug report's numbers on trust. Did not re-verify the `k_ball_pedal`/
+`rotor_dir`/`k_turn_coord_pedal` sign fix itself or `TestBallCentringPedalSign` — those were the
+subject of the original (not re-) review above and are unchanged by this fix round.
