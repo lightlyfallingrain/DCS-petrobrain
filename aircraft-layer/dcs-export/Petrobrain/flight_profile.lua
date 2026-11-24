@@ -86,7 +86,14 @@ M.PROFILES["Mi-24P"] = {
     -- `schedule_gain_min`/`schedule_full_speed_kmh` scale them by
     -- speed. Owed by M0-E.
     alt_accel_cap_mps2 = 1.0,
-    speed_accel_cap_mps2 = 0.5,
+    -- LV-1 amendment (2026-11-24, fourth re-fly, Q2 "brisk"/E14): raised
+    -- 0.5 -> 1.9 -- the user's own acceleration (150->250 km/h in ~20 s,
+    -- sustained 1.6-1.9 m/s^2) against `MAX_ACCEL_MPS2` (body-layer,
+    -- raised alongside this one so the dv_ref clamp does not sit below
+    -- this cap). Reached in full only at/above `schedule_full_speed_
+    -- kmh` (150), per the existing gain schedule above -- unchanged at
+    -- low speed.
+    speed_accel_cap_mps2 = 1.9,
 
     -- Feedback gains (`a_u,d = w_ref_dot + k_w*(w_ref-w) + k_h*(h_ref-h)`,
     -- `a_f,d = dV_ref_dot + k_v*(V_ref-V)`, section C). Owed by M0-E.
@@ -118,7 +125,15 @@ M.PROFILES["Mi-24P"] = {
     -- attitude response, the plan's own stability argument (the toy
     -- plant checks this separation with the plant's gains deliberately
     -- wrong). First cut, owed by a flight.
-    c_theta = 0.5,
+    -- LV-1 amendment (2026-11-24, fourth re-fly, Finding 4b/Q2): raised
+    -- 0.5 -> 0.85, toward the full kinematic tilt -- the user's own
+    -- figure ("about atan(a/g), slightly more": ~12 deg of nose-down
+    -- for 1.9 m/s^2, against atan(1.9/9.81) ~= 10.9 deg). Leaves theta_i
+    -- a smaller but still real residual to learn (the fuselage-trim
+    -- unknown, above), rather than reintroducing a model of it -- what
+    -- changes is the onset (fast), not the several-second trim time
+    -- constant below (unchanged, decision 5/"feedback, not a model").
+    c_theta = 0.85,
     k_phi_trim = 0.02,
     k_theta_trim = 0.02,
     -- Anti-windup bound (section H): while the measured attitude is
@@ -192,6 +207,28 @@ M.PROFILES["Mi-24P"] = {
     retreating_blade_stall_margin_kmh = 20.0,
     collective_rate_cap_near_blade_stall = 0.0,
 
+    -- LV-1 amendment (2026-11-24, fourth re-fly, section C/Q1): the
+    -- engine-RPM-gated collective-rate schedule, anticipatory above the
+    -- reactive rotor-RPM-floor guard above (which stays exactly as it
+    -- is, the backstop it was always meant to be). At/above this engine
+    -- RPM, a collective increase is capped only by the existing
+    -- physical/pedal-margin caps -- the user's own reading, "engine RPM
+    -- ~98-100%" during a fast acceleration. Only a further *increase*
+    -- is ever gated (decreases, i.e. spooling down, are never the
+    -- hazard).
+    spooled_rpm_pct = 97.0,
+    -- The other end of the taper -- the user's own "fast descent at
+    -- collective full down" reading ("engine RPM ~74%"), the fully-
+    -- spooled-down reference state. Below this, the increase rate
+    -- tapers no further than `collective_rate_gentle_min_per_s`.
+    engine_rpm_gentle_floor_pct = 74.0,
+    -- The gentle minimum collective-increase rate (per second of the
+    -- [-1, 1] axis) the taper above reaches at `engine_rpm_gentle_
+    -- floor_pct` -- consistent with the user's own "~5 seconds" figure
+    -- for a full collective swing starting from a spooled-down state
+    -- (1.0 / 5.0 s ~= 0.2/s).
+    collective_rate_gentle_min_per_s = 0.2,
+
     -- Inner tilt loop (section D, kept): `u = T + k_theta*(target-
     -- measured) - k_q*(Euler pitch rate)`, `T` integrating `k_theta_i*
     -- (target-measured)`; same form for roll with `k_phi`/`k_phi_i`/
@@ -238,7 +275,22 @@ M.PROFILES["Mi-24P"] = {
     -- pedal moves left at the instant of the take, before the law has
     -- changed its output (same debug report, question 1).
     k_ball_pedal = 0.3,
-    k_pedal_from_collective_rate = 0.25,
+    -- LV-1 amendment (2026-11-24, fourth re-fly, section D/Q5): a
+    -- proportional term on top of the integral one above -- the
+    -- measured row-4 climb needed a pedal response the pure integrator
+    -- could not give fast enough (ball grew to 0.12 over ~15 s before
+    -- the integrator caught up). Same order of magnitude as the
+    -- integral gain, first cut; added at `law_outputs` only (never
+    -- integrated), mirroring `turn_coord_pedal`'s own "position overlay,
+    -- recomputed fresh, never itself integrated" shape -- bit-exact at
+    -- take is kept by backing its take-instant value out of `t_y`'s own
+    -- seed, the same way `u_c_i` backs `u_c_ff` out of the captured
+    -- collective.
+    k_ball_pedal_p = 0.3,
+    -- LV-1 amendment (2026-11-24, fourth re-fly, section D/Q5): raised
+    -- 0.25 -> 0.6, the measured ~0.6-per-unit-collective-rate the row-4
+    -- climb needed, pending the arg-42/-845 calibration row (U9).
+    k_pedal_from_collective_rate = 0.6,
     rotor_dir = 1.0,
     k_turn_coord_pedal = 0.02,
     -- Right pedal is the scarce side (user: "not much right rudder

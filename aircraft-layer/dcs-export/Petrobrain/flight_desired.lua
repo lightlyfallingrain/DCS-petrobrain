@@ -187,11 +187,17 @@ replaces a field rather than reassigning the whole thing (and to stay
 inside the 200-local budget). `nil` fields mean "not yet known" --
 `rules/gates.py` HOLDs on a nil `hdg_mode`/`alt_m`/`ias_kmh` downstream. ]]--
 local desired = {
-    hdg_mode = nil, -- "heading" | "turn" | nil
+    hdg_mode = nil, -- "heading" | "turn" | "bank" | nil
     heading_deg = nil,
     turn_dir = nil, -- -1 | 1 | nil
     turn_rate_deg_s = nil,
     turn_style = "normal", -- "normal" | "break" | "break_away"
+    -- LV-1 amendment (2026-11-24, fourth re-fly), section A, E11 -- the
+    -- take rule's own new field: set only by `reseed_from_measured`
+    -- below (never by a wire command -- there is no `apply_set` branch
+    -- for it), mirroring the mode-1 law's own internal state so the
+    -- status line and a later unpark both see what the law just chose.
+    bank_hold_deg = nil,
     alt_m = nil,
     alt_ref = nil, -- "agl" | "baro" | nil
     ias_kmh = nil,
@@ -209,6 +215,7 @@ local function clear_desired()
     desired.turn_dir = nil
     desired.turn_rate_deg_s = nil
     desired.turn_style = "normal"
+    desired.bank_hold_deg = nil
     desired.alt_m = nil
     desired.alt_ref = nil
     desired.ias_kmh = nil
@@ -234,11 +241,45 @@ local function reseed_from_measured()
     end
     local agl = safe_call(LoGetAltitudeAboveGroundLevel)
     local ias_mps = safe_call(LoGetIndicatedAirSpeed)
-    desired.hdg_mode = "heading"
-    desired.heading_deg = from_true_heading(true_heading_deg, true_heading_deg)
-    desired.turn_dir = nil
-    desired.turn_rate_deg_s = nil
-    desired.turn_style = "normal"
+    -- LV-1 amendment (2026-11-24, fourth re-fly), section A, E11 -- the
+    -- take rule: a bank held at or past the takeover threshold keeps
+    -- turning instead of capturing heading. This is a MIRROR of what
+    -- `flight_control.lua`'s own `law_init_at_take` independently
+    -- decides for the law itself (same inputs -- the estimator's own
+    -- averaged bank, the same wire threshold -- so the two agree), kept
+    -- here only so the status line and a later unpark both see the
+    -- `hdg_mode` the law actually chose. `flight_control`/its two
+    -- getters may be nil (load failure, or this module loading before
+    -- it -- see the module docstring's own load-order note) -- falls
+    -- back to the pre-amendment "always heading" behaviour rather than
+    -- guessing.
+    local phi_bar = nil
+    local threshold = nil
+    if flight_control ~= nil then
+        phi_bar = safe_call(flight_control.get_phi_bar)
+        threshold = safe_call(flight_control.takeover_level_bank_deg)
+    end
+    if type(phi_bar) ~= "number" then
+        phi_bar = nil
+    end
+    if type(threshold) ~= "number" then
+        threshold = nil
+    end
+    if phi_bar ~= nil and threshold ~= nil and math.abs(phi_bar) >= threshold then
+        desired.hdg_mode = "bank"
+        desired.bank_hold_deg = phi_bar
+        desired.heading_deg = nil
+        desired.turn_dir = nil
+        desired.turn_rate_deg_s = nil
+        desired.turn_style = "normal"
+    else
+        desired.hdg_mode = "heading"
+        desired.heading_deg = from_true_heading(true_heading_deg, true_heading_deg)
+        desired.turn_dir = nil
+        desired.turn_rate_deg_s = nil
+        desired.turn_style = "normal"
+        desired.bank_hold_deg = nil
+    end
     desired.alt_m = agl
     desired.alt_ref = "agl"
     if type(ias_mps) == "number" then
@@ -273,6 +314,11 @@ local function reseed_from_overlay()
         desired.turn_dir = nil
         desired.turn_rate_deg_s = nil
         desired.turn_style = "normal"
+        -- LV-1 amendment, Co-moving Fields -- mode 2 cannot hold a bank
+        -- (it has no such concept), so any standing `bank_hold_deg` from
+        -- a previous mode-1 activation must not leak into mode 2's own
+        -- status.
+        desired.bank_hold_deg = nil
         fd_stamp_hdg = fd_last_seq
     end
     if held.alt_m ~= nil then
@@ -308,6 +354,9 @@ local function convert_turn_to_heading_for_m2()
     desired.turn_dir = nil
     desired.turn_rate_deg_s = nil
     desired.turn_style = "normal"
+    -- LV-1 amendment, Co-moving Fields -- a standing `"bank"` take could
+    -- reach this edge directly (m1 -> m2 straight from a held bank).
+    desired.bank_hold_deg = nil
     fd_stamp_hdg = fd_last_seq
 end
 
@@ -539,6 +588,9 @@ local function apply_set(data, seq)
         else
             desired.turn_style = "normal"
         end
+        -- LV-1 amendment, Co-moving Fields -- only a heading-type
+        -- command ends a held bank (Q3); this is one of the two.
+        desired.bank_hold_deg = nil
         fd_stamp_hdg = seq
     end
     if turn ~= nil then
@@ -550,6 +602,10 @@ local function apply_set(data, seq)
         end
         desired.turn_rate_deg_s = nil
         desired.turn_style = "normal"
+        -- LV-1 amendment, Co-moving Fields -- the other heading-type
+        -- command that ends a held bank (Q3): "turn left/right" and
+        -- "stop turn" both land here.
+        desired.bank_hold_deg = nil
         fd_stamp_hdg = seq
     end
     if alt_m ~= nil then
@@ -716,6 +772,7 @@ local function push_flight_desired_state(t)
         .. ',"fd_turn_dir":' .. fmt_int_or_null(desired.turn_dir)
         .. ',"fd_turn_rate":' .. fmt_num_or_null(desired.turn_rate_deg_s)
         .. ',"fd_turn_style":' .. text_or_null(desired.turn_style)
+        .. ',"fd_bank_hold":' .. fmt_num_or_null(desired.bank_hold_deg)
         .. ',"fd_alt":' .. fmt_num_or_null(desired.alt_m)
         .. ',"fd_alt_ref":' .. text_or_null(desired.alt_ref)
         .. ',"fd_ias":' .. fmt_num_or_null(desired.ias_kmh)
