@@ -146,4 +146,21 @@ pedal write or capture, not to an added hardware position. Probe v2's constant ~
 fits a constant offset better. The trace from this flight (`a1103` next to `out_pedals`) gives its
 size and sign.
 
+## Data flight with actual args (logs `logs-2026-11-24/data_*`)
+
+> There may be multiple flights in these logs. In the last one, I tried the take with both pedals centered and then approximating the kick and pushing pedal right by about that amount to see what happens. I think I did that from both seats.
+
+Main loop's read (six takes, both seats, pedals centred and pre-offset right):
+
+- **The pedal write carries a constant offset.** In steady state, actual pedal arg
+  `a1103 ≈ 0.32 − out_pedals` at every take and throughout every active period: 0.30–0.36 over
+  speeds 40–61 m/s and collective 0.26–1.0, both seats. Before the first write `a1103` equals the
+  captured value (bumpless read); within ~0.6 s of writing it settles 0.32 higher (= left pedal).
+  Pitch, roll and collective args follow their commands with no offset. On the ground (M0-B) the
+  pedal write had no offset. Where the 0.32 comes from in DCS is unknown.
+- With the hardware pre-offset right (`a1103 = −0.375` before the take), the pedal still ended at
+  `0.32 − command` — the write overrides the hardware pedal; nothing is added from it.
+- **New: the collective goes to full up (arg 1.0) within ~3 s of every take** and stays there.
+  Not yet explained (the RPM-guard unlock is the only collective change since the re-fly).
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
