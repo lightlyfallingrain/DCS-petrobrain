@@ -85,4 +85,10 @@ Main loop's read of the law trace:
 So the take is not bumpless on the pedal, in both code versions. That is independent of the
 ball-loop gain sign.
 
+## User's further observation and rule
+
+> Take over from when player is in copilot seat is a bit smoother.
+> Could be that pedals are read from copilot.
+> -> controls must be read and written from which ever seat player is in
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
