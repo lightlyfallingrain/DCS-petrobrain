@@ -110,4 +110,31 @@ run "Instant Trim", a mode meant for spring-centred pedals, and only the pedals 
 trim-offset hypothesis (`plans/flight-lift-vector/debug-2026-11-24b.md`) at the pedal trimmer mode,
 not at a trimmer press. Not proven; the next trace (`a1103` next to `out_pedals`) gives the offset.
 
+## User's correction on pedal trim
+
+> In DCS settings there inly two options for the Pedals Trimmer Mode:
+> - Instant Trim (default)
+> - Central Position Trimmer Mode
+>
+> For pedals without spring centering, Instant Trim is the correct choise.
+>
+> However, since I also have Pedals Trimer Button set to Do not trim, it actually does not trim the pedals.
+> Trim in this case of pedals meaning:
+> - player offsets pedals
+> - player presses trim
+> - current pedal offset is set to be pedals neutral position
+> This is mainly for spring centered pedals, so that the player does not need to keep pressing the pedal all the time againt the spring force. But since I don't have spring centering, I do not need this trimmer and can just leave the pedals at the offset they are on and they stay there.
+>
+> Not, the Pedals Microswitch Locig is the actual Mi-24 pedals "trim". When SAU is active (or rather channels that affect the heading/tail rotor) then the microswitch activation is the "trim" that then attempts to smooth the controls so that set heading/tail rotor force is maintained, just as the other SAU channels.
+
+Main loop: this rules out a trimmer offset — nothing trims. What remains that fits every data
+point is that **the pedal write is added to the player's own (non-centring) hardware pedal
+position** instead of replacing it: cockpit pedal = hardware − command. On the ground (M0-B) the
+hardware pedals were centred, so the write looked like a clean −1 mirror. At a take Petrovich
+captures the cockpit pedal (= the player's hardware offset) and writes it back, so the offset is
+counted twice: J3's exact doubling (0.062 → 0.123), probe v2's constant ~0.16 in both seats (the
+player's pedal offset then), and the left kick at every take. The stick holds exactly at a take,
+so the stick write replaces rather than adds — why the pedals differ is unknown. Not proven;
+predictions: `a1103` doubles at the take; a take with the hardware pedals centred has no kick.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
