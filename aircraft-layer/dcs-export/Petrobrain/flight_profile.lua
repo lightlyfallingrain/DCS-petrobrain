@@ -220,7 +220,9 @@ M.PROFILES["Mi-24P"] = {
     -- collective_rate` (reused from LV-0, unchanged role) is the
     -- torque feed-forward, `rotor_dir` giving its sign ("more
     -- collective -> more right pedal on the Mi-24P" is now `rotor_dir =
-    -- -1`, corrected below); `k_turn_coord_pedal` is now a feed-forward
+    -- -1`, corrected below -- the physical claim itself remains
+    -- unproven, see `plans/flight-lift-vector/debug-2026-11-24.md`
+    -- "What remains unproven"); `k_turn_coord_pedal` is now a feed-forward
     -- nudge toward the turn at turn entry (same formula LV-0 had,
     -- reframed per F: its only job is to help the ball-centring
     -- integrator catch up, not to hold a deliberate ball offset --

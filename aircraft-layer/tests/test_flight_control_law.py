@@ -1369,6 +1369,62 @@ class TestBallCentringPedalSign:
         assert abs(final_ball - 0.03) < 0.05
 
 
+class TestCollectiveRateCapNearPedalLimit:
+    """Review required fix, 2026-11-24
+    (`plans/flight-lift-vector/review-debug-1124.md`): the collective-
+    near-pedal-limit guard in `law_update` must cap a rising collective
+    (`u_c_rate > 0.0`) near the side a collective increase actually
+    pushes `t_y` toward, not a hard-coded limit name. Post the
+    2026-11-24 pedal-sign fix, `k_pedal_from_collective_rate *
+    rotor_dir` is negative, so that side is now `pedal_limit_negative`
+    (the scarce, right-pedal side) -- before this fix the guard still
+    checked `pedal_limit_positive` (now the abundant, left-pedal side)
+    and so neither capped the scarce side nor left the abundant one
+    alone. `t_y` values mirror the review's own mutation
+    (`-0.42`/`0.92`); `h_m`/`alt_goal_m` mirror `TestRotorEnvelopeGuards
+    .test_well_clear_of_both_guards_collective_rises_freely` so only
+    the pedal guard is ever in question here, with `w_mps` widened
+    (-5.0 -> -10.0) only to confirm first that this scenario's own
+    nominal (uncapped) rate (0.447, by direct computation against the
+    real law) clears `COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT` (0.3) --
+    the -5.0 scenario's own nominal rate (0.177) sits below 0.3
+    regardless of the guard, so a reading at or below 0.3 there would
+    prove nothing."""
+
+    def test_caps_a_rising_collective_near_the_scarce_negative_limit(
+        self,
+    ) -> None:
+        driver = f"""
+local measured = {_measured(h_m=100.0, w_mps=-10.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state.alt_goal_m = 1000.0
+-- Within PEDAL_NEAR_LIMIT_MARGIN (0.1) of PEDAL_LIMIT_NEGATIVE (-0.5),
+-- the scarce side (review's own mutation value).
+state.t_y = -0.42
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", next_state.dbg_u_c_rate))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) <= 0.3 + 1e-6
+
+    def test_does_not_cap_a_rising_collective_near_the_generous_positive_limit(
+        self,
+    ) -> None:
+        driver = f"""
+local measured = {_measured(h_m=100.0, w_mps=-10.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state.alt_goal_m = 1000.0
+-- Near PEDAL_LIMIT_POSITIVE (1.0), the abundant side a rising
+-- collective never pushes `t_y` toward any more (review's own
+-- mutation value).
+state.t_y = 0.92
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", next_state.dbg_u_c_rate))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) > 0.3 + 1e-6
+
+
 class TestAntiWindupPreventsTheRetestDivergence:
     """Main-loop addition 2 (LV-1 task brief, from the LV-0 debug pass,
     `plans/flight-lift-vector/debug-2026-11-23.md`, problem 3): the
