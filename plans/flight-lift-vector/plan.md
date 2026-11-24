@@ -1076,6 +1076,9 @@ in full (reproduced above) and `body-layer/config/defaults.toml`'s flight-contro
 
 ### Decisions Requiring User Input (amendment)
 
+- **Answered 2026-11-24 (user, on the diagram review):** *"accepted, as recommended"* — diagrams
+  approved; U9 as reworded (log and calibrate engine/rotor RPM from one flight, schedule and guard
+  off until then); U10 inside LV-1's own build, retested on rows 8–9.
 - **U9 (reworded 2026-11-24 after the user's RPM readings — the schedule is on engine RPM, args
   40/41/838/839; rotor RPM 42/845 stays the 85% generator-trip floor; see C's correction):**
   calibrate both from one logged flight against the user's three reference states, schedule and
