@@ -137,7 +137,12 @@ local PROFILE = {
     -- debug-2026-11-24b.md` reverted the first 2026-11-24 pass's flip,
     -- which the re-fly showed backwards) -- mirrors `flight_profile.lua`.
     k_ball_pedal = 0.3,
+    -- LV-1 amendment (2026-11-24, fourth re-fly) -- new fields.
+    k_ball_pedal_p = 0.3,
     k_pedal_from_collective_rate = 0.25,
+    spooled_rpm_pct = 97.0,
+    engine_rpm_gentle_floor_pct = 74.0,
+    collective_rate_gentle_min_per_s = 0.2,
     rotor_dir = 1.0,
     k_turn_coord_pedal = 0.02,
     pedal_limit_positive = 0.5,
@@ -215,6 +220,11 @@ def _measured(**overrides: float) -> str:
         # (85.0) by default, so no pre-existing scenario trips the
         # rotor-RPM guard it is not testing.
         "rotor_rpm_pct": 100.0,
+        # LV-1 amendment (2026-11-24, fourth re-fly) -- well clear of
+        # `PROFILE.spooled_rpm_pct` (97.0) by default, same "no
+        # pre-existing scenario trips a guard it is not testing" posture
+        # as `rotor_rpm_pct` above.
+        "engine_rpm_pct": 100.0,
         # BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) --
         # defaults `true` so every pre-existing collective-channel
         # scenario above keeps exercising the collective-coupling
@@ -271,23 +281,69 @@ print(state.u_c)
 
 
 class TestTakeoverModeSelection:
+    """LV-1 amendment (2026-11-24, fourth re-fly), section A, E11 -- a
+    bank at or past `LIMITS.takeover_level_bank_deg` now HOLDS THAT BANK
+    directly (`bank_hold_deg`) rather than setting the old `turn_mode`
+    (which held whatever rate happened to be measured at the take,
+    finding 2's own "a 45 deg take rolls out to `max_turn_bank_deg`").
+    `turn_mode` is never set true by a take any more -- it stays live
+    only for an actual "turn left/right" command."""
+
     def test_4_9_degrees_picks_heading_mode(self) -> None:
         driver = f"""
 local measured = {_measured(bank_deg=4.9)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
 print(tostring(state.turn_mode))
+print(tostring(state.bank_hold_deg))
 """
         lines = _run(driver)
         assert lines[0] == "false"
+        assert lines[1] == "nil"
 
-    def test_5_1_degrees_picks_turn_mode(self) -> None:
+    def test_5_1_degrees_holds_that_bank(self) -> None:
         driver = f"""
 local measured = {_measured(bank_deg=5.1)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
 print(tostring(state.turn_mode))
+print(string.format("%.6f", state.bank_hold_deg))
 """
         lines = _run(driver)
-        assert lines[0] == "true"
+        assert lines[0] == "false"
+        assert abs(float(lines[1]) - 5.1) < 1e-6
+
+    def test_averaged_bank_phi_bar_is_what_the_5_degree_rule_reads(
+        self,
+    ) -> None:
+        """Finding, "the 5 deg rule's input": a wobbly raw single-frame
+        bank must not flip the decision -- `measured.phi_bar` (the
+        estimator's own running mean) is read in preference to
+        `measured.bank_deg` whenever it is present."""
+        driver = f"""
+local measured = {_measured(bank_deg=10.0)}
+measured.phi_bar = 2.0
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
+print(tostring(state.turn_mode))
+print(tostring(state.bank_hold_deg))
+"""
+        lines = _run(driver)
+        # phi_bar (2.0) is below the 5 deg threshold, even though the
+        # raw single-frame bank_deg (10.0) is not.
+        assert lines[0] == "false"
+        assert lines[1] == "nil"
+
+    def test_bank_hold_falls_back_to_raw_bank_when_phi_bar_absent(
+        self,
+    ) -> None:
+        """A mission-start-instant take (estimator not primed yet) has
+        no `phi_bar` -- falls back to the raw measured bank, same as
+        before the estimator primed anywhere else in this module."""
+        driver = f"""
+local measured = {_measured(bank_deg=8.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0 }}, nil, PROFILE)
+print(string.format("%.6f", state.bank_hold_deg))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - 8.0) < 1e-6
 
 
 class TestUnparkTakeSeedFromMode2SetTargets:
@@ -347,6 +403,11 @@ print(tostring(with_seed.speed_goal_mps == without_seed.speed_goal_mps))
         assert all(line == "true" for line in lines)
 
     def test_without_a_seed_a_mid_break_unpark_never_levels_or_converges(self) -> None:
+        """LV-1 amendment, section A -- the mechanism changed (`bank_
+        hold_deg` replaces the old measured-rate-hold `turn_mode`), but
+        the outcome this test pins is the same one E11 asks for: a take
+        past the takeover threshold with no known heading keeps turning,
+        never rolls back toward level."""
         driver = f"""
 local measured = {
             _measured(
@@ -360,6 +421,7 @@ local measured = {
 local command = {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}
 local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
 print(tostring(state.turn_mode))
+print(tostring(state.bank_hold_deg))
 local dt = 0.05
 local tau = 1.0
 for i = 1, 2000 do
@@ -383,16 +445,17 @@ print(tostring(state.in_band_heading))
 print(string.format("%.6f", measured.bank_deg))
 """
         lines = _run(driver)
-        was_turn_mode, in_band, final_bank = lines
-        assert was_turn_mode == "true"
+        was_turn_mode, bank_hold_deg, in_band, final_bank = lines
+        assert was_turn_mode == "false"
+        assert abs(float(bank_hold_deg) - 25.0) < 1e-6
         # Never a heading to be "in band" of -- `law_update` forces
-        # `in_band_heading` false for the whole run while `turn_mode`
-        # holds.
+        # `in_band_heading` false for the whole run while a bank is
+        # held.
         assert in_band == "false"
-        # Settles into a steady turn at (close to) the captured rate,
-        # never back toward level flight -- nothing in this mechanism
-        # ever commands it to roll out.
-        assert abs(float(final_bank)) > 5.0
+        # Holds (close to) the captured bank, never back toward level
+        # flight -- nothing in this mechanism ever commands it to roll
+        # out.
+        assert abs(float(final_bank)) > 20.0
 
     def test_with_a_held_heading_the_unpark_rolls_level_and_converges(self) -> None:
         driver = f"""
@@ -1541,6 +1604,314 @@ print(string.format("%.6f", state.u_c))
         assert abs(phi_d - 12.0) < 1e-6
         assert abs(theta_d - (-4.0)) < 1e-6
         assert abs(u_c - 0.3) < 1e-6
+
+
+class TestBankHoldTake:
+    """LV-1 amendment (2026-11-24, fourth re-fly), section A, E11/E13 --
+    a take past the takeover threshold holds that bank, height and
+    speed, through a sustained run (not just the take-instant state
+    `TestTakeoverModeSelection` already covers)."""
+
+    def test_bank_hold_at_or_past_threshold_keeps_bank_height_and_speed(
+        self,
+    ) -> None:
+        driver = f"""
+local measured = {
+            _measured(bank_deg=30.0, psi_deg=0.0, h_m=500.0, ias_mps=50.0, v_t_mps=52.0)
+        }
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+local dt = 0.05
+local tau = 1.0
+for i = 1, 2000 do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
+    measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
+    local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
+    measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
+    measured.r_deg_s = r
+    -- Height/speed hold through the circle (E13) -- no goal ever
+    -- pushes them away, so they must not drift.
+end
+print(string.format("%.6f", measured.bank_deg))
+print(string.format("%.6f", measured.h_m))
+print(string.format("%.6f", measured.ias_mps))
+"""
+        lines = _run(driver)
+        final_bank, final_h, final_ias = lines
+        # Holds close to the taken bank (a small steady-state trim
+        # offset is expected, same as every other bank-lag toy-plant
+        # scenario in this file -- not asserted tighter than that) --
+        # the qualitative claim is "holds the bank taken, not 20 deg
+        # (max_turn_bank_deg) and not 0".
+        assert abs(float(final_bank) - 30.0) < 6.0
+        assert abs(float(final_h) - 500.0) < 1e-6
+        assert abs(float(final_ias) - 50.0) < 1e-6
+
+    def test_a_heading_type_command_ends_a_held_bank(self) -> None:
+        """Q3 -- only a heading-type command ("turn heading") ends it."""
+        driver = f"""
+local measured = {_measured(bank_deg=20.0, psi_deg=0.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+print(tostring(state.bank_hold_deg ~= nil))
+state = flight_control.law_apply_goal(state, {{ heading_deg = 90.0 }}, LIMITS, PROFILE)
+print(tostring(state.bank_hold_deg))
+"""
+        lines = _run(driver)
+        assert lines[0] == "true"
+        assert lines[1] == "nil"
+
+    def test_a_continuous_turn_command_also_ends_a_held_bank(self) -> None:
+        """The other heading-type command (Q3)."""
+        driver = f"""
+local measured = {_measured(bank_deg=20.0, psi_deg=0.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ turn = 1 }}, LIMITS, PROFILE)
+print(tostring(state.bank_hold_deg))
+print(tostring(state.turn_mode))
+"""
+        lines = _run(driver)
+        assert lines[0] == "nil"
+        assert lines[1] == "true"
+
+    def test_a_speed_or_altitude_command_does_not_end_a_held_bank(self) -> None:
+        """Q3 -- height and speed commands change speed/height *inside*
+        the held turn; they never end it."""
+        driver = f"""
+local measured = {_measured(bank_deg=20.0, psi_deg=0.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ ias_kmh = 200.0, alt_m = 600.0 }}, LIMITS, PROFILE)
+print(tostring(state.bank_hold_deg))
+print(string.format("%.6f", state.speed_goal_mps))
+print(string.format("%.6f", state.alt_goal_m))
+"""
+        lines = _run(driver)
+        bank_hold_deg, speed_goal, alt_goal = lines
+        assert abs(float(bank_hold_deg) - 20.0) < 1e-6
+        assert abs(float(speed_goal) - (200.0 / 3.6)) < 1e-6
+        assert abs(float(alt_goal) - 600.0) < 1e-6
+
+
+class TestUnparkMidTurnRateNeverSlammedToTheOrdinaryCeiling:
+    """LV-1 amendment, section A, E12 -- the "first goes level" fix: an
+    inherited rate from an m2->m1 unpark mid-turn, above the ordinary
+    `max_turn_bank_deg`-derived ceiling, must decay smoothly through the
+    critically-damped heading-error term, never be clamped down to the
+    ceiling on the very first `law_update` frame."""
+
+    def test_an_above_ceiling_inherited_rate_is_not_clamped_on_frame_one(
+        self,
+    ) -> None:
+        driver = f"""
+-- max_turn_bank_deg = 20 deg at v_t=150/3.6 m/s -> r_max ~= 4.7 deg/s.
+-- Seed a much faster inherited rate (12 deg/s, as mode 2's own AI
+-- autopilot might leave it) via a held-heading unpark seed.
+local measured = {
+            _measured(
+                bank_deg=35.0,
+                psi_deg=0.0,
+                r_deg_s=12.0,
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6,
+            )
+        }
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, {{ heading_deg = 90.0 }}, PROFILE)
+local r_at_take = state.r_ref
+state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", r_at_take))
+print(string.format("%.6f", state.r_ref))
+"""
+        lines = _run(driver)
+        r_at_take, r_after_one_frame = (float(x) for x in lines)
+        assert abs(r_at_take - 12.0) < 1e-6
+        # Never slammed down to the ~4.7 deg/s ordinary ceiling in one
+        # step -- the first frame's own accel-limited change is small
+        # relative to the full inherited rate.
+        assert abs(r_after_one_frame - r_at_take) < 1.0
+
+
+class TestSpeedChannelIsBrisk:
+    """LV-1 amendment (2026-11-24, fourth re-fly), section B/Q2, E14 --
+    `c_theta` raised toward the full kinematic tilt and `speed_accel_
+    cap_mps2` raised (both local overrides here, since the shared
+    `_PROFILE`/`flight_profile.lua` default-tracking posture of this
+    file keeps the baseline at the pre-amendment values for every other
+    scenario, root `CLAUDE.md` "do not reinvent" notwithstanding -- see
+    `plans/flight-lift-vector/implementation.md` for why): the toy
+    plant's own along-track acceleration should reach past 1.5 m/s^2
+    within a few seconds of a speed-up command, not need the several-
+    second trim loop alone to get there."""
+
+    def test_reaches_past_1_5_mps2_within_a_few_seconds(self) -> None:
+        driver = """
+PROFILE.c_theta = 0.85
+PROFILE.speed_accel_cap_mps2 = 1.9
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.3 }, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 250.0 }, LIMITS, PROFILE)  -- ~69.4 m/s
+local dt = 0.05
+local plant_ax_gain = 2.0
+local max_ax = 0.0
+for i = 1, 100 do  -- 5 s
+    local prev_ias = measured.ias_mps
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    local tau = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
+    measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
+    local ax = plant_ax_gain * (0.0 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    local measured_ax = (measured.ias_mps - prev_ias) / dt
+    if measured_ax > max_ax then max_ax = measured_ax end
+end
+print(string.format("%.6f", max_ax))
+print(string.format("%.6f", measured.ias_mps))
+""".replace(
+            "{measured}",
+            _measured(pitch_deg=0.0, ias_mps=150.0 / 3.6, v_t_mps=150.0 / 3.6 + 2.0),
+        )
+        lines = _run(driver)
+        max_ax, final_ias = (float(x) for x in lines)
+        assert max_ax > 1.5
+        # Settles without overshoot -- never exceeds the commanded speed
+        # by more than a small margin within this short a run.
+        assert final_ias <= (250.0 / 3.6) * 1.05
+
+
+class TestPedalReachesCollectiveStepTarget:
+    """LV-1 amendment, section D/Q5 -- `k_ball_pedal_p` (the new
+    proportional term) lets the pedal reach the ball-centring correction
+    a collective step needs within ~1-2 s, rather than the pure
+    integrator's own much slower catch-up (the measured row-4 climb:
+    ball grew to 0.12 over ~15 s before the integrator caught up)."""
+
+    def test_pedal_catches_up_within_one_to_two_seconds(self) -> None:
+        driver = f"""
+local measured = {_measured(ias_mps=40.0, v_t_mps=42.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ alt_m = 300.0 }}, LIMITS, PROFILE)  -- a climb step -> collective rises
+local dt = 0.05
+local pedal_at_1s, pedal_at_2s
+for i = 1, 60 do  -- 3 s
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    -- A ball offset proportional to the collective rate, same shape the
+    -- measured row-4 climb showed (yaw torque grows the ball error
+    -- faster than the pedal alone corrects it) -- held fixed here (no
+    -- separate yaw plant) so this test isolates the pedal LOOP's own
+    -- response time, not a full closed-loop convergence.
+    measured.ball = 0.12
+    if i == 20 then pedal_at_1s = outputs.pedals end
+    if i == 40 then pedal_at_2s = outputs.pedals end
+end
+print(string.format("%.6f", pedal_at_1s))
+print(string.format("%.6f", pedal_at_2s))
+"""
+        lines = _run(driver)
+        pedal_at_1s, pedal_at_2s = (float(x) for x in lines)
+        # The proportional term alone (k_ball_pedal_p * (0.12 - 0.03) =
+        # 0.3 * 0.09 = 0.027) is present on every frame once the ball
+        # offset exists, so the pedal is already most of the way there
+        # well inside 1 s -- unlike the pure integrator this replaces,
+        # which took ~15 s for the same ball offset.
+        assert abs(pedal_at_1s) > 0.02
+        assert abs(pedal_at_2s) >= abs(pedal_at_1s)
+
+
+class TestEngineRpmGatedCollectiveSchedule:
+    """LV-1 amendment, section C/Q1, correction box -- the anticipatory
+    engine-RPM-gated collective-rate schedule, off (always "fast") by
+    default (U9, the dummy-equivalent posture at the toy-plant level is
+    `measured.engine_rpm_pct` at or above `spooled_rpm_pct`, the
+    `_measured()` helper's own default)."""
+
+    @staticmethod
+    def _collective_rate_for(engine_rpm_pct: float) -> float:
+        # `PROFILE.alt_accel_cap_mps2` raised locally (same "override
+        # the loaded PROFILE table for this one test" technique as
+        # `TestSpeedChannelIsBrisk`) so the demanded climb's own nominal
+        # collective rate clearly exceeds `collective_rate_gentle_min_
+        # per_s` (0.2) -- the default LIMITS/PROFILE scenario saturates
+        # the ordinary vertical-accel ceiling well below that, which
+        # would make the taper a no-op regardless of engine RPM.
+        driver = f"""
+PROFILE.alt_accel_cap_mps2 = 5.0
+local measured = {_measured(h_m=10.0, w_mps=0.0)}
+measured.engine_rpm_pct = {engine_rpm_pct}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.0 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ alt_m = 3000.0 }}, LIMITS, PROFILE)
+state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.9f", state.dbg_u_c_rate))
+"""
+        return float(_run(driver)[0])
+
+    def test_schedule_inactive_when_engine_rpm_is_at_or_above_spooled(
+        self,
+    ) -> None:
+        """At/above `spooled_rpm_pct` (97.0), the rate is identical to
+        fully-spooled-up (100.0) -- the schedule adds no further taper
+        once the engines are already at/near normal output."""
+        at_floor = self._collective_rate_for(97.0)
+        fully_up = self._collective_rate_for(100.0)
+        assert abs(at_floor - fully_up) < 1e-9
+
+    def test_schedule_tapers_the_increase_when_engine_rpm_is_spooled_down(
+        self,
+    ) -> None:
+        """The same climb step, with the engines spooled down (the
+        user's own "~74%" fully-spooled-down reading) -- the increase
+        rate is capped toward `collective_rate_gentle_min_per_s` and
+        strictly below the unthrottled rate at full engine RPM."""
+        fully_up = self._collective_rate_for(100.0)
+        spooled_down = self._collective_rate_for(74.0)
+        gentle = float(PROFILE_COLLECTIVE_RATE_GENTLE_MIN)
+        assert spooled_down < fully_up
+        assert spooled_down <= gentle + 1e-6
+
+    def test_schedule_never_gates_a_collective_decrease(self) -> None:
+        """ "Decreases are never gated by this -- spooling down is not
+        the hazard." A descent step (collective falling) with the
+        engines spooled down must not be slowed by this guard."""
+        driver = f"""
+local measured = {_measured(h_m=300.0, w_mps=0.0)}
+measured.engine_rpm_pct = 74.0
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.5 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ alt_m = 50.0 }}, LIMITS, PROFILE)
+state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", state.dbg_u_c_rate))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) < 0.0
+
+
+#: `PROFILE.collective_rate_gentle_min_per_s` mirrored here so the two
+#: tests above can assert against it without re-parsing the Lua table.
+PROFILE_COLLECTIVE_RATE_GENTLE_MIN = "0.2"
+
+
+class TestBitExactAtTakeWithTheNewPedalProportionalTerm:
+    """LV-1 amendment, section D/Q5 -- `k_ball_pedal_p` must not disturb
+    Decision 24's bit-exact-at-take guarantee even when the ball is NOT
+    centred at the instant of the take (the case that actually exercises
+    the new term, unlike every pre-existing take test, which defaults
+    `measured.ball` to `profile.ball_centre` via `_measured()`'s own
+    absence of a `ball` field)."""
+
+    def test_pedal_output_equals_the_captured_command_with_ball_offset(
+        self,
+    ) -> None:
+        driver = f"""
+local measured = {_measured()}
+measured.ball = 0.2  -- well off centre (profile.ball_centre = 0.03)
+local command = {{ pitch = 0, roll = 0, pedals = 0.15, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+local outputs = flight_control.law_outputs(state, measured, PROFILE)
+print(string.format("%.9f", outputs.pedals))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - 0.15) < 1e-6
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

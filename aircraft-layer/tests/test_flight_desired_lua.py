@@ -89,6 +89,12 @@ local fc_mode_value = "off"
 local fc_release_reason = nil
 local fc_refuse_cause = nil
 
+-- LV-1 amendment (2026-11-24, fourth re-fly), section A -- backs the
+-- `flight_control` mock's `get_phi_bar`/`takeover_level_bank_deg`
+-- below. `nil` by default (no estimator reading available yet).
+local fc_phi_bar = nil
+local fc_takeover_threshold = nil
+
 local ap_parked = false
 local ap_held = nil
 
@@ -122,6 +128,12 @@ flight_control = {
         return { mode = fc_mode_value, release_reason = fc_release_reason,
                  refuse_cause = fc_refuse_cause }
     end,
+    -- LV-1 amendment (2026-11-24, fourth re-fly), section A -- `nil` by
+    -- default (same as a real session before the estimator primes),
+    -- which keeps every pre-existing `reseed_from_measured` test above
+    -- exercising the "always heading" fallback unchanged.
+    get_phi_bar = function() return fc_phi_bar end,
+    takeover_level_bank_deg = function() return fc_takeover_threshold end,
 }
 
 ai_pilot_wheel = {
@@ -271,6 +283,71 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_alt_ref") == "agl"
         assert _field(line, "fd_ias") == "200.00000"
 
+    def test_off_to_m1_at_a_low_bank_still_reseeds_heading(self) -> None:
+        """LV-1 amendment (2026-11-24, fourth re-fly), section A, E11 --
+        below the takeover threshold, the mirror picks "heading", same
+        as the pre-amendment `test_off_to_m1_reseeds_from_measured`
+        above, now with the threshold machinery actually wired (phi_bar
+        present but under threshold)."""
+        driver = """
+heading_rad = math.rad(90.0)
+agl_m = 123.0
+ias_mps = 200.0 / 3.6
+fc_phi_bar = 3.0
+fc_takeover_threshold = 5.0
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.push_flight_desired_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_hdg_mode") == "heading"
+        assert _field(line, "fd_heading") == "90.00000"
+        assert _field(line, "fd_bank_hold") is None
+
+    def test_off_to_m1_at_a_high_bank_holds_that_bank(self) -> None:
+        """LV-1 amendment, section A, E11 -- at or above the takeover
+        threshold, the mirror picks "bank" with `bank_hold_deg` set to
+        the averaged bank, heading/turn cleared."""
+        driver = """
+heading_rad = math.rad(90.0)
+agl_m = 123.0
+ias_mps = 200.0 / 3.6
+fc_phi_bar = 12.0
+fc_takeover_threshold = 5.0
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.push_flight_desired_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_hdg_mode") == "bank"
+        assert _field(line, "fd_bank_hold") == "12.00000"
+        assert _field(line, "fd_heading") is None
+        # Height and speed are still captured exactly as today (E13).
+        assert _field(line, "fd_alt") == "123.00000"
+        assert _field(line, "fd_ias") == "200.00000"
+
+    def test_off_to_m1_with_no_phi_bar_falls_back_to_heading(self) -> None:
+        """A mission-start-instant take (the estimator has not primed)
+        has no `phi_bar` to read -- falls back to the pre-amendment
+        "always heading" behaviour rather than guessing."""
+        driver = """
+heading_rad = math.rad(45.0)
+fc_phi_bar = nil
+fc_takeover_threshold = 5.0
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.push_flight_desired_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_hdg_mode") == "heading"
+        assert _field(line, "fd_bank_hold") is None
+
     def test_off_to_m2_reseeds_from_overlay_once_readable(self) -> None:
         driver = """
 ap_parked = true
@@ -411,6 +488,48 @@ print(sent_lines[#sent_lines])
         assert _field(line, "fd_hdg_ref") == "true"
         assert _field(line, "fd_stamp_hdg") == "1"
         assert _field(line, "fd_acks") == "1:a:m1"
+
+    def test_set_heading_while_holding_a_bank_clears_the_hold(self) -> None:
+        """LV-1 amendment, section A, Co-moving Fields -- a heading-type
+        command is the only thing that ends a held bank (Q3); `apply_
+        set`'s `heading_deg` branch must clear `bank_hold_deg` too."""
+        driver = """
+heading_rad = math.rad(90.0)
+fc_phi_bar = 12.0
+fc_takeover_threshold = 5.0
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","heading_deg":270.0}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        # The take itself entered bank-hold mode (12 deg >= 5 deg) --
+        # confirm the precondition before confirming it was cleared.
+        assert _field(line, "fd_hdg_mode") == "heading"
+        assert _field(line, "fd_bank_hold") is None
+
+    def test_set_turn_while_holding_a_bank_clears_the_hold(self) -> None:
+        """Same as above, the other heading-type command (Q3)."""
+        driver = """
+heading_rad = math.rad(90.0)
+fc_phi_bar = 12.0
+fc_takeover_threshold = 5.0
+flight_desired.reset(5)
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.handle_flight_command(
+    '{"epoch":5,"seq":1,"until":10.0,"kind":"set","turn":1}', 0.1)
+flight_desired.push_flight_desired_state(0.1)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_hdg_mode") == "turn"
+        assert _field(line, "fd_bank_hold") is None
 
     def test_set_turn_while_m1(self) -> None:
         driver = """

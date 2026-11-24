@@ -56,12 +56,16 @@ local function new_est()
             acc2_n = flight_control.est_ring_new(), acc2_u = flight_control.est_ring_new(),
             acc2_e = flight_control.est_ring_new(),
             ball = flight_control.est_ring_new(),
+            -- LV-1 amendment (2026-11-24, fourth re-fly), section A --
+            -- the new averaged-bank ring.
+            bank = flight_control.est_ring_new(),
         },
         v = { n = 0.0, u = 0.0, e = 0.0 },
         v_unselected = { n = 0.0, u = 0.0, e = 0.0 },
         a = { n = 0.0, u = 0.0, e = 0.0, f = 0.0, r = 0.0 },
         euler = { phi_dot = 0.0, theta_dot = 0.0, psi_dot = 0.0 },
         ball = 0.0,
+        phi_bar = 0.0,
         v_g = 0.0, v_g_f = 0.0, v_g_r = 0.0,
         lambda = 0.0,
     }

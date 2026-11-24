@@ -248,7 +248,13 @@ flight_profile = {
         -- Positive pedal command = RIGHT pedal (`plans/flight-lift-
         -- vector/debug-2026-11-24b.md`) -- mirrors `flight_profile.lua`.
         k_ball_pedal = 0.3,
+        -- LV-1 amendment (2026-11-24, fourth re-fly) -- new fields,
+        -- mirroring `flight_profile.lua`.
+        k_ball_pedal_p = 0.3,
         k_pedal_from_collective_rate = 0.25,
+        spooled_rpm_pct = 97.0,
+        engine_rpm_gentle_floor_pct = 74.0,
+        collective_rate_gentle_min_per_s = 0.2,
         rotor_dir = 1.0,
         k_turn_coord_pedal = 0.02,
         pedal_limit_positive = 0.5,
