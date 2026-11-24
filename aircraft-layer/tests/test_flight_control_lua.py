@@ -253,6 +253,13 @@ flight_profile = {
         k_turn_coord_pedal = 0.02,
         pedal_limit_positive = 0.5,
         pedal_limit_negative = -1.0,
+        -- Write bias (debug-2026-11-24c, finding 1) -- mirrors
+        -- `flight_profile.lua`.
+        write_bias_seed = { pedals = 0.32 },
+        write_bias_bound = 0.5,
+        write_bias_tau_s = 3.0,
+        write_bias_settle_s = 1.0,
+        write_bias_settle_band = 0.02,
         pedal_near_limit_margin = 0.1,
         collective_rate_cap_near_pedal_limit = 0.3,
         rotor_rpm_near_floor_margin_pct = 5.0,
@@ -401,6 +408,12 @@ end
 """
 
 
+#: The pedal write-bias seed the harness's `flight_profile` mirror
+#: carries (`write_bias_seed.pedals`) -- a take writes the captured
+#: pedal command plus this (debug-2026-11-24c, finding 1).
+_PEDAL_BIAS_SEED = 0.32
+
+
 def _run(
     driver: str,
     *,
@@ -530,8 +543,10 @@ print(string.format("%.6f", written[2087]))
         assert abs(float(lines[0]) - (-0.3)) <= 0.0011
 
     def test_pedal_capture_writes_with_the_measured_sign(self) -> None:
-        """M0-B (2026-11-18): `SIGN.pedals = -1.0` -- the written command
-        is `-captured_arg` (plus wobble), not the raw arg value."""
+        """M0-B (2026-11-18): `SIGN.pedals = -1.0` -- the intended command
+        is `-captured_arg`, not the raw arg value. Since debug-2026-11-24c
+        the take frame writes that plus the pedal write-bias seed (0.32,
+        `write_bias_seed`), so the pedal itself stays where it was."""
         driver = """
 pilot_args.pedals = 0.4
 ap_parked = false
@@ -541,7 +556,7 @@ flight_control.run_flight_control(0.1)
 print(string.format("%.6f", written[2003]))
 """
         lines = _run(driver)
-        assert abs(float(lines[0]) - (-0.4)) <= 0.0011
+        assert abs(float(lines[0]) - (-0.4 + _PEDAL_BIAS_SEED)) <= 0.0011
 
     def test_unpark_take_succeeds_with_the_flag_on_by_default(self) -> None:
         """`UNPARK_TAKE_ENABLED` now defaults **on** -- M0-J (flight 9)
@@ -1123,8 +1138,9 @@ print(string.format("%.6f", written[2003]))
         # The pilot set as it reads now (0.15 / 0.3), not the snapshot
         # (0.3 / 0.0) and not the operator set (0.2 / 0.1).
         assert abs(float(pitch_written) - 0.15) <= 0.0011
-        # Pedal command = SIGN.pedals (-1) * captured arg.
-        assert abs(float(pedal_written) - (-0.3)) <= 0.0011
+        # Pedal command = SIGN.pedals (-1) * captured arg, plus the
+        # write-bias seed (debug-2026-11-24c).
+        assert abs(float(pedal_written) - (-0.3 + _PEDAL_BIAS_SEED)) <= 0.0011
 
     def test_player_in_operator_seat_with_live_controls_captures_the_operator_set(
         self,
@@ -1143,7 +1159,7 @@ print(string.format("%.6f", written[2003]))
 """
         lines = _run(driver)
         assert abs(float(lines[0]) - 0.1) <= 0.0011
-        assert abs(float(lines[1]) - 0.05) <= 0.0011
+        assert abs(float(lines[1]) - (0.05 + _PEDAL_BIAS_SEED)) <= 0.0011
 
     def test_take_debug_line_names_seat_source_and_both_seats_args(self) -> None:
         """Testing aid (`debug-2026-11-24b.md`, question 4): with the
@@ -1992,6 +2008,149 @@ print(sent_lines[#sent_lines])
         # magnitude), not a specific value the mock cannot produce.
         v_g = float(_field(line, "fc_est_v_g"))
         assert v_g >= 0.0
+
+
+#: Toy pedal plant for `TestPedalWriteBias` (debug-2026-11-24c, finding
+#: 1): what the 2026-11-24 data flight measured -- in flight the pedal
+#: arg settles at `PLANT_OFFSET - command`, first order with the pedal's
+#: own ~0.25 s lag (M0-B). Holds still while nothing is written. Every
+#: pedal-moving law term is zeroed so the law's intended pedal is the
+#: captured one for the whole run; the test then reads only the write
+#: stage.
+_PEDAL_PLANT = """
+local PLANT_OFFSET = 0.32
+local PLANT_TAU = 0.25
+flight_profile.ACTIVE.k_ball_pedal = 0.0
+flight_profile.ACTIVE.k_pedal_from_collective_rate = 0.0
+flight_profile.ACTIVE.k_turn_coord_pedal = 0.0
+local function plant_step(dt)
+    local cmd = written[2003]
+    if cmd == nil then return end
+    local target = PLANT_OFFSET - cmd
+    pilot_args.pedals = pilot_args.pedals
+        + (target - pilot_args.pedals) * (1.0 - math.exp(-dt / PLANT_TAU))
+end
+-- Runs frames from t0 for `seconds` at `hz`; returns the end time and the
+-- largest |pedal arg - ref| seen within the first `window_s`.
+local function fly(t0, seconds, hz, ref, window_s)
+    local dt = 1.0 / hz
+    local t = t0
+    local worst = 0.0
+    while t < t0 + seconds do
+        t = t + dt
+        flight_control.run_flight_control(t)
+        plant_step(dt)
+        if t - t0 <= window_s then
+            worst = math.max(worst, math.abs(pilot_args.pedals - ref))
+        end
+    end
+    return t, worst
+end
+ap_parked = false
+ap_seat = "pilot"
+pilot_args.pitch = 0.1
+pilot_args.collective = 0.3
+"""
+
+
+class TestPedalWriteBias:
+    """Debug-2026-11-24c, finding 1: the in-flight pedal write lands 0.32
+    left of the command. The output stage writes `intended + bias`,
+    seeded from `flight_profile`'s `write_bias_seed` and learnt online,
+    so the pedal stays where the player held it at the take."""
+
+    def test_seeded_bias_makes_the_take_bumpless_on_the_actual_pedal(self) -> None:
+        driver = (
+            _PEDAL_PLANT
+            + """
+pilot_args.pedals = 0.15
+flight_control.request_take(1, 0.0)
+local _, worst = fly(0.0, 3.0, 140.0, 0.15, 3.0)
+print(string.format("%.6f", worst))
+"""
+        )
+        worst = float(_run(driver)[0])
+        # Without the bias the pedal settles 0.32 away (the kick).
+        assert worst < 0.01, worst
+
+    def test_a_wrong_seed_kicks_then_the_bias_is_learnt(self) -> None:
+        driver = (
+            _PEDAL_PLANT
+            + """
+flight_profile.ACTIVE.write_bias_seed = { pedals = 0.0 }
+pilot_args.pedals = 0.15
+flight_control.request_take(1, 0.0)
+local _, early = fly(0.0, 25.0, 60.0, 0.15, 1.5)
+print(string.format("%.6f", early))
+print(string.format("%.6f", pilot_args.pedals))
+print(string.format("%.6f", written[2003]))
+"""
+        )
+        early, final_arg, final_written = (float(x) for x in _run(driver))
+        # The toy plant does kick with a zero seed -- the test bites.
+        assert early > 0.25, early
+        # ...and the learnt bias brings the pedal back to where it was.
+        assert abs(final_arg - 0.15) < 0.02, final_arg
+        # written = intended (-0.15) + learnt bias (~0.32).
+        assert abs(final_written - (-0.15 + 0.32)) < 0.025, final_written
+
+    def test_the_learnt_bias_carries_into_the_next_take_and_on_stop_clears_it(
+        self,
+    ) -> None:
+        driver = (
+            _PEDAL_PLANT
+            + """
+flight_profile.ACTIVE.write_bias_seed = { pedals = 0.0 }
+pilot_args.pedals = 0.15
+flight_control.request_take(1, 0.0)
+local t = fly(0.0, 25.0, 60.0, 0.15, 0.0)
+-- Release: writes stop, the pedal holds (M0-F).
+flight_control.request_release(2)
+written = {}
+t = fly(t, 1.0, 60.0, 0.0, 0.0)
+local held = pilot_args.pedals
+flight_control.request_take(3, t)
+local t2, worst_retake = fly(t, 3.0, 60.0, held, 3.0)
+print(string.format("%.6f", worst_retake))
+-- Mission stop: the learnt bias goes back to the (zero) seed.
+flight_control.on_stop()
+written = {}
+held = pilot_args.pedals
+flight_control.request_take(4, t2 + 1.0)
+local _, worst_after_stop = fly(t2 + 1.0, 1.5, 60.0, held, 1.5)
+print(string.format("%.6f", worst_after_stop))
+"""
+        )
+        worst_retake, worst_after_stop = (float(x) for x in _run(driver))
+        assert worst_retake < 0.03, worst_retake
+        assert worst_after_stop > 0.25, worst_after_stop
+
+
+class TestCollectiveLawDirection:
+    """Debug-2026-11-24c, finding 2: the law's collective is positive =
+    up (`LAW_DIR`), command 2087 positive = down (`SIGN.collective` -1,
+    arg 1102 positive = up). Climbing at the take, the altitude shaper
+    asks to arrest the climb, so the lever must go DOWN -- the arg falls,
+    the written command rises. Before the fix it ran to full up."""
+
+    def test_arresting_a_climb_lowers_the_collective(self) -> None:
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+pilot_args.pitch = 0.1
+pilot_args.collective = 0.3
+vs_mps = 5.0
+flight_control.request_take(1, 0.0)
+local t = 0.0
+for _ = 1, 3 * 60 do
+    t = t + 1.0 / 60.0
+    flight_control.run_flight_control(t)
+end
+print(string.format("%.6f", written[2087]))
+"""
+        written_collective = float(_run(driver)[0])
+        # Captured command is -0.3; down is a rising command.
+        assert written_collective > -0.3 + 0.05, written_collective
 
 
 class TestLawHzScheduling:

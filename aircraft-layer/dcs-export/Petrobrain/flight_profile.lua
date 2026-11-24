@@ -247,6 +247,25 @@ M.PROFILES["Mi-24P"] = {
     pedal_limit_positive = 0.5,
     pedal_limit_negative = -1.0,
 
+    -- ---- Write bias (output stage, `plans/flight-lift-vector/debug-
+    -- 2026-11-24c.md`, finding 1): in flight the pedal write lands a
+    -- near-constant offset away from the command -- `arg 1103 ~= 0.32 -
+    -- command` at every take of the 2026-11-24 data flight, both seats,
+    -- 40-61 m/s, collective 0.26-1.0 (0 on the ground, M0-B; ~0.16 on
+    -- probe v2). Cause in DCS unknown. `flight_control.lua` writes
+    -- `intended + bias` (command domain, positive = right pedal) so the
+    -- pedal sits where the law means it: the seed makes the first frame
+    -- of a take bumpless; the bias is then learnt online from
+    -- `written - measured` while the write is steady, and kept across
+    -- takes for the mission. Only axes listed in `write_bias_seed`
+    -- take part; pitch, roll and collective follow their commands with
+    -- no offset in the same data, so they are not listed.
+    write_bias_seed = { pedals = 0.32 },
+    write_bias_bound = 0.5,       -- |bias| never exceeds this
+    write_bias_tau_s = 3.0,       -- learning time constant
+    write_bias_settle_s = 1.0,    -- write steady this long before learning (pedal 98% settled, M0-B)
+    write_bias_settle_band = 0.02, -- "steady" = within this of where it settled
+
     -- Below this residual turn rate (deg/s), a turn-mode roll-out
     -- counts as "settled" and the law switches internally to heading
     -- mode, holding the heading the roll-out stopped at; also the

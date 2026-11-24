@@ -143,6 +143,25 @@ local CMD = { pitch = 2001, roll = 2002, pedals = 2003, collective = 2087 }
 -- ENABLED.collective` below.
 local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
+-- The law's own axis directions, against the command domain above:
+-- `law value = LAW_DIR[axis] * command`, and back again on output
+-- (`LAW_DIR` is +-1, its own inverse). The law (`law_update`) reasons
+-- in physical terms -- **collective: positive = more lift** (its
+-- vertical-acceleration integrator raises `u_c` to climb; the RPM,
+-- blade-stall and pedal-limit guards cap a *rising* `u_c`; the torque
+-- feed-forward adds right pedal for a rising `u_c`); **pedals:
+-- positive = right**. Command 2087 runs the other way for the
+-- collective: `SIGN.collective = -1` and arg 1102 positive is
+-- collective up (M0 A3, +0.89 against VS), so a positive command is
+-- collective DOWN. Before this table existed the law's `u_c` was the
+-- command itself, so every collective term had the wrong sign -- the
+-- 2026-11-24 data flight drove the lever to full up within ~3 s of
+-- every take while the law asked to descend (`plans/flight-lift-
+-- vector/debug-2026-11-24c.md`, finding 2). Pedals already agree
+-- (command positive = right, debug-2026-11-24b), pitch/roll are
+-- unchanged (+1) -- not re-derived here.
+local LAW_DIR = { pitch = 1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
+
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
 -- defaults off for pedal and collective until M0-B and M0-C" -- each
 -- axis gated on its own probe). Pitch/roll are the axes probe v2
@@ -537,11 +556,14 @@ local function law_apply_goal(state, goal, limits, profile)
 end
 
 -- `law_init_at_take(measured, limits, command, seed, profile)` -- Decision 24's
--- "At take" section. `command` is the already SIGN-mapped (per
--- `SIGN.*`) captured axis value for every axis, in the same domain the
--- output stage writes (so `law_outputs` on this very state, with zero
--- attitude/rate error, reproduces `command` exactly -- "the output is
--- continuous at take, bit-exact").
+-- "At take" section. `command` is the captured axis value for every
+-- axis in the **law domain** (`LAW_DIR`: collective positive = up,
+-- pedals positive = right), i.e. `law_domain` of the SIGN-mapped
+-- command -- so `law_outputs` on this very state, with zero
+-- attitude/rate error, reproduces `command` exactly, and the output
+-- stage's `law_domain` maps it back to the captured command ("the
+-- output is continuous at take, bit-exact"; the pedal write bias is
+-- added on top of that, `command_for`).
 --
 -- `seed` (BL-16 sortie 2026-11-20, `plans/flight-control/debug.md`) is
 -- an optional table -- `{heading_deg, alt_m, alt_ref, speed_kmh}`, any
@@ -1045,8 +1067,8 @@ local function law_update(state, dt, measured, limits, profile)
 end
 
 -- `law_outputs(state, measured, profile)` -- reads the four axis
--- commands out of `state`, already in the sign-mapped domain the output
--- stage writes (clamped defensively; `law_update`'s own saturation
+-- commands out of `state`, in the law domain (`LAW_DIR`; the output
+-- stage, `command_for`, maps them to what is written) (clamped defensively; `law_update`'s own saturation
 -- already keeps `u_c`/`t_y` in range, but the pitch/roll inner-loop
 -- terms below are not themselves saturated upstream). Pure, no
 -- mutation.
@@ -1112,6 +1134,20 @@ local function axis_command(values, axis)
     return SIGN[axis] * v
 end
 
+-- Command domain <-> law domain (`LAW_DIR`, its own comment). The same
+-- function both ways, since every `LAW_DIR` entry is +-1. A take's
+-- `law_init_at_take` receives `law_domain(command)`; every write sends
+-- `law_domain(law_outputs(...))` -- so the take stays bit-exact (the
+-- two flips cancel) while the law's own collective terms point the
+-- right way.
+local function law_domain(values)
+    local out = {}
+    for axis, v in pairs(values) do
+        out[axis] = (LAW_DIR[axis] or 1.0) * v
+    end
+    return out
+end
+
 -- Mode-1 own state. `fc_mode`: "off" | "taking" | "active" | "armed".
 local fc_mode = "off"
 local fc_take_seq = nil
@@ -1165,6 +1201,26 @@ local fc_captured = {}
 -- own `source`, or the unpark path's) -- diagnostic only, read by the
 -- take's own trace-gated debug line (`debug-2026-11-24b.md`, question 4).
 local fc_capture_source = nil
+-- The seat `fc_captured` was read from ("pilot"/"operator", nil when
+-- unknown) -- the seat whose args the write-bias learner reads back
+-- (`learn_write_bias`). Not the camera seat: on the 2026-11-24 data
+-- flight the player sat in the operator seat, the operator set read 0
+-- throughout and the pilot set carried both the capture and the write.
+local fc_capture_seat = nil
+
+-- Per-axis write bias, command domain (`plans/flight-lift-vector/debug-
+-- 2026-11-24c.md`, finding 1): `written = intended + bias`, so the
+-- actual axis lands where the law means it to. Only axes listed in
+-- `flight_profile`'s `write_bias_seed` take part -- today the pedals,
+-- whose write lands a near-constant 0.32 left of the command in flight
+-- (cause in DCS unknown). Seeded from that table on first use, learnt
+-- online while active, kept across takes; cleared only by `on_stop`
+-- (mission stop/restart, and `reset(epoch)`, which reuses it).
+local fc_write_bias = {}
+-- Per-axis "written value steady since" anchor for the learner:
+-- `{value, t}`, re-anchored whenever the written value leaves
+-- `write_bias_settle_band` of it. Cleared at every take.
+local fc_write_bias_anchor = {}
 
 -- M0-J (flight 9) capture fixes -- never consulted as an active control
 -- source, only snapshotted at a take.
@@ -1183,6 +1239,8 @@ local fc_last_stowed_pilot_capture = nil
 -- once). Tracked every frame regardless of `fc_mode`, since a take can
 -- be commanded on any frame.
 local fc_last_steady_values = nil
+-- Which seat `fc_last_steady_values` came from.
+local fc_last_steady_seat = nil
 
 local fc_wobble_parity = false
 local fc_last_frame_t = nil
@@ -1264,8 +1322,10 @@ local function update_live_seat_tracking()
     local operator_live = mag_operator > LIVE_SEAT_ZERO_EPS
     if pilot_live and not operator_live then
         fc_last_steady_values = capture_from_seat("pilot")
+        fc_last_steady_seat = "pilot"
     elseif operator_live and not pilot_live then
         fc_last_steady_values = capture_from_seat("operator")
+        fc_last_steady_seat = "operator"
     end
 end
 
@@ -1289,33 +1349,34 @@ end
 -- unknown seat or a player's seat that reads idle (M0-J's explicit-
 -- handover state: the player sits there without having requested
 -- control, so that set holds no inputs and capturing it would write
--- zeros -- the J1 incident). Returns `values, source`; `source` names
--- the branch taken, for the take's own debug line.
+-- zeros -- the J1 incident). Returns `values, source, seat`; `source`
+-- names the branch taken, for the take's own debug line; `seat` is the
+-- set the values came from (the write-bias learner reads it back).
 local function resolve_capture_values()
     local seat = nil
     if ai_pilot_wheel ~= nil and ai_pilot_wheel.player_seat ~= nil then
         seat = safe_call(ai_pilot_wheel.player_seat)
     end
     if (seat == "pilot" or seat == "operator") and axis_magnitude(seat) > LIVE_SEAT_ZERO_EPS then
-        return capture_from_seat(seat), "player_seat_" .. seat
+        return capture_from_seat(seat), "player_seat_" .. seat, seat
     end
     local mag_pilot = axis_magnitude("pilot")
     local mag_operator = axis_magnitude("operator")
     local pilot_live = mag_pilot > LIVE_SEAT_ZERO_EPS
     local operator_live = mag_operator > LIVE_SEAT_ZERO_EPS
     if pilot_live and not operator_live then
-        return capture_from_seat("pilot"), "live_pilot"
+        return capture_from_seat("pilot"), "live_pilot", "pilot"
     end
     if operator_live and not pilot_live then
-        return capture_from_seat("operator"), "live_operator"
+        return capture_from_seat("operator"), "live_operator", "operator"
     end
     if fc_last_steady_values ~= nil then
-        return fc_last_steady_values, "last_steady"
+        return fc_last_steady_values, "last_steady", fc_last_steady_seat
     end
     if mag_operator > mag_pilot then
-        return capture_from_seat("operator"), "larger_operator"
+        return capture_from_seat("operator"), "larger_operator", "operator"
     end
-    return capture_from_seat("pilot"), "larger_pilot"
+    return capture_from_seat("pilot"), "larger_pilot", "pilot"
 end
 
 -- Decision 1 REVISED/24's takeover-mode pick, snapshotted once at take
@@ -2412,6 +2473,81 @@ local function request_release(seq)
     return "accepted"
 end
 
+-- One learning step of the write bias for `axis` (`fc_write_bias`'s own
+-- comment; `plans/flight-lift-vector/debug-2026-11-24c.md`, finding 1).
+-- Observes `written - p_meas`, where `written` is last frame's pre-wobble
+-- command (`fc_last_command`) and `p_meas = SIGN * arg` is where the axis
+-- actually is, in the command domain, on the captured seat. Learns only
+-- once the written value has stayed within `write_bias_settle_band` for
+-- `write_bias_settle_s` (longer than the pedal's own ~0.25 s lag, M0-B),
+-- so a moving command's lag is never mistaken for an offset; never at a
+-- saturated write or arg, where the offset relation cannot show. Slow
+-- (`write_bias_tau_s`, seconds) and bounded (`write_bias_bound`).
+local function learn_write_bias(axis, b, t, dt, profile)
+    local written = fc_last_command and fc_last_command[axis]
+    if written == nil then
+        return b
+    end
+    local anchor = fc_write_bias_anchor[axis]
+    if anchor == nil or math.abs(written - anchor.value) > profile.write_bias_settle_band then
+        fc_write_bias_anchor[axis] = { value = written, t = t }
+        return b
+    end
+    if (t - anchor.t) < profile.write_bias_settle_s or math.abs(written) >= 0.999 then
+        return b
+    end
+    local arg = read_axis(fc_capture_seat or "pilot", axis)
+    if type(arg) ~= "number" or arg ~= arg or math.abs(arg) >= 0.999 then
+        return b
+    end
+    local observed = written - SIGN[axis] * arg
+    local k = math.min(1.0, dt / profile.write_bias_tau_s)
+    return law_clamp(b + k * (observed - b), -profile.write_bias_bound, profile.write_bias_bound)
+end
+
+-- The command actually written for a law output: the law's intended
+-- axis positions (`law_outputs`, law domain) mapped to the command
+-- domain (`law_domain`), plus the per-axis write bias. The law's own
+-- limits (`pedal_limit_*`) therefore bound the *intended* position, not
+-- the biased write; `write_outputs` still clamps the write to +-1. On a
+-- take frame (`learn` false) the bias is applied but not learnt, so the
+-- first write is `captured + bias` and the axis stays where it was.
+local function command_for(law_out, t, dt, learn)
+    local profile = flight_profile.ACTIVE
+    local command = law_domain(law_out)
+    local seeds = profile.write_bias_seed
+    if type(seeds) ~= "table" then
+        return command
+    end
+    for axis, seed in pairs(seeds) do
+        if command[axis] ~= nil then
+            local b = fc_write_bias[axis]
+            if b == nil then
+                b = seed
+            end
+            if learn and dt ~= nil and dt > 0.0 then
+                b = learn_write_bias(axis, b, t, dt, profile)
+            end
+            fc_write_bias[axis] = b
+            command[axis] = command[axis] + b
+        end
+    end
+    return command
+end
+
+-- Testing aid: the current write bias per axis, as trace text (same
+-- flag as the flight trace).
+local function trace_write_bias()
+    local parts = {}
+    for _, axis in ipairs({ "pitch", "roll", "collective", "pedals" }) do
+        local b = fc_write_bias[axis]
+        if b ~= nil then
+            parts[#parts + 1] = "bias_" .. axis .. "=" .. string.format("%.4f", b)
+        end
+    end
+    return table.concat(parts, " ")
+end
+
 -- The output half of an "active" frame -- shared by the ordinary
 -- per-frame path below and by a fresh take/unpark-take transition,
 -- which must write from the very first frame it is active ("the output
@@ -2482,7 +2618,9 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
         -- `desired` verbatim (Decision 32/Q4), a voice take only the
         -- parts stamped after this take's own seq.
         local seed, desired_at_take = build_take_seed(measured.psi_deg)
-        fc_law = law_init_at_take(measured, fc_limits, command, seed, flight_profile.ACTIVE)
+        fc_law = law_init_at_take(
+            measured, fc_limits, law_domain(command), seed, flight_profile.ACTIVE)
+        fc_write_bias_anchor = {}
         -- Testing aid (`debug-2026-11-24b.md`, question 4): one line per
         -- take -- which seat the player is in, which capture branch ran,
         -- what it captured, the command written, and both seats' raw args
@@ -2535,7 +2673,7 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
             fc_applied_stamp_alt = desired_at_take.stamp_alt
             fc_applied_stamp_spd = desired_at_take.stamp_spd
         end
-        write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), nil)
+        write_outputs(command_for(law_outputs(fc_law, measured, flight_profile.ACTIVE), t, dt, false), nil)
         return
     end
     apply_desired_changes_to_law(measured.psi_deg)
@@ -2549,7 +2687,7 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
     -- current measured attitude against last frame's own target
     -- (never a literally frozen axis value).
     if not fc_est.primed then
-        write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), dt)
+        write_outputs(command_for(law_outputs(fc_law, measured, flight_profile.ACTIVE), t, dt, true), dt)
         return
     end
     -- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required
@@ -2636,7 +2774,7 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
             end
         end
     end
-    write_outputs(law_outputs(fc_law, measured, flight_profile.ACTIVE), dt)
+    write_outputs(command_for(law_outputs(fc_law, measured, flight_profile.ACTIVE), t, dt, true), dt)
 end
 
 -- Every frame, from `LuaExportBeforeNextFrame` (Decision 23).
@@ -2666,7 +2804,7 @@ local function run_flight_control(t)
         local ran = est_sample(fc_est, t, raw, flight_profile_active)
         if ran and FLIGHT_TRACE_ENABLED then
             flight_trace_log(format_trace_line(t, fc_est, raw, fc_law, fc_mode, fc_last_command)
-                .. " " .. trace_axis_args())
+                .. " " .. trace_axis_args() .. " " .. trace_write_bias())
         end
         fc_debug_estimator_sample_count = fc_debug_estimator_sample_count + 1
     end
@@ -2802,6 +2940,7 @@ local function run_flight_control(t)
         -- the threshold (should not happen outside a test harness).
         local values = fc_last_stowed_pilot_capture
         fc_capture_source = "stowed_pilot"
+        fc_capture_seat = "pilot"
         if values == nil then
             values = capture_from_seat("pilot")
             fc_capture_source = "fresh_pilot"
@@ -2833,13 +2972,14 @@ local function run_flight_control(t)
     end
 
     if fc_mode == "taking" then
-        local values, source = resolve_capture_values()
+        local values, source, seat = resolve_capture_values()
         if values == nil then
             -- else: stays "taking", retries next frame.
             return
         end
         fc_captured = values
         fc_capture_source = source
+        fc_capture_seat = seat
         fc_mode = "active"
         fc_take_seq = fc_pending_take_seq
         fc_pending_take_seq = nil
@@ -3012,6 +3152,13 @@ local function on_stop()
     fc_last_frame_t = nil
     fc_last_stowed_pilot_capture = nil
     fc_last_steady_values = nil
+    fc_last_steady_seat = nil
+    -- The learnt write bias lives for the mission (kept across takes);
+    -- a stop/restart -- or a body-layer `reset(epoch)`, which reuses
+    -- this -- starts again from `write_bias_seed`.
+    fc_write_bias = {}
+    fc_write_bias_anchor = {}
+    fc_capture_seat = nil
     fc_law = nil
     fc_law_last_update_t = nil
     fc_law_deferred_last_frame = false

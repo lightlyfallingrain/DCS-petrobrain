@@ -316,3 +316,42 @@ User, 2026-11-18: *"J"*. The run started 15:47:48 with the probe starting at J1.
   true and magnetic. Steady on an exact HSI number and half-press.
 - The airborne yaw response to a pedal step (M0-E).
 - B, C and D in both seats, and J1–J3.
+
+## Added 2026-11-24: the in-flight pedal write offset, measured
+
+Source: the 2026-11-24 data flight (`docs/acceptance/2026-11-24-sortie-feedback.md`, "Data flight
+with actual args"; logs `logs-2026-11-24/data_flight_trace.log` and `data_debug.log`, gitignored).
+Six mode-1 takes, four from the pilot seat and two from the operator seat, with the trace logging
+the written command (`out_pedals`) next to the actual pedal arg (`a1103`). Analysis:
+`plans/flight-lift-vector/debug-2026-11-24c.md`.
+
+**Result: in flight, `arg 1103 = B − command`, with B = 0.32.** Equivalently, in the command domain
+(`p = SIGN.pedals · arg`), the pedal sits at `command − 0.32`: 0.32 to the left of the command.
+
+| take | seat (player) | pedal before take (arg) | settled samples | B mean | B range |
+|---|---|---|---|---|---|
+| s8 t=61.4 | pilot | +0.152 | 28 | 0.325 | 0.322–0.329 |
+| s9 t=23.9 | pilot | +0.013 | 45 | 0.322 | 0.313–0.338 |
+| s9 t=74.1 | pilot | +0.000 | 53 | 0.324 | 0.320–0.329 |
+| s10 t=22.1 | pilot | −0.329 (pre-offset right) | 0 (command never steady 1 s) | — | — |
+| s11 t=24.0 | operator | −0.000 | 49 | 0.324 | 0.320–0.330 |
+| s11 t=42.0 | operator | −0.375 (pre-offset right) | 10 | 0.331 | 0.330–0.333 |
+
+"Settled" means the written command stayed within 0.02 of where it last settled for at least 1 s,
+longer than the pedal's own lag (τ ≈ 0.25 s, flights 3/4): 185 samples, mean **0.324**, range
+0.313–0.338. Unfiltered (every active sample), B spreads 0.30–0.36, the spread being the pedal lag
+while the command moves. Speeds 40–61 m/s, collective arg 0.25–1.0.
+
+- **Before the first write, the arg equals the capture** (the read is fresh and correct). Within
+  ~0.6 s of the first write it settles B further left. That is the left kick at every take.
+- **The hardware pedal does not enter.** With the pedals pre-offset right (−0.33, −0.375) the arg
+  still went to `B − command`. The write overrides the hardware position; nothing is added. This
+  falsifies the 2026-11-24 additive hypothesis, and the trim-datum reading of J3 above (the user's
+  pedal trimmer is set to "do not trim").
+- **Seat:** with the player in the operator seat, 1110–1113 read 0 throughout and the pilot set
+  carried both the capture and the write. B is the same in both seats.
+- **Pitch, roll and collective args follow their commands with no offset** in the same takes.
+- **On the ground B was 0** (flights 3/4, B2 read exactly `−command`); probe v2 (2026-11-01) fits
+  B ≈ 0.16. So B is not a universal constant, and what sets it inside DCS is unknown. The fix
+  (`flight_control.lua`, write bias) therefore seeds 0.32 and learns B online rather than relying
+  on it.
