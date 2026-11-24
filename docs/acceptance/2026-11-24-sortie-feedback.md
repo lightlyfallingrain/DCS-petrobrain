@@ -312,4 +312,35 @@ first; and the user's own acceleration technique (−15° pitch, collective and 
 1–2 s, hold until near target, then settle) as the reference for speed changes. Breaks:
 nose rises too much and bank eases too soon.
 
+### Fourth re-fly logs (`logs-2026-11-24/refly4_*`, session starting trace line 3532)
+
+Main loop's read:
+
+- **Acceleration, user vs Petrovich.** User hand-flown (t=2042–2064): 146 → 257 km/h in ~20 s,
+  dV/dt 1.6–1.9 m/s² sustained, pitch −13…−14°, collective arg to **1.00** (full) within ~6 s,
+  pedal arg 0.35 → −0.13 (right) with it. Petrovich (t=1815–1891): 167 → 250 km/h in ~75 s.
+  The shaper asked for up to `a_f_d` = 1.78 m/s² but he got only 0.6: `theta_d` reached only
+  −8.4°, collective 0.35. Near the target `a_f_d` stayed 0.8 with achieved ~0 and `theta_i` crept
+  only −3.0 → −4.2 in 75 s. So the shaper is not the limit. The pitch the law derives from a
+  desired acceleration is about half what is needed (`c_theta = 0.5`, the plan's deliberate "half
+  feed-forward"), and the trim loop that should make up the rest is far too slow. The user needed
+  about 12° of extra nose-down for 1.9 m/s², slightly more than `atan(a/g)` (10.9°).
+- **Collective → pedal.** In the row-4 climb (t=976–995) the collective rose at only
+  ~0.05/s (−0.02 → 0.49 over 10 s). The nose drifted left (ψ̇ −0.9 °/s), the ball went
+  0.03 → 0.12, and `t_y` took ~15 s to move 0.32. The torque feed-forward gave 0.25 × Δu_c ≈ 0.13
+  of that; the rest came from the ball integrator (`k_ball_pedal` 0.3/s per ball unit, **integral
+  only, no proportional term**). The heading hold then banked ±4° to fix the yaw, giving a ~20 s
+  weave. The pedal needed was ~0.6 per unit collective here, not 0.25.
+- **Take from a bank, heading-hold case.** Take at t=366.5 in −23° bank, ψ̇ −8 °/s: heading hold
+  on the take heading swung bank to **+34°**, then −18°, +5°; settled in ~15 s. Take at t=409.5
+  in +31°: −35°, +11°, −3°. The outer heading loop over-corrects a turn already under way. The
+  new 5° rule removes this case; heading capture after turn commands (row 2) was accepted.
+- **Slow flight (row 10), t=1505–1534.** Decelerating 81 → 64 km/h ground speed, sideslip from the
+  trace's own `aoss` grew 25° → 42° while the ball stayed centred (wind: ground-referenced
+  velocity, ~40° crab). At t=1527 the nose broke left: ψ̇ −0.4 → −15 °/s in 3 s. The pedal went
+  right only at ~0.09/s (arg −0.03 → −0.46 in 5 s), driven by the ball loop and the turn-entry
+  nudge from heading hold (r_d +17 °/s, bank to 30°). No yaw-rate term exists in forward flight by
+  design (plan F, finding 2), so nothing reacts to the yaw itself; the right-pedal limit (0.5) was
+  not reached. LV-3 scope, but the same slow pedal is the cause.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
