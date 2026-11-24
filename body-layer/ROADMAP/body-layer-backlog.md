@@ -172,6 +172,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B132]] — Readable cockpit args (lamps, gauges, rotor RPM) in the switch reference
 - [[BL-B133]] — Petrovich does not start talking while the player keys ICS or RADIO
 - [[BL-B134]] — One readback rule for every command: "stand by", then confirm on execution
+- [[BL-B135]] — Guard non-finite floats at aircraft-layer wire boundaries (telemetry `received_wall_clock_s` and siblings)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

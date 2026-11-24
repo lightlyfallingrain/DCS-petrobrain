@@ -58,6 +58,15 @@ _PAYLOAD_BODY = {
     ],
 }
 
+_PTT_STATE_BODY = {
+    "t": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "raw": 0.5,
+    "intercom": True,
+    "radio": False,
+    "last_seat": "pilot",
+}
+
 _AI_PILOT_WHEEL_BODY = {
     "t": 123.5,
     "received_wall_clock_s": 1000.0,
@@ -109,6 +118,8 @@ def _make_handler(
                 self._respond(200, _PAYLOAD_BODY)
             elif self.path == "/ai_pilot_wheel/latest":
                 self._respond(200, _AI_PILOT_WHEEL_BODY)
+            elif self.path == "/ptt/state":
+                self._respond(200, _PTT_STATE_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -316,6 +327,21 @@ def test_get_spu8_state_latest_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.get_spu8_state_latest()
+
+
+def test_get_ptt_state_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_ptt_state_latest()
+
+    assert result == _PTT_STATE_BODY
+
+
+def test_get_ptt_state_latest_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.get_ptt_state_latest()
 
 
 def test_get_watched_args_latest_returns_parsed_dict(server_url: str) -> None:

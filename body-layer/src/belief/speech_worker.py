@@ -47,7 +47,47 @@ that itself waits in a queue is not an interrupt. `audio-adapter`'s
 server is already `ThreadingHTTPServer` (confirmed, `audio-adapter/src/
 server.py:58,501`), so `POST /stop` is already safe to call while a
 `POST /speak` is in flight on another connection -- this costs at most
-one small round trip, never seconds."""
+one small round trip, never seconds.
+
+**`ptt_gate` (`body-layer/ROADMAP/BL-B133.md`) holds the *start* of a
+routine item, on this worker's own background thread, before `_process`
+is ever called for it.** Blocking here is safe -- this thread does
+nothing else -- and preserves order (the held item stays dequeued-but-
+unstarted rather than going back on the queue, so nothing behind it can
+jump ahead). An urgent item still preempts immediately: `enqueue`'s
+existing `bypass_gate=True` branch calls `interrupt()` before this
+worker thread ever sees the new item, and `interrupt()` now also wakes
+the wait so the currently-held (not yet started, never spoken) routine
+item is abandoned rather than finishing its wait first and delaying the
+urgent item behind it -- see `_wait_for_ptt_release`'s own docstring. A
+line already *playing* is untouched: the gate only runs before
+`_process` starts, never during it, so `_process` itself needs no
+change.
+
+**Review fix 2 (`plans/bl-b133-ptt-speech-hold/review.md`): `_gate_lock`
+closes a real lost-wakeup race, not a theoretical one.** The first
+version cleared a bare `threading.Event` unconditionally at the top of
+`_wait_for_ptt_release`; an `interrupt()` landing in the narrow window
+between `_run` dequeuing a routine item and that `clear()` running was
+silently wiped, leaving the wait blocked on `is_held()` alone until the
+trigger was physically released -- confirmed by direct repro (review's
+own: setting the abort signal before calling `_wait_for_ptt_release`
+left the call blocked a full second later against a held gate). The
+fix cannot be "don't clear at the top" on its own -- an urgent item's
+own `enqueue(bypass_gate=True)` calls `interrupt()` but never itself
+consumes the signal (it skips `_wait_for_ptt_release` entirely), so a
+leftover un-consumed signal would then wrongly abort a later, unrelated
+routine item's wait. So the ground truth is `_gate_wait_superseded`, a
+plain `bool` scoped to exactly one routine item's wait at a time via
+`_gate_wait_active`, both read/written only under `_gate_lock` -- never
+the `Event` alone, which stays only as a prompt-wake optimisation.
+`_run` sets `_gate_wait_active=True, _gate_wait_superseded=False` under
+the lock *before* calling `_wait_for_ptt_release`, so an `interrupt()`
+that takes the lock anywhere from that point onward (including the
+exact window the old code lost) sees `_gate_wait_active` already `True`
+and marks this specific wait superseded; `_run` resets
+`_gate_wait_active=False` the moment the wait resolves, so the flag can
+never leak into the next item's wait the way the bare `Event` did."""
 
 from __future__ import annotations
 
@@ -59,9 +99,16 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from belief.audio_client import AudioAdapterError
+from belief.ptt_hold import PttHoldGate
 from connection_reporter import ConnectionReporter
 
 logger = logging.getLogger(__name__)
+
+#: How often `_wait_for_ptt_release` re-checks the gate while waiting --
+#: well under any perceptible delay, so this is a poll-rate constant, not
+#: a behaviour tunable (same posture as `ptt_source.py`'s own `DEFAULT_
+#: DCS_POLL_HZ`, which is also an ordinary module literal).
+_PTT_WAIT_POLL_INTERVAL_S = 0.05
 
 #: Same value and reasoning as `AudioPlaybackSender._MAX_QUEUE_LEN`/
 #: `F10CommandQueue`/`_pending_positional_replies`'s identical cap --
@@ -133,10 +180,14 @@ class SpeechWorker:
     `AudioPlaybackSender` rather than `BrainLayerClient`."""
 
     def __init__(
-        self, client: SpeechClient, reporter: ConnectionReporter | None = None
+        self,
+        client: SpeechClient,
+        reporter: ConnectionReporter | None = None,
+        ptt_gate: PttHoldGate | None = None,
     ) -> None:
         self._client = client
         self._reporter = reporter
+        self._ptt_gate = ptt_gate
         self._queue: queue.Queue[_SpeechItem | None] = queue.Queue(
             maxsize=_MAX_QUEUE_LEN
         )
@@ -150,6 +201,23 @@ class SpeechWorker:
         #: race between the two could in principle log twice instead of
         #: once, which is a cosmetic risk, not a correctness one.
         self._overflow_warned = False
+        #: Set by `interrupt()`, cleared at the start of each PTT wait --
+        #: a prompt-wake optimisation only (so a waiting thread does not
+        #: sit through a full `_PTT_WAIT_POLL_INTERVAL_S` after an
+        #: interrupt); never the source of truth for whether a wait was
+        #: superseded -- see `_gate_wait_superseded` and the module
+        #: docstring's "Review fix 2."
+        self._ptt_wait_abort = threading.Event()
+        #: `_gate_lock` protects the pair below, which together are the
+        #: actual source of truth `_wait_for_ptt_release` checks (module
+        #: docstring, "Review fix 2"). `_gate_wait_active` is `True` for
+        #: exactly the span from `_run` dequeuing a routine item meant to
+        #: wait on the gate to that wait resolving one way or the other --
+        #: `interrupt()` consults it to decide whether *this* wait (not
+        #: some future, unrelated one) is the one being superseded.
+        self._gate_lock = threading.Lock()
+        self._gate_wait_active = False
+        self._gate_wait_superseded = False
 
     def open(self) -> None:
         """Starts the background worker thread. Call once, before the
@@ -216,6 +284,10 @@ class SpeechWorker:
         raises: a failure to interrupt degrades to a logged warning, same
         posture as `AudioPlaybackSender._interrupt_playback`."""
         self._clear_queue()
+        with self._gate_lock:
+            if self._gate_wait_active:
+                self._gate_wait_superseded = True
+        self._ptt_wait_abort.set()
         try:
             self._client.stop()
         except Exception:
@@ -242,6 +314,20 @@ class SpeechWorker:
             item = self._queue.get()
             if item is None:
                 return
+            if not item.bypass_gate and self._ptt_gate is not None:
+                with self._gate_lock:
+                    self._gate_wait_active = True
+                    self._gate_wait_superseded = False
+                superseded = not self._wait_for_ptt_release()
+                with self._gate_lock:
+                    self._gate_wait_active = False
+                if superseded:
+                    # Superseded by an urgent arrival (possibly one that
+                    # landed before the wait even started -- see module
+                    # docstring's "Review fix 2") -- dropped, same policy
+                    # as any other item `interrupt()` already clears from
+                    # the queue itself.
+                    continue
             try:
                 self._process(item)
             except Exception:
@@ -257,6 +343,44 @@ class SpeechWorker:
                     "line (continuing)",
                     exc_info=True,
                 )
+
+    def _wait_for_ptt_release(self) -> bool:
+        """Blocks on this worker's own thread until `self._ptt_gate.
+        is_held()` reports released, returning `True` once it does.
+        Returns `False` instead if `interrupt()` (an urgent item) fires
+        at any point while this wait is the active one (`_gate_wait_
+        active`, set by `_run` before calling this) -- including before
+        this method's own `while` loop ever runs, which is the race
+        module docstring's "Review fix 2" fixes. The caller must then
+        drop the held item rather than speak it, since the urgent item
+        has already cleared the queue behind it and is waiting for this
+        wait to end."""
+        assert self._ptt_gate is not None
+        self._ptt_wait_abort.clear()
+        while self._ptt_gate.is_held():
+            with self._gate_lock:
+                if self._gate_wait_superseded:
+                    return False
+            # A wake here (whether from `interrupt()`'s `set()` or a
+            # plain timeout) means nothing beyond "check again" -- the
+            # `_gate_wait_superseded` check above/next iteration is the
+            # only thing that ever ends this loop early; `clear()` is
+            # safe to call unconditionally since it is a prompt-wake
+            # optimisation only, never the source of truth (module
+            # docstring, "Review fix 2").
+            self._ptt_wait_abort.wait(timeout=_PTT_WAIT_POLL_INTERVAL_S)
+            self._ptt_wait_abort.clear()
+        return True
+
+    def reset_for_new_mission(self) -> None:
+        """Delegates to `self._ptt_gate.reset_for_new_mission()` -- a
+        true no-op when no gate is configured (tests, or any future
+        caller with no PTT feed). `body._reset_mission_state` calls this
+        so a cached `held=True` PTT sample from the mission that just
+        ended cannot carry into the new one (`body-layer/ROADMAP/
+        BL-B133.md` review fix 1)."""
+        if self._ptt_gate is not None:
+            self._ptt_gate.reset_for_new_mission()
 
     def _process(self, item: _SpeechItem) -> None:
         push_sent_wall = time.time()

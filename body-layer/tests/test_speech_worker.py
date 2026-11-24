@@ -67,6 +67,22 @@ class _FakeSpeechClient:
         self.stop_calls += 1
 
 
+class _FakePttGate:
+    """A controllable `PttHoldGate` double -- `held` is flipped directly
+    by the test, from whichever thread, rather than driving a real
+    `AircraftLayerClient`/debounce/staleness path (those are `test_ptt_
+    hold.py`'s job). `calls` lets a test confirm the wait loop actually
+    polled at least once before asserting on timing-sensitive sequencing."""
+
+    def __init__(self, held: bool = False) -> None:
+        self.held = held
+        self.calls = 0
+
+    def is_held(self) -> bool:
+        self.calls += 1
+        return self.held
+
+
 def _wait_until(predicate: Callable[[], bool], timeout_s: float = 2.0) -> None:
     """Polls `predicate()` until it is truthy or `timeout_s` elapses --
     used instead of a fixed `sleep` wherever a test needs to wait for the
@@ -408,3 +424,189 @@ def test_interrupt_wall_time_is_bounded_well_under_push_speechs_timeout_against_
             assert elapsed < 2.0
         finally:
             worker.close()
+
+
+# -- PTT hold (`[[BL-B133]]`) -----------------------------------------------
+
+
+def test_routine_line_waits_for_ptt_release_then_speaks_in_order() -> None:
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("line 0", False, None, None)
+        worker.enqueue("line 1", False, None, None)
+        _wait_until(lambda: gate.calls > 0)
+        # Still held -- nothing started yet, and nothing was lost or
+        # reordered by waiting.
+        assert client.calls == []
+
+        gate.held = False
+        _wait_until(lambda: len(client.calls) == 2)
+    finally:
+        gate.held = False
+        worker.close()
+    assert [text for text, _, _ in client.calls] == ["line 0", "line 1"]
+
+
+def test_urgent_line_speaks_while_ptt_held() -> None:
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("urgent line", True, None, None)
+        _wait_until(lambda: len(client.calls) == 1)
+    finally:
+        gate.held = False
+        worker.close()
+    assert client.calls == [("urgent line", True, None)]
+
+
+def test_radio_held_blocks_a_routine_line_same_as_intercom() -> None:
+    """The gate's own `is_held()` already folds intercom/radio into one
+    bit (`PttHoldGate`'s "either" reading) -- this just confirms
+    `SpeechWorker` does not add a second, narrower check of its own."""
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)  # stands in for a radio-held reading
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("line 0", False, None, None)
+        _wait_until(lambda: gate.calls > 0)
+        assert client.calls == []
+        gate.held = False
+        _wait_until(lambda: len(client.calls) == 1)
+    finally:
+        gate.held = False
+        worker.close()
+
+
+def test_already_playing_line_is_not_interrupted_when_ptt_goes_down() -> None:
+    """A line already *playing* when the trigger goes down plays to the
+    end (U1's "2 - let it play") -- the gate is only consulted before a
+    new item starts, never while `_process` is already running one."""
+    blocker = threading.Event()
+    client = _FakeSpeechClient(blocker=blocker)
+    gate = _FakePttGate(held=False)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("line 0", False, None, None)
+        _wait_until(lambda: client._blocked_once)
+        # The trigger goes down mid-playback -- must not abort it.
+        gate.held = True
+        blocker.set()
+        _wait_until(lambda: len(client.calls) == 1)
+    finally:
+        gate.held = False
+        worker.close()
+    assert client.calls == [("line 0", False, None)]
+
+
+def test_held_routine_line_is_dropped_by_an_urgent_arrival_while_waiting() -> None:
+    """An urgent line must not queue up behind a routine line that is
+    still waiting on the PTT gate -- `interrupt()` (the urgent `enqueue`
+    path) also wakes the wait, same "superseded, dropped" policy as any
+    other item it already clears from the queue itself."""
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("routine (will be held)", False, None, None)
+        _wait_until(lambda: gate.calls > 0)
+
+        worker.enqueue("urgent", True, None, None)
+        _wait_until(lambda: len(client.calls) == 1)
+    finally:
+        gate.held = False
+        worker.close()
+    assert client.calls == [("urgent", True, None)]
+
+
+def test_interrupt_racing_between_dequeue_and_wait_start_is_not_lost() -> None:
+    """Required Fix 2 (`plans/bl-b133-ptt-speech-hold/review.md`): an
+    `interrupt()` landing in the narrow window between `_run` dequeuing a
+    routine item and `_wait_for_ptt_release` actually starting to wait
+    must not be silently lost -- the bug the review confirmed directly:
+    a bare `Event` cleared unconditionally at the top of `_wait_for_ptt_
+    release` discarded a `set()` that raced in just before it, leaving
+    the wait blocked on `is_held()` alone until the trigger physically
+    released.
+
+    Deterministic repro of exactly that window, no real threading/timing
+    involved: `_gate_wait_active` is set the same way `_run` sets it
+    immediately after dequeuing an item meant to wait on the gate, then
+    `interrupt()` is called -- simulating an urgent arrival landing in
+    that exact gap -- *before* `_wait_for_ptt_release` is ever entered.
+    On the pre-fix code this would block until the gate released (the
+    review's own repro: still blocked a full second later); with the fix
+    it returns `False` immediately."""
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker._gate_wait_active = True  # as `_run` would have just set, post-dequeue
+
+    worker.interrupt()  # the urgent arrival racing into the window
+
+    start = time.monotonic()
+    assert worker._wait_for_ptt_release() is False
+    assert time.monotonic() - start < 1.0  # not the old blocked-until-released bug
+
+
+def test_an_earlier_supersession_does_not_leak_into_a_later_waits_abort() -> None:
+    """The fix must not reopen the bug its own docstring names: once an
+    earlier routine item has actually been superseded (`_gate_wait_
+    superseded` left `True` after that wait returns `False`), an urgent
+    item's own processing never clears it back (`bypass_gate` skips the
+    gate branch entirely) -- `_run` resetting `_gate_wait_superseded =
+    False` fresh at the *start* of every new gated item (not just after
+    a fresh `interrupt()`) is what keeps that stale `True` from wrongly
+    aborting a later, unrelated routine line's wait."""
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=True)
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        # Routine A: dequeued, starts waiting on the (held) gate.
+        worker.enqueue("routine A (will be superseded)", False, None, None)
+        _wait_until(lambda: gate.calls > 0)
+
+        # Urgent supersedes A -- same mechanism as
+        # `test_held_routine_line_is_dropped_by_an_urgent_arrival_while_
+        # waiting`, left `_gate_wait_superseded` `True` internally.
+        worker.enqueue("urgent", True, None, None)
+        _wait_until(lambda: len(client.calls) == 1)
+        assert client.calls == [("urgent", True, None)]
+
+        # Routine B, still held, must wait normally -- not be instantly
+        # dropped by the stale `True` left behind by A's supersession.
+        worker.enqueue("routine B", False, None, None)
+        _wait_until(lambda: gate.calls > 1)
+        assert len(client.calls) == 1  # still only the urgent line so far
+
+        gate.held = False
+        _wait_until(lambda: len(client.calls) == 2)
+    finally:
+        gate.held = False
+        worker.close()
+    assert [text for text, _, _ in client.calls] == ["urgent", "routine B"]
+
+
+def test_ptt_feed_unavailable_does_not_hold_speech() -> None:
+    """`PttHoldGate.is_held()` itself resolves "unavailable" to `False`
+    (`test_ptt_hold.py`); this confirms the worker speaks normally when
+    wired to a gate in that state, i.e. does not add a second place that
+    could get this wrong."""
+    client = _FakeSpeechClient()
+    gate = _FakePttGate(held=False)  # what an unavailable feed resolves to
+    worker = SpeechWorker(client, ptt_gate=gate)
+    worker.open()
+    try:
+        worker.enqueue("line 0", False, None, None)
+        _wait_until(lambda: len(client.calls) == 1)
+    finally:
+        worker.close()
+    assert client.calls == [("line 0", False, None)]

@@ -1,0 +1,227 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>PTT Speech Hold Card</title>
+<style>
+/* layout: a tall single-column cockpit card, one numbered block per test case in natural flight
+   order, the urgent-line case flagged as the prize (the clearest break from "unable, not ready" ) */
+:root{
+  --bg:#0c1210; --bg-panel:#141c19; --fg:#e9efe9; --fg-dim:#9fb0a8;
+  --accent:#e8a33d; --accent-dim:#7a5a23; --record:#4fa3c4; --record-dim:#1c3038;
+  --ok:#5fb87c; --warn:#d9684b; --rule:#263430;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+    --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+    --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f1e8; --bg-panel:#ffffff; --fg:#1b2420; --fg-dim:#5a6a62;
+  --accent:#a9661b; --accent-dim:#e9cda0; --record:#1f6e8c; --record-dim:#dceef4;
+  --ok:#2f7a4a; --warn:#b03a24; --rule:#dcd6c4;
+  color-scheme: light;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--fg); margin:0;
+  font-family:"Source Sans 3",system-ui,sans-serif;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+  padding-block:24px;
+}
+h1,h2,.mono{font-family:"Barlow Condensed",system-ui,sans-serif;}
+.mono,code,pre{font-family:"JetBrains Mono",monospace;}
+.wrap{max-width:740px; margin:0 auto; display:flex; flex-direction:column; gap:20px;}
+header{border-bottom:1px solid var(--rule); padding-bottom:14px;}
+header h1{font-size:clamp(1.6rem,5vw,2.2rem); margin:0 0 4px; letter-spacing:.02em; text-transform:uppercase; color:var(--accent);}
+header p{margin:0; color:var(--fg-dim); font-size:.95rem;}
+.branch{
+  display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:6px; padding:10px 14px;
+}
+.branch .tag{font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--fg-dim);}
+.branch code{color:var(--accent); font-size:.95rem;}
+.note{
+  background:var(--bg-panel); border-left:3px solid var(--accent-dim); border-radius:0 6px 6px 0;
+  padding:12px 14px; font-size:.9rem; color:var(--fg-dim); line-height:1.5;
+}
+.note code{color:var(--fg);}
+.card{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:18px 18px 16px;
+}
+.card.prize{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-dim) inset;}
+.card.optional{border-style:dashed;}
+.card h2{
+  margin:0 0 10px; font-size:1.3rem; letter-spacing:.01em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+}
+.card h2 .n{color:var(--accent); font-variant-numeric:tabular-nums;}
+.prizetag{
+  font-size:.65rem; letter-spacing:.09em; text-transform:uppercase; color:var(--bg);
+  background:var(--accent); border-radius:4px; padding:2px 7px; font-family:"Source Sans 3",sans-serif;
+}
+.opttag{
+  font-size:.65rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim);
+  border:1px solid var(--rule); border-radius:4px; padding:2px 7px; font-family:"Source Sans 3",sans-serif;
+}
+.block{display:flex; flex-direction:column; gap:10px;}
+.label{font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim); margin-bottom:2px;}
+.expect{font-size:.95rem; line-height:1.55;}
+.record-box{
+  background:var(--record-dim); border:1px solid var(--record); border-radius:6px; padding:10px 12px;
+  font-size:.9rem; line-height:1.5;
+}
+.record-box .label{color:var(--record); opacity:.9;}
+.chk{display:flex; align-items:flex-start; gap:10px; margin-top:4px;}
+.chk input[type=checkbox]{
+  width:20px; height:20px; margin-top:2px; accent-color:var(--accent); flex-shrink:0;
+}
+.chk label{font-size:.95rem; line-height:1.4;}
+.bringback{
+  background:var(--bg-panel); border:1px solid var(--rule); border-radius:10px; padding:16px 18px;
+}
+.bringback h2{margin:0 0 10px; font-size:1.1rem;}
+.bringback ul{margin:0; padding-left:20px; font-size:.92rem; line-height:1.6;}
+.bringback .surprise{margin-top:10px; font-style:italic; color:var(--record);}
+.seealso{font-size:.85rem; color:var(--fg-dim); line-height:1.6;}
+footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px;}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>PTT Speech Hold</h1>
+    <p>BL-B133 &mdash; does Petrovich stay quiet while you're keying ICS or RADIO, 2026-11-24</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <code>main</code>
+    <span class="tag">once this DoD pass's auto-merge lands &mdash; <code>git checkout main &amp;&amp; git pull</code></span>
+  </div>
+
+  <div class="note">
+    No special setup &mdash; this is the production crew pipeline, not a probe. Fly normally, let
+    Petrovich accumulate a few routine callouts before testing, so there's something queued to
+    hold against. Two things this card does <strong>not</strong> settle: the exact debounce window
+    and the 2-minute telemetry-staleness bound were chosen as agreed guesses
+    (<code>belief/ptt_hold.py</code>), not measured &mdash; this flight is the first real data on
+    whether they feel right.
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span> Hold ICS through a routine line, then release</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Press and hold the intercom trigger while you expect a routine line
+        (a contact callout, a status update) is about to come. Hold a few seconds, then release.</div>
+      <div class="label">Expect</div>
+      <div class="expect">No new line starts while ICS is held. Shortly after release &mdash; a
+        fraction of a second, not a noticeable delay &mdash; the line starts.</div>
+      <div class="chk"><input type="checkbox" data-k="b1-done" id="c1"><label for="c1">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did anything start while held? How
+        long from release to the line actually starting?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span> Same with RADIO</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Repeat block 1, holding the radio trigger instead of intercom.</div>
+      <div class="label">Expect</div>
+      <div class="expect">Identical behaviour &mdash; either trigger holds routine speech, not
+        just one of them.</div>
+      <div class="chk"><input type="checkbox" data-k="b2-done" id="c2"><label for="c2">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Any difference from how ICS behaved
+        in block 1.</div>
+    </div>
+  </div>
+
+  <div class="card prize">
+    <h2><span class="n">3</span> An urgent line speaks through a held trigger <span class="prizetag">The prize</span></h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">While holding ICS or RADIO, trigger something that should produce an
+        urgent line &mdash; a forced handback (&ldquo;you have controls!&rdquo;) is the clearest
+        if one is available; any line you know is marked urgent works.</div>
+      <div class="label">Expect</div>
+      <div class="expect">The urgent line speaks <strong>immediately</strong>, even though the
+        trigger is still held down. It does not wait for release &mdash; this is the one behaviour
+        the whole feature exists to not break.</div>
+      <div class="chk"><input type="checkbox" data-k="b3-done" id="c3"><label for="c3">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did the urgent line speak while you
+        were still holding the trigger, or did it wait?</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">4</span> Holding the trigger mid-line doesn't cut it off</h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">Let Petrovich start speaking a line, then press and hold ICS or RADIO
+        partway through it.</div>
+      <div class="label">Expect</div>
+      <div class="expect">The line already playing <strong>finishes normally</strong> &mdash; it
+        is not cut off. Only the <em>next</em> line (if routine) waits for release.</div>
+      <div class="chk"><input type="checkbox" data-k="b4-done" id="c4"><label for="c4">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did the in-progress line finish
+        cleanly, or did it get cut off the moment you pressed the trigger?</div>
+    </div>
+  </div>
+
+  <div class="card optional">
+    <h2><span class="n">5</span> A long held trigger <span class="opttag">optional</span></h2>
+    <div class="block">
+      <div class="label">Do</div>
+      <div class="expect">If the flight runs long and you end up holding RADIO for an extended
+        stretch (a couple of minutes or more) during a real exchange, just notice what happens.</div>
+      <div class="label">Expect</div>
+      <div class="expect">By design, a held trigger is only trusted for as long as the telemetry
+        feed itself keeps refreshing &mdash; this is the one open question in the implementation
+        (see <code>belief/ptt_hold.py</code>'s module docstring). A genuinely long hold under
+        normal conditions should still hold; this block is the only way to probe it for real.</div>
+      <div class="chk"><input type="checkbox" data-k="b5-done" id="c5"><label for="c5">Checked</label></div>
+      <div class="record-box"><div class="label">Record</div>Did Petrovich ever start talking over
+        a long held trigger? Roughly how long had you been holding it?</div>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Bring back</h2>
+    <ul>
+      <li>Blocks 1&ndash;2: did either trigger correctly stop a routine line, and how quick was
+        release-to-speech.</li>
+      <li>Block 3: did the urgent line really speak through a held trigger.</li>
+      <li>Block 4: did an in-progress line ever get cut off.</li>
+      <li>Block 5, if you hit it: any talking-over on a long hold.</li>
+    </ul>
+    <div class="surprise">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <div class="seealso">
+    Source: <code>body-layer/ROADMAP/BL-B133.md</code>,
+    <code>plans/bl-b133-ptt-speech-hold/</code>.
+  </div>
+
+  <footer>docs/acceptance/2026-11-24-bl-b133-ptt-hold-card.md</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='bl-b133-ptt-hold-card';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
