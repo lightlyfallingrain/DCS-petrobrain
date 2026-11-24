@@ -76,4 +76,13 @@ Main loop's read of the law trace:
 - The trace still lacks the **actual** axis args (1100–1103) next to the commands, so the take
   mismatch cannot be confirmed from the logs.
 
+## User's answer on the take (after the re-fly read)
+
+> Ah, this is a lead.
+> When Petrovich takes controls (with current branch code and before the axis sign flip) There is an immediate pedal movement to left. It does not hold, what player was holding, but moves immediately. That causes the initial yaw.
+> I suspect that either the pedal read is old, or it is wrong.
+
+So the take is not bumpless on the pedal, in both code versions. That is independent of the
+ball-loop gain sign.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
