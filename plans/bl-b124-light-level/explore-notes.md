@@ -56,6 +56,14 @@ wrecks, is unknown — investigator territory.
 them is friendly units in deep friendly territory anyway."* Remaining new sources to check:
 explosions, missile plumes; moonlight later.
 
+**Missile plume = the launch (user, 2026-11-24):** *"Missile plume is certainly not reported, but
+that is the same thing as missile launch, the plume is there for a few seconds. And smoke trail,
+though that we do not see in the dark."* So a missile launch makes the launcher a light source for
+a few seconds; the smoke trail is a daytime cue only and is not part of this work. The existing
+firing hook (`aircraft-layer/dcs-export/petrobrain-firing-events-hook.lua`) already carries
+`S_EVENT_SHOT` (missile/rocket launches, initiator position resolved at event time) alongside
+`S_EVENT_SHOOTING_START/_END` (gun bursts) — no new DCS read needed for this source.
+
 ## Speech
 
 > *"no, the player sees the light/weather situation with his eyes as well."*
