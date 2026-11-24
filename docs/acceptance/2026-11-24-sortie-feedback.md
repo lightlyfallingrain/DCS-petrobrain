@@ -210,4 +210,106 @@ Corroborated by `a1100` vs pitch acceleration, positive (+0.25..+0.57) in every 
 of both flights. Fixed in 2ff15f05 (`LAW_DIR.pitch = 1`, `plans/flight-lift-vector/debug-2026-11-24d.md`).
 The checks named above were not needed.
 
+## Fourth re-fly (pitch direction reverted, 38302851) — full card
+
+No logs brought back with this report. User's words, verbatim:
+
+> # LV-1 test flight
+>
+> ## Item 1
+>
+> passes now. The take over is a bit wobbly, but it stabilizes. It'll do for now.
+>
+> ## 8-9 Take from a bank, and mid-turn
+>
+> Levels off from the turn. There's some oscillation, but it subsides and aircraft stabilizes - OK. However, when Mode 1 engages in a turn, it should continue that turn, turn engage heading hold on the heading at handover time. Not immediate big problem, but needs fixing in BL-16.
+>
+> Mode 2 to Mode 1 mid turn: first goes for bank 0, then resumes turn to heading set in Mode 2. Resuming set heading is correct, leveling off mid turn is not, should just continue turn.
+>
+> ## 2 Turns: 30° and 90°, both ways, 120 and 220 km/h
+>
+> Turns OK, accepted.
+>
+> ## 3 Speed 150 → 220 → 150
+>
+> Speed changes work, but are very slow. Way too slow. Need much more pitch and collective input.
+>
+> ## 4 Climb 100 m, descend 100 m
+>
+> Climb and descent work, but on collective movements, especially increase, pedal correction lags behind causing yaw offset and oscillation.
+>
+> ## 5 Heading hold in a crosswind
+>
+> Pass.
+>
+> ## 7 Take at about 70 km/h
+>
+> OK. Though pedal inputs change quite slowly, which may cause overshoot and oscillation.
+>
+> ## R2 Handback with a seat change
+>
+> OK, pass.
+>
+> ## 10 Slow flight — expected to find the edge
+>
+> Around 50 km/h developed left yaw, which quickly got out of control. Not enough right pedal.
+>
+> ## general observations
+>
+> * cyclic and pedal changes are slow and because of that corrections sometimes lag the actual flight state.
+>
+> * Break turn starts fine, but then nose rises too much and bank smooths soon. Could fly breaks more agressively, it is an escape manouvre.
+>
+> * Accelecating from 150 to 250:
+>    * slow pith down increase to about -8 deg.
+>    * How I fly it:
+>       * level flight, 150 km/h
+>       * pitch down ~15 deg, lot's more collective and right pedal to compensate for added collective. All this in 1-2 s.
+>       * Keep flying -15 pitch until speed about 230, then start settling for 250 by bringning nose up, lowering collective, adjusting pedals.
+>       * Same thing for decelaration, but opposite ways.
+
+User's correction to the 8–9 sentence:
+
+> " OK. However, when Mode 1 engages in a turn, it should continue that turn, turn engage heading hold on the heading at handover time" - correction "not turn engage heading hold on"
+
+So: a take in a turn continues the turn; it does **not** engage heading hold on the handover
+heading. This restates BL-16 decision 3 (*"keep the turn going, that is what I mean by
+maintaining current state"*, `body-layer/ROADMAP/BL-16.md`), which LV-1 does not meet.
+
+Asked whether, with no command after a take in a bank, he keeps circling:
+
+> Mode 1 takeover. Let's say that if bank is less than +-5 degrees, engage heading hold. If bank is more than that, maintain bank.
+
+Rule for a mode 1 take with no standing goal: |bank| < 5° → heading hold (on the take heading);
+|bank| ≥ 5° → hold the bank (keep turning) until commanded. The 5° is a first cut, tunable. Mode 2 →
+mode 1 with a mode-2 heading goal: keep the turn toward that heading, never level first.
+
+Explore answers on speed changes and input shape:
+
+> 1 - Acceleration 150 to 250 takes about 20 s when I fly it. Petrovich took about a minute. I might use more than -15 momentarily, but -15 is about the max that the collective can create lift to maintain altitude. If I decide to sacrifice alt for speed, I can push beyound -15 deg for a a few seconds.
+>
+> 2 - pretty much the same, except that  at stabilization collective needs to be raised fairly slowly to give the engines time to spool up and create more torque, otherwise rotor RPM drops fast. Say ~5 seconds smooth nose down and collective up.
+>
+> 3 - The input cahnes themselves can be fast always, that's how a human needs to do them. But the amount of delta needs to get slower as speeds slows. Therefore: Any cyclic movement can be fast, even very fast. Pedals move more slowly in Mi-24 anyhow. Collective small movements can be fast, large movements especially increase need to be more gently. What the movememts should not be is a lot of delta at fast rate. Rather lots of smaller incremental corrections at fast rate.
+
+Main loop's reading:
+- **Speed change target:** 150 → 250 km/h in ~20 s (he took ~60 s). Level acceleration pitch about
+  −15°, the most at which the collective can still hold height; beyond −15° only for a few seconds
+  and only when trading height for speed.
+- **Deceleration** mirrors it, except the roll-out at the end: nose down and collective **up** over
+  ~5 s, smooth, so the engines spool and rotor RPM does not drop.
+- **Input shape:** fast, frequent, small corrections — never one big delta at a fast rate. Cyclic
+  may move fast; pedals are slower in the Mi-24 anyway; collective small moves fast, large moves
+  (above all increases) gentle. The size of each correction shrinks as speed falls.
+- Not answered (assumed): holding a bank after a take also holds height and speed. Oscillation
+  size after a take from a bank: left to the next logs.
+
+Main loop's first summary (not a diagnosis): rows 1, 2, 4, 5, 7, 8–9 stabilise, R2 pass, row 10
+lost at ~50 km/h (left yaw, not enough right pedal). Common thread: everything is **slow** —
+cyclic, pedal and speed changes lag the flight state. Two behaviour gaps: a take mid-turn should
+**keep the turn** (heading hold on the take-time heading, or the mode-2 heading), not level off
+first; and the user's own acceleration technique (−15° pitch, collective and right pedal in
+1–2 s, hold until near target, then settle) as the reference for speed changes. Breaks:
+nose rises too much and bank eases too soon.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
