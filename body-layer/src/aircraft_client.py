@@ -39,7 +39,15 @@ resolving the per-`unit_name` join against a world-objects snapshot itself
 -- this client does no joining or interpretation, mirroring every other
 `get_*` method here.
 
-`get_line_of_sight_latest`/`post_look_direction` (`plans/dcs-driven-los/
+`get_line_of_sight_latest`/`get_ptt_state_latest` (`body-layer/ROADMAP/BL-B133.md`) is this seam's
+`GET /ptt/state` counterpart to `get_spu8_state_latest` -- same "not an
+error" empty-cache posture: `None` until the trigger first moves at all
+this collector process's lifetime. `belief.ptt_hold.PttHoldGate` is the
+one caller, resolving the typed hold/debounce/staleness decision itself
+-- this client does no interpretation, same division of labour every
+other `get_*` method here already has.
+
+`post_look_direction` (`plans/dcs-driven-los/
 plan.md`, X-B29) are this seam's `GET /line_of_sight/latest` and
 `POST /command/look_direction` counterparts. `get_line_of_sight_latest`
 follows `get_unit_velocity_latest`'s exact "not an error" empty-cache
@@ -395,6 +403,24 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /spu8/state, got {type(result).__name__}"
+            )
+        return result
+
+    def get_ptt_state_latest(self) -> dict[str, Any] | None:
+        """`GET /ptt/state` -> the pilot/operator push-to-talk trigger
+        sample as a dict (see `aircraft-layer/src/schema/ptt.py`'s
+        `PttSample.to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "raw", "intercom", "radio", "last_seat"}` -- `"intercom"` is
+        already gated by the SPU-8 switches, server-side), or `None` if
+        the trigger has not moved at all this collector process's
+        lifetime -- same "not an error" posture as `get_spu8_state_
+        latest` (`body-layer/ROADMAP/BL-B133.md`)."""
+        result = self._get_json("/ptt/state")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /ptt/state, got {type(result).__name__}"
             )
         return result
 

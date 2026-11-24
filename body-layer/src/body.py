@@ -226,6 +226,7 @@ from belief.optic_policy import (
     search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
+from belief.ptt_hold import PttHoldGate
 from belief.sight_effector import (
     REQUIRED_POLLED_ARGS,
     GuidanceUnitState,
@@ -7278,7 +7279,17 @@ def main() -> None:
     # to happen inside `CrewConsole._print` now happen on this worker's
     # own background thread instead (Decision 2), but through the same
     # reporter instance.
-    speech_worker = SpeechWorker(audio_adapter_client, reporter=audio_adapter_reporter)
+    # `[[BL-B133]]` -- its own `ConnectionReporter` instance, not `audio_
+    # adapter_reporter`: the aircraft-layer `/ptt/state` seam and the
+    # audio-adapter `/speak` seam are two independent dependencies, and
+    # sharing one reporter would mean an audio-adapter outage logging as
+    # an aircraft-layer one (or vice versa).
+    ptt_gate = PttHoldGate(
+        aircraft_client, reporter=ConnectionReporter(logger, label="ptt feed")
+    )
+    speech_worker = SpeechWorker(
+        audio_adapter_client, reporter=audio_adapter_reporter, ptt_gate=ptt_gate
+    )
     speech_worker.open()
     # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
     # loaded once here, before `CrewConsole` exists, so a bad

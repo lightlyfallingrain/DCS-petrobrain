@@ -47,7 +47,22 @@ that itself waits in a queue is not an interrupt. `audio-adapter`'s
 server is already `ThreadingHTTPServer` (confirmed, `audio-adapter/src/
 server.py:58,501`), so `POST /stop` is already safe to call while a
 `POST /speak` is in flight on another connection -- this costs at most
-one small round trip, never seconds."""
+one small round trip, never seconds.
+
+**`ptt_gate` (`body-layer/ROADMAP/BL-B133.md`) holds the *start* of a
+routine item, on this worker's own background thread, before `_process`
+is ever called for it.** Blocking here is safe -- this thread does
+nothing else -- and preserves order (the held item stays dequeued-but-
+unstarted rather than going back on the queue, so nothing behind it can
+jump ahead). An urgent item still preempts immediately: `enqueue`'s
+existing `bypass_gate=True` branch calls `interrupt()` before this
+worker thread ever sees the new item, and `interrupt()` now also wakes
+the wait so the currently-held (not yet started, never spoken) routine
+item is abandoned rather than finishing its wait first and delaying the
+urgent item behind it -- see `_wait_for_ptt_release`'s own docstring. A
+line already *playing* is untouched: the gate only runs before
+`_process` starts, never during it, so `_process` itself needs no
+change."""
 
 from __future__ import annotations
 
@@ -59,9 +74,16 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from belief.audio_client import AudioAdapterError
+from belief.ptt_hold import PttHoldGate
 from connection_reporter import ConnectionReporter
 
 logger = logging.getLogger(__name__)
+
+#: How often `_wait_for_ptt_release` re-checks the gate while waiting --
+#: well under any perceptible delay, so this is a poll-rate constant, not
+#: a behaviour tunable (same posture as `ptt_source.py`'s own `DEFAULT_
+#: DCS_POLL_HZ`, which is also an ordinary module literal).
+_PTT_WAIT_POLL_INTERVAL_S = 0.05
 
 #: Same value and reasoning as `AudioPlaybackSender._MAX_QUEUE_LEN`/
 #: `F10CommandQueue`/`_pending_positional_replies`'s identical cap --
@@ -133,10 +155,14 @@ class SpeechWorker:
     `AudioPlaybackSender` rather than `BrainLayerClient`."""
 
     def __init__(
-        self, client: SpeechClient, reporter: ConnectionReporter | None = None
+        self,
+        client: SpeechClient,
+        reporter: ConnectionReporter | None = None,
+        ptt_gate: PttHoldGate | None = None,
     ) -> None:
         self._client = client
         self._reporter = reporter
+        self._ptt_gate = ptt_gate
         self._queue: queue.Queue[_SpeechItem | None] = queue.Queue(
             maxsize=_MAX_QUEUE_LEN
         )
@@ -150,6 +176,11 @@ class SpeechWorker:
         #: race between the two could in principle log twice instead of
         #: once, which is a cosmetic risk, not a correctness one.
         self._overflow_warned = False
+        #: Set by `interrupt()`, cleared at the start of each PTT wait --
+        #: lets an urgent arrival abandon a routine item already dequeued
+        #: and waiting on the gate, rather than finishing that wait first
+        #: (see `_wait_for_ptt_release`'s own docstring).
+        self._ptt_wait_abort = threading.Event()
 
     def open(self) -> None:
         """Starts the background worker thread. Call once, before the
@@ -216,6 +247,7 @@ class SpeechWorker:
         raises: a failure to interrupt degrades to a logged warning, same
         posture as `AudioPlaybackSender._interrupt_playback`."""
         self._clear_queue()
+        self._ptt_wait_abort.set()
         try:
             self._client.stop()
         except Exception:
@@ -242,6 +274,15 @@ class SpeechWorker:
             item = self._queue.get()
             if item is None:
                 return
+            if (
+                not item.bypass_gate
+                and self._ptt_gate is not None
+                and not self._wait_for_ptt_release()
+            ):
+                # Superseded by an urgent arrival while waiting -- dropped,
+                # same policy as any other item `interrupt()` already
+                # clears from the queue itself.
+                continue
             try:
                 self._process(item)
             except Exception:
@@ -257,6 +298,20 @@ class SpeechWorker:
                     "line (continuing)",
                     exc_info=True,
                 )
+
+    def _wait_for_ptt_release(self) -> bool:
+        """Blocks on this worker's own thread until `self._ptt_gate.
+        is_held()` reports released, returning `True` once it does.
+        Returns `False` instead if `interrupt()` (an urgent item) fires
+        while waiting -- the caller must then drop the held item rather
+        than speak it, since the urgent item has already cleared the
+        queue behind it and is waiting for this wait to end."""
+        assert self._ptt_gate is not None
+        self._ptt_wait_abort.clear()
+        while self._ptt_gate.is_held():
+            if self._ptt_wait_abort.wait(timeout=_PTT_WAIT_POLL_INTERVAL_S):
+                return False
+        return True
 
     def _process(self, item: _SpeechItem) -> None:
         push_sent_wall = time.time()
