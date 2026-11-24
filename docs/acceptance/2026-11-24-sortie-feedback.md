@@ -312,6 +312,39 @@ first; and the user's own acceleration technique (−15° pitch, collective and 
 1–2 s, hold until near target, then settle) as the reference for speed changes. Breaks:
 nose rises too much and bank eases too soon.
 
+### Answers to the goal check's five questions (`plans/flight-lift-vector/alignment.md`)
+
+> 1 - at higher speed, collective can be increased faster. At level flight the engines are already at high/normal output, so increasing collective is no problem. When descending or decelerating or both, the engines spool down as torque is not needed. Then adding lot's of collective in that state quickly slows down the rotor. Collective increase triggers the engine control unit to increase power, but it takes a few seconds for the engines to spool up and provide torque. That is why collective increase need to be gradual, when engine RPM is low initially. When engine RPM is high initially, the collective increase can be fast as well.
+>   - More collective -> more rotor blade angle -> more torque needed -> engine control unit commands more power.
+>   - Lees collective -> less rotor blade angle -> less torque needed -> engine control unit commands less power. If needed torque is very low for several seconds (slowing down and/or descending) engine RPM drops low until torque is needed again.
+>
+> 2 - brisk
+>
+> 3 - as recommended
+>
+> 4 - as recommended
+>
+> 5 - The Mi-24 limits pedal movement speed. We have measurements of pedal movemnt from earlier, commanded vs actual. From there you can get the actual pedal delta speed.
+
+Main loop's reading:
+1. The collective-increase rate depends on **engine state**, not on the manoeuvre: engines at
+   normal output (level flight, higher speed) → fast increase is fine; engines spooled down after
+   several seconds of low torque demand (descending, decelerating) → increase gradually over a few
+   seconds while they spool up. Needs an engine-RPM/torque reading or a proxy (recent low-collective
+   time); today's RPM guard runs on a placeholder reading.
+2. A take with a speed gap flies the brisk speed change at once.
+3. Only heading-type commands ("turn heading", "turn N left/right", "stop turn"/"level flight") end
+   a held turn; height and speed are held while it circles.
+4. A take during a roll-out with |bank| ≥ 5° keeps the bank (the rule as stated); "stop turn" levels.
+5. The aircraft itself rate-limits pedal travel. Get the real rate from commanded-vs-actual pedal
+   in the traces, and make the law's pedal command keep up with that rate rather than lag it.
+   Measured: M0 (ground, 0.15–0.20 steps) first-order lag τ ≈ 0.25 s
+   (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`); fourth re-fly,
+   hand-flown, pedal arg rate clusters at **0.90–0.91 /s** and never sustains more (0.3 s windows:
+   p99 0.72, max 1.29 /s including seat-switch steps) — an aircraft rate cap of ~0.9 /s on top
+   of the τ 0.25 s lag. Petrovich's own pedal moved at p99 **0.16 /s**, p95 0.06 /s: about 5×
+   below what the aircraft allows.
+
 ### Fourth re-fly logs (`logs-2026-11-24/refly4_*`, session starting trace line 3532)
 
 Main loop's read:
