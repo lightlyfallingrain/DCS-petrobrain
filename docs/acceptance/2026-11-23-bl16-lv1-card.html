@@ -108,15 +108,13 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
   </div>
 
   <div class="gate">
-    <h2>Re-fly 2026-11-24 &mdash; pedal sign fixed</h2>
+    <h2>Re-fly 2026-11-24 (2nd) &mdash; data flight for the take kick</h2>
     <div class="block">
-      <div class="expect">Row 1 failed on the first flight: the pedal loop was reversed (positive command is <strong>left</strong> pedal, not right), so he fed left pedal into a ball already right &mdash; your &ldquo;lots of left pedal&rdquo;. Fixed, plus the collective-near-pedal-limit guard now watches the right-pedal side. <code>git pull</code> again on both machines.</div>
-      <div class="label">Fly, in this order</div>
-      <div class="expect"><strong>Row 1</strong>, then <strong>row 8&ndash;9</strong>. Only if both are clean, carry on down the card.</div>
-      <div class="label">Watch</div>
-      <div class="expect">After the take: pedal moves <em>toward</em> the ball side, ball comes back to centre and stays. On any collective increase (climb, speed-up): he adds a little <strong>right</strong> pedal &mdash; if it is left, say so (that sign is still unproven).</div>
-      <div class="chk"><input type="checkbox" data-k="refly" id="crf"><label for="crf">Pulled, row 1 and 8&ndash;9 flown</label></div>
-      <div class="record-box"><div class="label">Record</div>Ball after the take: centred or running away? Which pedal on collective increase? Did the bank still grow?</div>
+      <div class="expect">Pedal direction is back to the original (positive = right; the first flip was wrong). Collective no longer locked (an RPM guard on a placeholder reading blocked every increase). Take reads <strong>your</strong> seat. <strong>Not fixed:</strong> the left pedal kick at the take &mdash; leading suspect is the pedal trim being added twice. The trace now logs the real pedal position, so one take shows it. <code>git pull</code> again on both machines.</div>
+      <div class="label">Do</div>
+      <div class="expect">Pilot seat, level flight, note whether you trimmed the pedals (trimmer pressed) before. <strong>Row 1 take</strong>. Expect the left kick &mdash; <strong>take back at once</strong> if it does not settle within ~3&nbsp;s. If you have time: one take after a trim reset with pedals centred.</div>
+      <div class="chk"><input type="checkbox" data-k="refly2" id="crf2"><label for="crf2">Pulled, take(s) flown</label></div>
+      <div class="record-box"><div class="label">Record</div>Trimmed before the take, or not? Kick there or not, which way? After the kick: did the ball come back to centre?</div>
     </div>
   </div>
 
