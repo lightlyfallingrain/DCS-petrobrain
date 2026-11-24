@@ -110,11 +110,12 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
   <div class="gate">
     <h2>Re-fly 2026-11-24 (2nd) &mdash; data flight for the take kick</h2>
     <div class="block">
-      <div class="expect">Pedal direction is back to the original (positive = right; the first flip was wrong). Collective no longer locked (an RPM guard on a placeholder reading blocked every increase). Take reads <strong>your</strong> seat. <strong>Not fixed:</strong> the left pedal kick at the take &mdash; leading suspect is the pedal trim being added twice. The trace now logs the real pedal position, so one take shows it. <code>git pull</code> again on both machines.</div>
-      <div class="label">Do</div>
-      <div class="expect">Pilot seat, level flight, note whether you trimmed the pedals (trimmer pressed) before. <strong>Row 1 take</strong>. Expect the left kick &mdash; <strong>take back at once</strong> if it does not settle within ~3&nbsp;s. If you have time: one take after a trim reset with pedals centred.</div>
-      <div class="chk"><input type="checkbox" data-k="refly2" id="crf2"><label for="crf2">Pulled, take(s) flown</label></div>
-      <div class="record-box"><div class="label">Record</div>Trimmed before the take, or not? Kick there or not, which way? After the kick: did the ball come back to centre?</div>
+      <div class="expect">Pedal direction is back to the original (positive = right; the first flip was wrong). Collective no longer locked (an RPM guard on a placeholder reading blocked every increase). Take reads <strong>your</strong> seat. <strong>Not fixed:</strong> the left pedal kick at the take &mdash; suspect: his pedal write is <em>added</em> to your (non-centring) hardware pedal instead of replacing it, so your offset counts twice. The trace now logs the real pedal position. <code>git pull</code> again on both machines.</div>
+      <div class="label">Do &mdash; two takes, pilot seat, level flight</div>
+      <div class="expect"><strong>A:</strong> pedals where you normally hold them &rarr; take. Expect the kick; <strong>take back at once</strong> if it does not settle within ~3&nbsp;s.<br>
+        <strong>B:</strong> hardware pedals <strong>centred</strong> (accept the ball off a little) &rarr; take. Prediction: <strong>no kick</strong>.</div>
+      <div class="chk"><input type="checkbox" data-k="refly2" id="crf2"><label for="crf2">Pulled, A and B flown</label></div>
+      <div class="record-box"><div class="label">Record</div>A and B: kick or not, which way, mission time. Where were your hardware pedals in A?</div>
     </div>
   </div>
 
