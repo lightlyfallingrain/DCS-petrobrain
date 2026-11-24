@@ -107,6 +107,19 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
     <span class="tag">on <strong>both</strong> machines &mdash; <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, then your usual redeploy and restart of collector and body-layer. Back with <code>git checkout main</code>.</span>
   </div>
 
+  <div class="gate">
+    <h2>Re-fly 2026-11-24 &mdash; pedal sign fixed</h2>
+    <div class="block">
+      <div class="expect">Row 1 failed on the first flight: the pedal loop was reversed (positive command is <strong>left</strong> pedal, not right), so he fed left pedal into a ball already right &mdash; your &ldquo;lots of left pedal&rdquo;. Fixed, plus the collective-near-pedal-limit guard now watches the right-pedal side. <code>git pull</code> again on both machines.</div>
+      <div class="label">Fly, in this order</div>
+      <div class="expect"><strong>Row 1</strong>, then <strong>row 8&ndash;9</strong>. Only if both are clean, carry on down the card.</div>
+      <div class="label">Watch</div>
+      <div class="expect">After the take: pedal moves <em>toward</em> the ball side, ball comes back to centre and stays. On any collective increase (climb, speed-up): he adds a little <strong>right</strong> pedal &mdash; if it is left, say so (that sign is still unproven).</div>
+      <div class="chk"><input type="checkbox" data-k="refly" id="crf"><label for="crf">Pulled, row 1 and 8&ndash;9 flown</label></div>
+      <div class="record-box"><div class="label">Record</div>Ball after the take: centred or running away? Which pedal on collective increase? Did the bank still grow?</div>
+    </div>
+  </div>
+
   <div class="note">
     <strong>New in mode 1:</strong> he steers the flight path (DCS velocity), pedals always fly the ball,
     slowing is cyclic back <em>and</em> less collective, every slow trim is capped, the take starts
