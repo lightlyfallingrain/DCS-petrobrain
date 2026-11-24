@@ -30,21 +30,32 @@ Two distinct unknowns, both resolved the same way, both logged once
   here exactly as `SpeechWorker` already reuses it for the audio-adapter
   seam -- the "log once per outage" mechanism already exists, so this
   does not invent a second one.
-- **Stale** -- checked only when the sample currently reads *held*: the
-  sample's own `received_wall_clock_s` is too old. `Export.lua` sends a
-  `ptt` line only on change (`aircraft-layer/src/api/server.py`'s
-  `_handle_ptt_state` docstring), so an untouched trigger's timestamp is
-  *expected* to age indefinitely -- the ordinary idle case, already
-  `released` with no need to look at its age. What this bound actually
-  guards against is the
-  collector process surviving a crashed/ended mission while the last
-  sample it cached happened to read "held": nothing would ever refresh
-  that sample, and the gate would hold Petrovich mute for the rest of
-  the process's life. `_PTT_STALE_AFTER_S` trades the opposite failure
-  (a very long genuine radio call past the bound would let him start
-  talking over it) against that one -- chosen because an occasional
-  early start is recoverable in a way that an indefinitely silent crew
-  member is not.
+- **Stale** -- checked only when the sample currently reads *held*, and
+  keyed off **`GET /telemetry/latest`'s own `received_wall_clock_s`**
+  (`telemetry_received_wall_clock_s`, supplied by the caller -- `body.py`
+  wires this to the same telemetry its poll loop already reads every
+  poll, so this adds no second request), **not** the PTT sample's own
+  timestamp. `Export.lua` sends a `ptt` line only on change
+  (`aircraft-layer/src/api/server.py`'s `_handle_ptt_state` docstring) but
+  telemetry every tick regardless of value -- so a steadily *held*
+  trigger's own `received_wall_clock_s` ages exactly like a dead
+  collector's last cached sample, and cannot tell the two apart (review
+  fix 1, `plans/bl-b133-ptt-speech-hold/review.md`: this is what the
+  previous PTT-sample-keyed version actually got wrong -- a routine, genuinely
+  held trigger longer than the bound released early, which is precisely
+  the behaviour U1 exists to prevent). Telemetry refreshing is a property
+  of the feed, independent of PTT value, so its own age tells "the
+  collector/DCS side has stopped updating" without being confused by an
+  ordinary long intercom/radio call. What this bound guards against is
+  the collector process surviving a crashed/ended mission while the last
+  PTT sample it cached happened to read "held": nothing would ever
+  refresh that sample, and the gate would hold Petrovich mute for the
+  rest of the process's life -- `PTT_FEED_STALE_AFTER_S` is how long
+  telemetry itself may go unrefreshed before that cached "held" is
+  distrusted. `body._reset_mission_state` also calls `reset_for_new_
+  mission()` on this gate directly, so a genuine DCS mission (re)start
+  clears a stuck `held=True` state at the actual lifecycle event, rather
+  than this bound being the only backstop.
 
 **The release side is debounced, the press side is not, and the
 debounce only ever applies to a genuine held-to-released *transition*.**
@@ -90,14 +101,17 @@ PTT_RELEASE_DEBOUNCE_S: float = tuning.real(
     status="agreed-guess",
 )
 
-#: Above this age, a cached `held=True` sample is no longer trusted and
-#: `is_held()` reports released instead -- see module docstring's "Stale"
-#: paragraph for the failure this guards against and the tradeoff it
-#: accepts. Comfortably longer than any ordinary intercom/radio call in
-#: this aircraft, short enough that a wedged collector cannot silence
-#: Petrovich for the rest of a sortie.
-PTT_STALE_AFTER_S: float = tuning.real(
-    "belief.ptt_hold.PTT_STALE_AFTER_S",
+#: Above this age, the *telemetry* feed (not the PTT sample itself --
+#: see module docstring's "Stale" paragraph) is considered dead, and a
+#: cached `held=True` PTT sample is no longer trusted: `is_held()`
+#: reports released instead. Telemetry refreshes every tick regardless
+#: of PTT value, so this bound is "how long the collector/DCS side may
+#: go unresponsive," not "how long a call may last" -- a genuine hold of
+#: any length is unaffected as long as telemetry keeps arriving. Short
+#: enough that a dead collector cannot silence Petrovich for the rest of
+#: a sortie.
+PTT_FEED_STALE_AFTER_S: float = tuning.real(
+    "belief.ptt_hold.PTT_FEED_STALE_AFTER_S",
     120.0,
     lo=10.0,
     hi=600.0,
@@ -125,11 +139,24 @@ class PttHoldGate:
     def __init__(
         self,
         client: PttSource,
+        *,
+        telemetry_received_wall_clock_s: Callable[[], float | None],
         reporter: ConnectionReporter | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
     ) -> None:
+        """`telemetry_received_wall_clock_s` -- the live mission's own
+        telemetry feed freshness (review fix 1): a callable returning the
+        most recent `GET /telemetry/latest` sample's own
+        `received_wall_clock_s`, or `None` if none has ever been
+        received. Keyword-only and required, not defaulted -- staleness
+        detection silently doing nothing because a caller forgot to wire
+        it is exactly the kind of broken-config failure this project's
+        "fail loud, not recover" rule exists for (root `CLAUDE.md`,
+        "Workflow"). `None` (never received) is treated as at least as
+        stale as any bound -- see `_is_stale`."""
         self._client = client
+        self._telemetry_received_wall_clock_s = telemetry_received_wall_clock_s
         self._reporter = reporter
         self._monotonic = monotonic
         self._wall_clock = wall_clock
@@ -177,14 +204,16 @@ class PttHoldGate:
         # Staleness only matters for a *held* reading -- an untouched
         # trigger's timestamp ages indefinitely in the ordinary idle case
         # (see module docstring), and that case already reports released
-        # below with no need to look at the age at all.
-        if held_now and self._is_stale(payload):
+        # below with no need to look at the age at all. Keyed off the
+        # *telemetry* feed's own freshness (review fix 1), not this PTT
+        # sample's own timestamp -- see `_is_stale`.
+        if held_now and self._is_stale():
             if not self._stale_warned:
                 self._stale_warned = True
                 logger.warning(
-                    "ptt state stale (no update in over %.0fs while held) -- "
-                    "treating as released",
-                    PTT_STALE_AFTER_S,
+                    "telemetry feed stale (no update in over %.0fs) while "
+                    "ptt reads held -- treating as released",
+                    PTT_FEED_STALE_AFTER_S,
                 )
             self._confirmed_held = False
             self._released_since = None
@@ -211,8 +240,30 @@ class PttHoldGate:
         self._released_since = None
         return False
 
-    def _is_stale(self, payload: dict[str, Any]) -> bool:
-        received = payload.get("received_wall_clock_s")
+    def _is_stale(self) -> bool:
+        """True if the *telemetry* feed -- not the PTT sample -- has not
+        refreshed within `PTT_FEED_STALE_AFTER_S` (review fix 1). This is
+        what actually distinguishes "the collector/DCS side died" from
+        "the player is still genuinely holding the trigger": `Export.lua`
+        sends telemetry every tick regardless of PTT value, so a live
+        mission's telemetry age stays near zero through an arbitrarily
+        long hold, while a dead mission's telemetry age grows without
+        bound -- the PTT sample's own `received_wall_clock_s` cannot make
+        this distinction (module docstring's "Stale" paragraph)."""
+        received = self._telemetry_received_wall_clock_s()
         if not isinstance(received, (int, float)) or isinstance(received, bool):
-            return False
-        return (self._wall_clock() - received) > PTT_STALE_AFTER_S
+            # No telemetry has ever been received this process's
+            # lifetime -- at least as stale as any bound.
+            return True
+        return (self._wall_clock() - received) > PTT_FEED_STALE_AFTER_S
+
+    def reset_for_new_mission(self) -> None:
+        """Clean slate on a genuine DCS mission (re)start
+        (`body._reset_mission_state`, review fix 1) -- a cached
+        `held=True` PTT sample from the mission that just ended, or a
+        release debounce window already in progress, must not carry into
+        the new one. Equivalent to a freshly constructed gate's own
+        starting state."""
+        self._confirmed_held = False
+        self._released_since = None
+        self._stale_warned = False

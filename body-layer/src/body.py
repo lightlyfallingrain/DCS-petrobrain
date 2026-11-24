@@ -488,6 +488,18 @@ class ConsolePerceptionRunner:
     #: state` above, since no other call site reads the raw dict at all.
     #: `None` before the first poll, same posture as `last_ownship_state`.
     last_ias_kmh: float | None = None
+    #: The current telemetry sample's own `received_wall_clock_s` (review
+    #: fix 1, `plans/bl-b133-ptt-speech-hold/review.md`) -- set in
+    #: `run_once` from the same `GET /telemetry/latest` poll that already
+    #: fills `last_ownship_state`/`last_ias_kmh` above, so `PttHoldGate`'s
+    #: staleness check reuses this poll rather than issuing a second
+    #: request. Read from `SpeechWorker`'s own background thread (via the
+    #: callable `main()` wires `PttHoldGate` with) -- a simple `float`
+    #: read/write needs no lock here, unlike `speech_log_sink`'s own
+    #: multi-field consistent-snapshot requirement (see that closure's
+    #: docstring). `None` before the first poll, same posture as `last_
+    #: ownship_state`.
+    last_telemetry_received_wall_clock_s: float | None = None
     #: Built lazily on the first poll that has both real telemetry and a
     #: `world_model_conn`/`theatre` (i.e. always, once `_run_crew_text_poll_
     #: loop` has set those two), then updated in place every poll after --
@@ -951,6 +963,11 @@ class ConsolePerceptionRunner:
             if isinstance(ias_mps, (int, float)) and not isinstance(ias_mps, bool)
             else None
         )
+        received_wall_clock_s = telemetry.get("received_wall_clock_s")
+        if isinstance(received_wall_clock_s, (int, float)) and not isinstance(
+            received_wall_clock_s, bool
+        ):
+            self.last_telemetry_received_wall_clock_s = received_wall_clock_s
         # Ownship-anchored attention areas track the nose, and they must be
         # re-projected *before* this tick's `ingest`/`tick` so the contacts
         # ingested below are judged against this tick's heading rather than
@@ -3152,6 +3169,7 @@ def _reset_mission_state(
     mission_memory: MissionMemory,
     fired_on_tracker: FiredOnTracker | None = None,
     lost_contact_tracker: LostContactTracker | None = None,
+    speech_worker: SpeechWorker | None = None,
 ) -> None:
     """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
     piece of belief/mission-memory state a clean slate on a genuine DCS
@@ -3192,7 +3210,13 @@ def _reset_mission_state(
     stalls `fired_on` mission-memory writes after a restart.
     `LostContactTracker` (`[[BL-B112]]`) is brought under this mechanism
     from the day it is added, to avoid discovering the same gap a second
-    time."""
+    time. `speech_worker` (`[[BL-B133]]` review fix 1,
+    `plans/bl-b133-ptt-speech-hold/review.md`) is the same "optional
+    collaborator, `None` is a no-op" shape -- `CrewConsole.reset_for_new_
+    mission` preserves `speech_worker` as the same object across a
+    restart (it is not rebuilt), so this call site, not that one, is
+    where a stuck `held=True` cached PTT sample from the mission that
+    just ended gets cleared."""
     runner.store.reset_for_new_mission()  # shared with crew_console.store
     runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
     for source in runner.sources:
@@ -3205,6 +3229,8 @@ def _reset_mission_state(
         fired_on_tracker.reset_for_new_mission()
     if lost_contact_tracker is not None:
         lost_contact_tracker.reset_for_new_mission()
+    if speech_worker is not None:
+        speech_worker.reset_for_new_mission()
 
 
 def _enter_refusal_mode(
@@ -4033,6 +4059,7 @@ def _check_for_new_mission(
     lost_contact_tracker: LostContactTracker | None = None,
     rule_runtime: RuleRuntime | None = None,
     audio_client: AudioAdapterClient | None = None,
+    speech_worker: SpeechWorker | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -4042,10 +4069,10 @@ def _check_for_new_mission(
     too (`_reroll_run_logs`, decision 5), not just for a future spoken
     acknowledgement.
 
-    `fired_on_tracker`/`lost_contact_tracker` are passed straight through
-    to `_reset_mission_state` -- see that function's own docstring for why
-    they default to `None` and what leaving either out would silently
-    break.
+    `fired_on_tracker`/`lost_contact_tracker`/`speech_worker` are passed
+    straight through to `_reset_mission_state` -- see that function's own
+    docstring for why they default to `None` and what leaving any of them
+    out would silently break.
 
     **A genuine reset also arms `runner.pending_mission_start_fire`/
     `pending_mission_start_in_air_check`**, with `mission_start_fresh_
@@ -4164,7 +4191,12 @@ def _check_for_new_mission(
     # "Two new triggers: mission start").
     pre_reset_t_sim = runner.last_t_sim
     _reset_mission_state(
-        runner, crew_console, mission_memory, fired_on_tracker, lost_contact_tracker
+        runner,
+        crew_console,
+        mission_memory,
+        fired_on_tracker,
+        lost_contact_tracker,
+        speech_worker,
     )
     _maybe_switch_theatre(
         runner,
@@ -5188,6 +5220,7 @@ def _run_crew_text_poll_loop(
                     lost_contact_tracker=lost_contact_tracker,
                     rule_runtime=rule_runtime,
                     audio_client=speech_client,
+                    speech_worker=crew_console.speech_worker,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -7285,7 +7318,17 @@ def main() -> None:
     # sharing one reporter would mean an audio-adapter outage logging as
     # an aircraft-layer one (or vice versa).
     ptt_gate = PttHoldGate(
-        aircraft_client, reporter=ConnectionReporter(logger, label="ptt feed")
+        aircraft_client,
+        # Review fix 1 (`plans/bl-b133-ptt-speech-hold/review.md`):
+        # reuses `crew_runner`'s own telemetry poll (`run_once` sets this
+        # every poll) rather than issuing a second request -- staleness
+        # is keyed to the telemetry feed's own freshness, not the PTT
+        # sample's, since `Export.lua` sends `ptt` only on change but
+        # telemetry every tick.
+        telemetry_received_wall_clock_s=lambda: (
+            crew_runner.last_telemetry_received_wall_clock_s
+        ),
+        reporter=ConnectionReporter(logger, label="ptt feed"),
     )
     speech_worker = SpeechWorker(
         audio_adapter_client, reporter=audio_adapter_reporter, ptt_gate=ptt_gate

@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,6 +33,8 @@ import pytest
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
+from belief.ptt_hold import PttHoldGate
+from belief.speech_worker import SpeechClient, SpeechWorker
 from belief.tasks import TaskStore
 from body import (
     ConsolePerceptionRunner,
@@ -686,6 +689,65 @@ def test_reset_mission_state_resets_lost_contact_tracker_when_given() -> None:
     _reset_mission_state(runner, None, mission_memory, None, tracker)
 
     assert tracker._scanned_event_count == 0
+
+
+class _FakePttSource:
+    """Minimal `belief.ptt_hold.PttSource` double -- a fixed `held`
+    reading, no debounce/staleness timing concerns (those are `test_ptt_
+    hold.py`'s own job; this test only needs `PttHoldGate` to have
+    observed `held=True` once, so there is something for `reset_for_new_
+    mission()` to actually clear)."""
+
+    def __init__(self, held: bool) -> None:
+        self._held = held
+
+    def get_ptt_state_latest(self) -> dict[str, object] | None:
+        return {
+            "t": 0.0,
+            "received_wall_clock_s": 0.0,
+            "raw": 0.5 if self._held else 0.0,
+            "intercom": self._held,
+            "radio": False,
+            "last_seat": "pilot",
+        }
+
+
+def test_reset_mission_state_resets_ptt_gate_via_speech_worker_when_given() -> None:
+    """`[[BL-B133]]` review fix 1 (`plans/bl-b133-ptt-speech-hold/
+    review.md`): `CrewConsole.reset_for_new_mission` preserves
+    `speech_worker` as the same object (it is not rebuilt), so this is
+    the one call site that must clear a stuck `held=True` cached PTT
+    sample from the mission that just ended. Goes through the real
+    `SpeechWorker.reset_for_new_mission`/`PttHoldGate.reset_for_new_
+    mission`, not a stand-in, since the point is that the delegation
+    itself is wired."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+    mission_memory = MissionMemory()
+    gate = PttHoldGate(
+        _FakePttSource(held=True),
+        # A fresh (not stale) reading -- the point of this test is the
+        # reset wiring, not staleness itself (`test_ptt_hold.py`'s job).
+        telemetry_received_wall_clock_s=time.time,
+    )
+    gate.is_held()  # observe held=True, so there is something to clear
+    assert gate._confirmed_held is True
+    worker = SpeechWorker(cast(SpeechClient, object()), ptt_gate=gate)
+
+    _reset_mission_state(runner, None, mission_memory, None, None, worker)
+
+    assert gate._confirmed_held is False
+
+
+def test_reset_mission_state_is_a_noop_for_speech_worker_when_omitted() -> None:
+    """The default (`speech_worker=None`) must not raise -- the shape
+    every other optional collaborator in this module follows."""
+    runner = ConsolePerceptionRunner(
+        aircraft_client=cast(AircraftLayerClient, object())
+    )
+
+    _reset_mission_state(runner, None, MissionMemory())
 
 
 # --- BL-15 Stage 3: theatre switching (`_maybe_switch_theatre`) and loud- --

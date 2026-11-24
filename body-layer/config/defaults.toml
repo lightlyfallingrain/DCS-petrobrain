@@ -433,15 +433,15 @@ SIGHT_STALL_COOLDOWN_S = 132.0
 SIGHT_STEADY_RATE_LIMIT_DEG_S = 30.0
 
 [belief.ptt_hold]
+# Above this age, the *telemetry* feed (not the PTT sample itself -- see module docstring's "Stale" paragraph) is considered dead, and a cached `held=True` PTT sample is no longer trusted: `is_held()` reports released instead.
+# status: agreed-guess | range: 10.0 .. 600.0
+# source: belief/ptt_hold.py:PTT_FEED_STALE_AFTER_S
+PTT_FEED_STALE_AFTER_S = 120.0
+
 # How long a `held=False` reading must persist before `is_held()` reports released -- guards the release-side mechanical transit (see module docstring).
 # status: agreed-guess | range: 0.0 .. 1.0
 # source: belief/ptt_hold.py:PTT_RELEASE_DEBOUNCE_S
 PTT_RELEASE_DEBOUNCE_S = 0.1
-
-# Above this age, a cached `held=True` sample is no longer trusted and `is_held()` reports released instead -- see module docstring's "Stale" paragraph for the failure this guards against and the tradeoff it accepts.
-# status: agreed-guess | range: 10.0 .. 600.0
-# source: belief/ptt_hold.py:PTT_STALE_AFTER_S
-PTT_STALE_AFTER_S = 120.0
 
 [belief.referent]
 # How long a mention stays resolvable by a bare/qualified pronoun (Decision 4: "time ok").

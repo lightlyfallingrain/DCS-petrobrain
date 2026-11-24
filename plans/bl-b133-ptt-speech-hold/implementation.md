@@ -157,3 +157,112 @@ there.
   They are each independently bounded (`lo=0.0,hi=1.0` and `lo=10.0,hi=600.0`), and I see no
   invariant between them or with `audio-adapter`'s own `INTERCOM_DEBOUNCE_S` (a different process,
   different venv, not coupled by this loader) that a per-key bound could miss.
+
+### Review fixes (`plans/bl-b133-ptt-speech-hold/review.md`, both REQUIRED, now resolved)
+
+**Fix 1 — staleness was keyed to the wrong clock.** `Export.lua` sends a `ptt` line only on
+change, so a steadily held trigger's own `received_wall_clock_s` ages identically to a dead
+collector's cached sample — the gate could not tell them apart, meaning a routine hold longer than
+`PTT_STALE_AFTER_S` (120s) would make Petrovich start talking over the player, exactly what U1
+forbids. Fixed two ways:
+- **Rekeyed staleness to the telemetry feed, not the PTT sample.** `PttHoldGate` now takes a
+  required `telemetry_received_wall_clock_s: Callable[[], float | None]` constructor argument;
+  `_is_stale()` compares `wall_clock() - telemetry_received_wall_clock_s()` against the bound,
+  never the PTT sample's own timestamp. `body.py` wires this to `crew_runner.last_telemetry_
+  received_wall_clock_s`, a new `ConsolePerceptionRunner` field `run_once` already sets every poll
+  from the same `GET /telemetry/latest` call it already makes (`Export.lua` sends telemetry every
+  tick regardless of PTT value, unlike `ptt`'s send-on-change) — no second request. Renamed
+  `PTT_STALE_AFTER_S` → `PTT_FEED_STALE_AFTER_S` and rewrote its `#:` comment/module docstring
+  accordingly; regenerated `config/defaults.toml` and read the rendered first sentence, not just
+  the source. Required (no default): an omitted wiring must fail loudly (`TypeError` at
+  construction), not silently disable staleness detection — project's "fail loud, not recover"
+  rule. `telemetry_received_wall_clock_s() -> None` (never received) is treated as at least as
+  stale as any bound.
+- **Wired `PttHoldGate.reset_for_new_mission()` into `body._reset_mission_state`** (new
+  `speech_worker: SpeechWorker | None = None` parameter, threaded through `_check_for_new_mission`
+  and the one production call site, `speech_worker=crew_console.speech_worker`) — a genuine DCS
+  mission (re)start clears a stuck `held=True` state at the actual lifecycle event, as the review
+  suggested as option (a). `SpeechWorker` gained a matching `reset_for_new_mission()` that
+  delegates to its own `ptt_gate` (no-op if unset) — needed because `CrewConsole.reset_for_new_
+  mission` preserves `speech_worker` as the same object across a restart rather than rebuilding it,
+  so this is the one call site where the gate's state actually gets cleared.
+
+  Did both (a) and (b) from the review's "either/or" rather than picking one: the telemetry-freshness
+  rekey alone does not help a session that never sees a new mission-start event (DCS idling at the
+  main menu after a crash, nothing to detect); the mission-restart reset alone does not help a feed
+  that stays nominally "the current mission" but has stopped actually updating. Together they cover
+  both named failure modes.
+
+**Fix 2 — a real race in `SpeechWorker._wait_for_ptt_release` could lose an urgent-arrival
+interrupt.** The original code called `self._ptt_wait_abort.clear()` unconditionally at the top of
+`_wait_for_ptt_release`; an `interrupt()` landing in the window between `_run` dequeuing a routine
+item and that `clear()` running would have its `set()` silently wiped, leaving the wait blocked on
+`is_held()` alone until the trigger was physically released. Confirmed by direct repro before
+fixing (same technique the review used): setting the `Event` before calling `_wait_for_ptt_release`
+left the call blocked a full second later against a held gate.
+
+Fixed by replacing the bare `Event` as the source of truth with a lock-protected pair scoped to
+exactly one item's wait at a time: `_gate_wait_active` (set by `_run`, under `_gate_lock`,
+immediately after dequeuing an item that needs the gate, before calling `_wait_for_ptt_release`) and
+`_gate_wait_superseded` (set by `interrupt()`, under the same lock, *only if* `_gate_wait_active` is
+currently `True`). `_wait_for_ptt_release`'s loop checks `_gate_wait_superseded` under the lock on
+every iteration instead of relying on the `Event`; the `Event` stays only as a prompt-wake
+optimisation (`interrupt()` still calls `.set()` so a waiting thread does not sit through a full
+`_PTT_WAIT_POLL_INTERVAL_S` after an interrupt). This closes the exact window the review found: an
+`interrupt()` racing in between dequeue and the wait's own first check now always sees
+`_gate_wait_active` already `True` (set by `_run` moments earlier, before the race window could even
+open) and marks the flag — there is no code path where the signal can be set-then-silently-cleared,
+because nothing ever blindly clears `_gate_wait_superseded`; it is only ever reset to `False` at the
+*start* of a new item's own wait (under the same lock), not at the top of `_wait_for_ptt_release`
+itself.
+
+I deliberately did not reuse a bare `clear()`-based fix: the review itself flags that "don't clear at
+the top" alone reopens a different bug — an urgent item's own `enqueue(bypass_gate=True)` calls
+`interrupt()` but never itself consumes the flag (it skips the gate branch in `_run` entirely via
+`item.bypass_gate`), so a leftover `True` from that interrupt could otherwise leak into a later,
+unrelated routine item's wait. The scoping fix is `_run` resetting `_gate_wait_superseded = False`
+fresh at the *start* of every new gated item's branch (not just after a fresh `interrupt()`) —
+verified by `test_an_earlier_supersession_does_not_leak_into_a_later_waits_abort`, which drives
+exactly that sequence (routine A superseded → urgent plays → routine B must still wait normally,
+not be dropped).
+
+New tests (both "red before green" — written to fail against the pre-fix code, confirmed, then the
+fix applied and confirmed green):
+- `test_ptt_hold.py`: `test_a_long_genuine_hold_with_a_live_telemetry_feed_stays_held` (ten
+  simulated minutes held, live telemetry throughout, never released early — the property Fix 1
+  exists for), `test_dead_telemetry_feed_past_the_bound_releases_a_held_reading` (telemetry stops
+  refreshing, PTT sample's own payload never changes — released once the *telemetry* age crosses
+  the bound), `test_no_telemetry_ever_received_is_treated_as_stale_while_held`, `test_reset_for_
+  new_mission_clears_confirmed_held_and_release_debounce`. `test_stale_held_reading_...`/`test_idle_
+  untouched_trigger_is_never_reported_stale` rewritten to the new telemetry-keyed semantics rather
+  than left asserting the old (wrong) behaviour.
+- `test_speech_worker.py`: `test_interrupt_racing_between_dequeue_and_wait_start_is_not_lost`
+  (deterministic repro of the exact race, no real threading/timing — sets `_gate_wait_active = True`
+  the way `_run` would have just set it, calls `interrupt()`, then asserts `_wait_for_ptt_release()`
+  returns `False` immediately rather than blocking), `test_an_earlier_supersession_does_not_leak_
+  into_a_later_waits_abort` (the anti-regression test for the "don't reopen the stale-leak bug"
+  constraint above).
+- `test_mission_start_reset.py`: `test_reset_mission_state_resets_ptt_gate_via_speech_worker_when_
+  given` / `..._is_a_noop_for_speech_worker_when_omitted`, matching the existing `fired_on_tracker`/
+  `lost_contact_tracker` pair's own shape.
+
+### Checks (review-fix pass)
+- `ruff format --check src tests`: pass (230 files already formatted, 1 reformatted during this
+  pass — `body.py`'s new lambda argument)
+- `ruff check src tests`: pass
+- `cd body-layer && .venv/bin/mypy src`: pass (`Success: no issues found in 93 source files`)
+- `.claude/scripts/fast-tests.sh body-layer`: 2820 passed, 4 xfailed
+- `tests/test_ptt_hold.py tests/test_speech_worker.py tests/test_mission_start_reset.py
+  tests/test_aircraft_client.py tests/test_tuning_defaults_toml.py`: 113 passed
+- `tests/test_body.py` (body.py changed significantly — `_reset_mission_state`/`_check_for_new_
+  mission` signatures, `ConsolePerceptionRunner`, `run_once`): 237 passed
+
+### Notable discoveries (review-fix pass)
+- `mypy tests/` (not part of the formal gate — `CLAUDE.md`'s command is `mypy src` only) reports
+  pre-existing errors in `test_ptt_hold.py`/`test_speech_worker.py`/`test_mission_start_reset.py`
+  unrelated to this change (a `Callable[[], float]` used as a fake clock with `.advance()`, `_Fake
+  PttGate`/`_FakeAircraftClient` not structurally matching their Protocols, two unrelated pre-
+  existing issues in `test_mission_start_reset.py`) — confirmed via `git stash` that every one of
+  these already existed before this review-fix pass; two new instances of the same pre-existing
+  `Callable`/`_FakeAircraftClient` pattern were added by my own new tests, consistent with the
+  existing convention rather than a new defect.
