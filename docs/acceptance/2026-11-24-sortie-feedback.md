@@ -163,4 +163,42 @@ Main loop's read (six takes, both seats, pedals centred and pre-offset right):
 - **New: the collective goes to full up (arg 1.0) within ~3 s of every take** and stays there.
   Not yet explained (the RPM-guard unlock is the only collective change since the re-fly).
 
+## Third re-fly (pedal bias + collective/pitch LAW_DIR, 5859838b) — logs `logs-2026-11-24/refly3_*`
+
+> Fail on the cyclic logic - complete loss of control is a couple of seconds
+
+Take t=52.318, pilot seat, captured p=0.190 r=0.077 c=0.211 y=0.006.
+
+Main loop's read (one take, ~40 m/s, climbing 4 m/s at the take):
+
+- **Take bumpless on all four axes**, pedal included: `a1103` 0.006 → 0.009 first frame,
+  `bias_pedals` 0.320. The pedal-bias fix works.
+- **Pitch ran away nose-down**: pitch −0.5° → −14.4° in 5.5 s, rate accelerating to −13 °/s.
+  Meanwhile `theta_d` rose to +0.8° (law wants nose up), `t_p` rose (law asks more nose-up), and
+  `out_pitch`/`a1100` fell 0.19 → −0.63/−0.55. A 0.74 move of the stick arg *with* an
+  accelerating nose drop: the stick moved the way that drops the nose. So **arg 1100 positive =
+  nose up (aft)**, and `LAW_DIR.pitch = −1` is the positive-feedback sign.
+- Independent check, steady trim at each take of the data flight and this one: higher speed →
+  lower `a1100` (40 m/s 0.19 … 58 m/s 0.04). Faster needs more forward stick, so lower = forward:
+  same conclusion. The M0 −0.56 correlation (pitch attitude vs arg, SAU on, A3) and the data-flight
+  pitch reading (collective then running to full up) were both confounded.
+- Other axes did what the law asked: collective eased down from the take (law levelling a 4 m/s
+  climb), pedal went left (ball loop centring a −0.16 ball; ball reached 0.00), bank followed
+  `phi_d` with ~0.5 s lag — roll direction looks right.
+
+User, answering "did the stick go back or forward?":
+
+> I think the pitch angle axis is flipped in our code.
+> On take Petrovich pulled the cyclic full back -> significant nose up.
+
+Main loop: this conflicts with every motion channel in the trace, not only the ADI pitch. From the
+take to t≈58 (before the tumble): ADI pitch −0.5° → −16.6°; body pitch rate (`LoGetAngularVelocity`
+z, a separate sensor) −15 °/s; load factor `au_y` 1.00 → 0.50 (a push-over, not a pull — a pull
+is above 1 g); vertical speed +4.2 → −3.5 m/s; ground speed 40.0 → 42.7 m/s. Nose up with full aft
+stick would show pitch rising, g above 1, speed falling. Pitch reaches −86° at t=60.3, then the
+bank flips to −140° and pitch comes back up while inverted (tumble). Open: either the stick in fact
+went full **forward** (arg 1100 −1 = forward, the take-trim evidence) and the cockpit picture
+misled, or aft stick did not raise the nose. Decisive, cheap checks: the track replay in external
+view, and a ground check of which way `a1100` moves when the player pushes the stick forward.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
