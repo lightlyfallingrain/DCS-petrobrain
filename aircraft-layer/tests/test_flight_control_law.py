@@ -140,7 +140,7 @@ local PROFILE = {
     -- LV-1 amendment (2026-11-24, fourth re-fly) -- new fields.
     k_ball_pedal_p = 0.3,
     k_pedal_from_collective_rate = 0.25,
-    spooled_rpm_pct = 97.0,
+    spooled_rpm_pct = 93.0,
     engine_rpm_gentle_floor_pct = 74.0,
     collective_rate_gentle_min_per_s = 0.2,
     rotor_dir = 1.0,
@@ -221,9 +221,10 @@ def _measured(**overrides: float) -> str:
         # rotor-RPM guard it is not testing.
         "rotor_rpm_pct": 100.0,
         # LV-1 amendment (2026-11-24, fourth re-fly) -- well clear of
-        # `PROFILE.spooled_rpm_pct` (97.0) by default, same "no
-        # pre-existing scenario trips a guard it is not testing" posture
-        # as `rotor_rpm_pct` above.
+        # `PROFILE.spooled_rpm_pct` (93.0, review-lv1-amendment.md
+        # required fix 2) by default, same "no pre-existing scenario
+        # trips a guard it is not testing" posture as `rotor_rpm_pct`
+        # above.
         "engine_rpm_pct": 100.0,
         # BL-16 sortie 2026-11-20 (`plans/flight-control/debug.md`) --
         # defaults `true` so every pre-existing collective-channel
@@ -1730,6 +1731,52 @@ print(string.format("%.6f", state.r_ref))
         # relative to the full inherited rate.
         assert abs(r_after_one_frame - r_at_take) < 1.0
 
+    def test_inherited_rate_decays_toward_the_heading_hold_equilibrium(
+        self,
+    ) -> None:
+        """review-lv1-amendment.md, optional refinement (implementer's
+        judgment 2) -- closes the "flagged, not fully traced" note by
+        making the decay visible in the test itself, rather than only
+        reasoning it through by hand: ten seconds after the frame-one
+        check above, the inherited 12 deg/s rate must have decayed back
+        under the ordinary ~4.7 deg/s ceiling, and the heading reference
+        must be converging on the 90 deg unpark goal -- not left
+        standing at the above-ceiling rate indefinitely. (Measured by
+        running the driver standalone: r_ref crosses below 4.7 deg/s at
+        t~=8s and is at 2.89 deg/s by t=10s, monotonically, with psi_ref
+        climbing steadily toward 90 the whole way -- not an oscillation
+        this margin could accidentally straddle.)"""
+        driver = f"""
+local measured = {
+            _measured(
+                bank_deg=35.0,
+                psi_deg=0.0,
+                r_deg_s=12.0,
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6,
+            )
+        }
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, {{ heading_deg = 90.0 }}, PROFILE)
+local dt = 0.05
+for i = 1, 200 do  -- 10 s further, same fixed measured (shaper's own
+                    -- internal trajectory, not a closed loop -- the
+                    -- frame-one test above exercises the plant-coupled
+                    -- case; this one isolates the shaper's own decay).
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+end
+print(string.format("%.6f", state.r_ref))
+print(string.format("%.6f", state.psi_ref))
+"""
+        lines = _run(driver)
+        r_after_10s, psi_ref_after_10s = (float(x) for x in lines)
+        # Decayed back under the ordinary ~4.7 deg/s ceiling (max_turn_
+        # bank_deg = 20 deg at this speed) -- never left standing at the
+        # inherited 12 deg/s.
+        assert abs(r_after_10s) < 4.7
+        # Converging on the 90 deg unpark heading goal, not drifting
+        # away from it or oscillating around some other value.
+        assert 0.0 < psi_ref_after_10s <= 90.0
+
 
 class TestSpeedChannelIsBrisk:
     """LV-1 amendment (2026-11-24, fourth re-fly), section B/Q2, E14 --
@@ -1850,10 +1897,12 @@ print(string.format("%.9f", state.dbg_u_c_rate))
     def test_schedule_inactive_when_engine_rpm_is_at_or_above_spooled(
         self,
     ) -> None:
-        """At/above `spooled_rpm_pct` (97.0), the rate is identical to
-        fully-spooled-up (100.0) -- the schedule adds no further taper
-        once the engines are already at/near normal output."""
-        at_floor = self._collective_rate_for(97.0)
+        """At/above `spooled_rpm_pct` (93.0, the user's own level-cruise
+        reading -- review-lv1-amendment.md required fix 2), the rate is
+        identical to fully-spooled-up (100.0) -- the schedule adds no
+        further taper once the engines are already at/near normal
+        output."""
+        at_floor = self._collective_rate_for(93.0)
         fully_up = self._collective_rate_for(100.0)
         assert abs(at_floor - fully_up) < 1e-9
 
@@ -1912,6 +1961,222 @@ print(string.format("%.9f", outputs.pedals))
 """
         lines = _run(driver)
         assert abs(float(lines[0]) - 0.15) < 1e-6
+
+
+class TestAmendmentProductionValuesTogether:
+    """review-lv1-amendment.md, required fix 1 -- no existing test ran
+    `c_theta=0.85`, `speed_accel_cap_mps2=1.9` and `k_pedal_from_
+    collective_rate=0.6` together, though all three were tuned from the
+    same fourth-re-fly flight and the row-4 climb that motivated the
+    raised torque feed-forward is exactly a simultaneous pitch-change-
+    plus-collective-rate event -- precisely the interaction an isolated-
+    field test (`TestSpeedChannelIsBrisk`, `TestPedalReachesCollective
+    StepTarget`) cannot see. `k_ball_pedal_p` is left at the shared
+    `_PROFILE`'s default (0.3), which already equals `flight_profile.
+    lua`'s shipped value -- no override needed for that one."""
+
+    def test_row4_like_climb_and_speed_change_is_stable(self) -> None:
+        """A row-4-like climb: a standing speed increase (feed-forward-
+        led pitch change, section B) commanded simultaneously with a
+        climb (a collective-rate event, section C/E). Toy plant combines
+        the pitch/speed plant (`TestSpeedChannelIsBrisk`) and the
+        collective/vertical-speed plant (`TestClimbTakeoverStoppingHeight`),
+        plus a crude ball plant coupling the collective rate to yaw the
+        same torque feed-forward is meant to compensate for -- so the
+        pedal's own tracking is actually exercised here, not assumed."""
+        driver = """
+PROFILE.c_theta = 0.85
+PROFILE.speed_accel_cap_mps2 = 1.9
+PROFILE.k_pedal_from_collective_rate = 0.6
+local measured = {measured}
+measured.ball = 0.03
+local trim_collective = 0.3
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = trim_collective }, nil, PROFILE)
+-- Bit-exact at take, with the amendment's production profile values
+-- active -- Decision 24's guarantee must survive the raised gains.
+local take_outputs = flight_control.law_outputs(state, measured, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 220.0, alt_m = 250.0 }, LIMITS, PROFILE)
+local dt = 0.05
+local plant_ax_gain = 2.0
+local plant_w_gain = 15.0
+-- Crude torque-to-ball coupling, same order the row-4 climb showed
+-- (yaw torque from a collective-rate change grows the ball error faster
+-- than the pedal alone would correct without the raised feed-forward).
+local k_yaw_from_collective_rate = 0.15
+local prev_w = measured.w_mps
+local max_abs_theta_d = 0.0
+local max_abs_ball = 0.0
+local max_abs_pedal = 0.0
+local first_half_max_speed_err, second_half_max_speed_err = 0.0, 0.0
+for i = 1, 300 do  -- 15 s
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    local tau = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
+    measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
+    local ax = plant_ax_gain * (0.0 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+
+    local w_dot = plant_w_gain * (outputs.collective - trim_collective)
+    measured.w_mps = measured.w_mps + w_dot * dt
+    measured.h_m = measured.h_m + measured.w_mps * dt
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    prev_w = measured.w_mps
+
+    measured.ball = measured.ball
+        + (k_yaw_from_collective_rate * state.dbg_u_c_rate - outputs.pedals) * dt
+    if measured.ball > 1.0 then measured.ball = 1.0 end
+    if measured.ball < -1.0 then measured.ball = -1.0 end
+
+    if math.abs(state.theta_d) > max_abs_theta_d then max_abs_theta_d = math.abs(state.theta_d) end
+    if math.abs(measured.ball) > max_abs_ball then max_abs_ball = math.abs(measured.ball) end
+    if math.abs(outputs.pedals) > max_abs_pedal then max_abs_pedal = math.abs(outputs.pedals) end
+    local speed_err = math.abs(measured.ias_mps - 220.0 / 3.6)
+    if i <= 150 then
+        if speed_err > first_half_max_speed_err then first_half_max_speed_err = speed_err end
+    else
+        if speed_err > second_half_max_speed_err then second_half_max_speed_err = speed_err end
+    end
+end
+print(string.format("%.9f", take_outputs.pitch))
+print(string.format("%.9f", take_outputs.collective))
+print(string.format("%.6f", max_abs_theta_d))
+print(string.format("%.6f", max_abs_ball))
+print(string.format("%.6f", max_abs_pedal))
+print(string.format("%.6f", first_half_max_speed_err))
+print(string.format("%.6f", second_half_max_speed_err))
+""".replace(
+            "{measured}",
+            _measured(
+                pitch_deg=0.0,
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6 + 2.0,
+                h_m=200.0,
+                w_mps=0.0,
+            ),
+        )
+        lines = _run(driver)
+        (
+            take_pitch,
+            take_collective,
+            max_abs_theta_d,
+            max_abs_ball,
+            max_abs_pedal,
+            first_half_err,
+            second_half_err,
+        ) = (float(x) for x in lines)
+        # Bit-exact at take: the captured command (pitch 0, collective
+        # 0.3) comes back out untouched, with the raised gains active.
+        assert abs(take_pitch - 0.0) < 1e-6
+        assert abs(take_collective - 0.3) < 1e-6
+        # Stable: the pitch reference stays well inside a plausible
+        # envelope rather than running away (theta_min/max_deg is +-15,
+        # but theta_d's feed-forward is not itself clamped to that --
+        # 30 deg is a generous "did not diverge" bound, not a tuned
+        # limit).
+        assert max_abs_theta_d < 30.0
+        # Ball/pedal keep up: the crude yaw-coupling plant never drives
+        # the ball anywhere near its usable range (+-0.5), and the
+        # pedal never sits pinned at its own limit -- both signs the
+        # raised torque feed-forward is actually compensating the
+        # collective-rate event, not lagging behind it.
+        assert max_abs_ball < 0.5
+        assert max_abs_pedal <= 0.5
+        # No growing oscillation: the speed error in the second half of
+        # the run is not larger than in the first half (a small margin
+        # covers the climb's own secondary disturbance to the speed
+        # channel via the priority-under-limits chain, section G).
+        assert second_half_err <= first_half_err + 0.5
+
+    def test_150_to_250_acceleration_is_stable_and_bit_exact_at_take(
+        self,
+    ) -> None:
+        """The amendment's other named scenario: a 150->250 km/h
+        acceleration on the toy plant with all three raised production
+        values together, including the raised torque feed-forward this
+        test alone does not otherwise exercise (`TestSpeedChannelIsBrisk`
+        never raises `k_pedal_from_collective_rate`)."""
+        driver = """
+PROFILE.c_theta = 0.85
+PROFILE.speed_accel_cap_mps2 = 1.9
+PROFILE.k_pedal_from_collective_rate = 0.6
+local measured = {measured}
+measured.ball = 0.03
+local command = { pitch = 0, roll = 0, pedals = 0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+local take_outputs = flight_control.law_outputs(state, measured, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 250.0 }, LIMITS, PROFILE)  -- ~69.4 m/s
+local dt = 0.05
+local plant_ax_gain = 2.0
+local k_yaw_from_collective_rate = 0.15
+local max_ax = 0.0
+local max_abs_ball = 0.0
+local max_abs_pedal = 0.0
+local max_overshoot_first, max_overshoot_second = 0.0, 0.0
+for i = 1, 500 do  -- 25 s
+    local prev_ias = measured.ias_mps
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    local tau = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
+    measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
+    local ax = plant_ax_gain * (0.0 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    local measured_ax = (measured.ias_mps - prev_ias) / dt
+    if measured_ax > max_ax then max_ax = measured_ax end
+
+    measured.ball = measured.ball
+        + (k_yaw_from_collective_rate * state.dbg_u_c_rate - outputs.pedals) * dt
+    if measured.ball > 1.0 then measured.ball = 1.0 end
+    if measured.ball < -1.0 then measured.ball = -1.0 end
+    if math.abs(measured.ball) > max_abs_ball then max_abs_ball = math.abs(measured.ball) end
+    if math.abs(outputs.pedals) > max_abs_pedal then max_abs_pedal = math.abs(outputs.pedals) end
+
+    local overshoot = measured.ias_mps - (250.0 / 3.6)
+    if overshoot > 0.0 then
+        if i <= 250 then
+            if overshoot > max_overshoot_first then max_overshoot_first = overshoot end
+        else
+            if overshoot > max_overshoot_second then max_overshoot_second = overshoot end
+        end
+    end
+end
+print(string.format("%.9f", take_outputs.pitch))
+print(string.format("%.9f", take_outputs.collective))
+print(string.format("%.6f", max_ax))
+print(string.format("%.6f", measured.ias_mps))
+print(string.format("%.6f", max_abs_ball))
+print(string.format("%.6f", max_abs_pedal))
+print(string.format("%.6f", max_overshoot_first))
+print(string.format("%.6f", max_overshoot_second))
+""".replace(
+            "{measured}",
+            _measured(pitch_deg=0.0, ias_mps=150.0 / 3.6, v_t_mps=150.0 / 3.6 + 2.0),
+        )
+        lines = _run(driver)
+        (
+            take_pitch,
+            take_collective,
+            max_ax,
+            final_ias,
+            max_abs_ball,
+            max_abs_pedal,
+            overshoot_first,
+            overshoot_second,
+        ) = (float(x) for x in lines)
+        assert abs(take_pitch - 0.0) < 1e-6
+        assert abs(take_collective - 0.3) < 1e-6
+        # Brisk, same bar `TestSpeedChannelIsBrisk` sets.
+        assert max_ax > 1.5
+        # Settles without a runaway overshoot.
+        assert final_ias <= (250.0 / 3.6) * 1.05
+        assert max_abs_ball < 0.5
+        assert max_abs_pedal <= 0.5
+        # No growing oscillation: overshoot in the second half of the
+        # run is not larger than in the first half.
+        assert overshoot_second <= overshoot_first + 0.5
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

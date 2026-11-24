@@ -212,11 +212,20 @@ M.PROFILES["Mi-24P"] = {
     -- reactive rotor-RPM-floor guard above (which stays exactly as it
     -- is, the backstop it was always meant to be). At/above this engine
     -- RPM, a collective increase is capped only by the existing
-    -- physical/pedal-margin caps -- the user's own reading, "engine RPM
-    -- ~98-100%" during a fast acceleration. Only a further *increase*
-    -- is ever gated (decreases, i.e. spooling down, are never the
-    -- hazard).
-    spooled_rpm_pct = 97.0,
+    -- physical/pedal-margin caps. Set to the user's own level-cruise
+    -- reading, not the acceleration one: "in level flight, 170 km/h --
+    -- engine RPM steady at ~93%... fast acceleration -- engine RPM
+    -- ~98-100%... fast descent at collective full down -- engine RPM
+    -- ~74%" (`docs/acceptance/2026-11-24-sortie-feedback.md`) -- the
+    -- plan's own correction box names ~93% ("normal cruise output") as
+    -- the "-> fast" threshold, not the ~98-100% reading from an
+    -- acceleration already under way; **review-lv1-amendment.md,
+    -- required fix 2** caught the first cut (97.0) sitting above
+    -- ordinary level cruise, which would have tapered every normal
+    -- level-flight collective increase to ~83% of nominal the moment
+    -- U9 turns this schedule on. Only a further *increase* is ever
+    -- gated (decreases, i.e. spooling down, are never the hazard).
+    spooled_rpm_pct = 93.0,
     -- The other end of the taper -- the user's own "fast descent at
     -- collective full down" reading ("engine RPM ~74%"), the fully-
     -- spooled-down reference state. Below this, the increase rate

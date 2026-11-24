@@ -779,3 +779,40 @@ text at this tip — no stale rotor-RPM passages found).
   without synchronizing on the actual condition it needs (it waits on one `threading.Event` but
   then asserts a second, unguarded count). Not this task's to fix, but worth flagging: `-n auto`
   changes CPU scheduling pressure enough to turn a timing-marginal test red.
+
+### Required fixes (review-lv1-amendment.md), implementer pass
+
+Branch `feature/bl16-lift-vector-law`, built on tip `d1043934` (the review itself). Both required
+fixes addressed:
+
+1. **Combined-production-values coverage.** New `TestAmendmentProductionValuesTogether`
+   (`aircraft-layer/tests/test_flight_control_law.py`) runs `c_theta=0.85`, `speed_accel_cap_mps2=
+   1.9`, `k_pedal_from_collective_rate=0.6` together (local `PROFILE.x = ...` overrides, the file's
+   existing technique), with `k_ball_pedal_p` left at the shared `_PROFILE`'s unchanged default
+   (0.3, already equal to the shipped value): a row-4-like climb (simultaneous `alt_m`/`ias_kmh`
+   goal, toy plant combining the pitch/speed and collective/vertical-speed plants from
+   `TestSpeedChannelIsBrisk`/`TestClimbTakeoverStoppingHeight`, plus a crude torque-to-ball coupling
+   so the raised pedal feed-forward is actually exercised rather than assumed) and a standalone
+   150→250 km/h acceleration. Both assert bit-exactness at take with the production values active,
+   bounded pitch/ball/pedal (no runaway), and that the speed/overshoot error in the second half of
+   each run is not larger than in the first (no growing oscillation). All production values proved
+   stable on the toy plant — no retuning needed.
+2. **`spooled_rpm_pct` 97.0 → 93.0** (`flight_profile.lua`), matching the plan's own ~93% level-
+   cruise threshold rather than the ~98-100% acceleration reading the first cut was justified from;
+   comment rewritten to cite the user's three readings verbatim and name the review's own finding.
+   `engine_rpm_gentle_floor_pct` (74.0) unchanged, per the fix instructions. Mirrored in both test
+   files' profile tables (`test_flight_control_law.py`'s shared `_PROFILE`, and `test_flight_
+   control_lua.py`'s own mirror, which is inert either way but claims to track production) and in
+   `TestEngineRpmGatedCollectiveSchedule`'s boundary test (97.0 → 93.0).
+3. **Optional refinement taken**: `TestUnparkMidTurnRateNeverSlammedToTheOrdinaryCeiling` gained a
+   second test, `test_inherited_rate_decays_toward_the_heading_hold_equilibrium` — ten seconds
+   further into the same driver, the inherited 12°/s rate has decayed to 2.89°/s (measured by
+   running the driver standalone, logged every 2 s: crosses below the ~4.7°/s ordinary ceiling at
+   t≈8s, monotonically, with `psi_ref` climbing steadily toward the 90° unpark goal throughout —
+   not an oscillation the assertion's margin could accidentally straddle).
+
+Checks (aircraft-layer only; body-layer untouched by these fixes): `ruff format --check`/
+`ruff check src tests` — pass (one file reformatted, `test_flight_control_law.py`, then clean);
+`cd aircraft-layer && .venv/bin/mypy src` — pass (29 files); full `pytest tests -q` — 1176 passed
+(3 more than the amendment's own 1173, the two new test methods plus the new class's second test);
+`.claude/scripts/fast-tests.sh aircraft-layer` — 1030 passed.

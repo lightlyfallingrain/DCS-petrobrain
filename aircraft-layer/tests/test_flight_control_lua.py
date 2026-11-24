@@ -252,7 +252,7 @@ flight_profile = {
         -- mirroring `flight_profile.lua`.
         k_ball_pedal_p = 0.3,
         k_pedal_from_collective_rate = 0.25,
-        spooled_rpm_pct = 97.0,
+        spooled_rpm_pct = 93.0,
         engine_rpm_gentle_floor_pct = 74.0,
         collective_rate_gentle_min_per_s = 0.2,
         rotor_dir = 1.0,
