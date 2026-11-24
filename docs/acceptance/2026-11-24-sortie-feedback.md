@@ -38,4 +38,13 @@ Logs: `aircraft_layer_flight_trace.log` (estimator trace only, t=0..144.9) and
 3. Lateral trim loop (phi_i on a_r error) fighting sideslip-induced side force, and the vertical
    loop climbing for a reason not yet known.
 
+## User's answer, after the first read
+
+Asked whether the pedals moved after the take, and which way:
+
+> yes, lot's of left pedal
+
+Left pedal is what moves the ball right (2026-11-20 calibration), so this supports hypothesis 1:
+the ball loop is driving the pedal away from centring.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
