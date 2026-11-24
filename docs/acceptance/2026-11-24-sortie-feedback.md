@@ -201,4 +201,13 @@ went full **forward** (arg 1100 −1 = forward, the take-trim evidence) and the 
 misled, or aft stick did not raise the nose. Decisive, cheap checks: the track replay in external
 view, and a ground check of which way `a1100` moves when the player pushes the stick forward.
 
+User's answer, closing the open question:
+
+> you are correct, it was pitch down. I remembered the flight before that where it went up.
+
+So the nose went down and the stick went forward: arg 1100 −1 = forward, positive = aft/nose up.
+Corroborated by `a1100` vs pitch acceleration, positive (+0.25..+0.57) in every hand-flown stretch
+of both flights. Fixed in 2ff15f05 (`LAW_DIR.pitch = 1`, `plans/flight-lift-vector/debug-2026-11-24d.md`).
+The checks named above were not needed.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
