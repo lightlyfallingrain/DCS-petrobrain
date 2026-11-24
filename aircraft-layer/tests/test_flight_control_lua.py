@@ -2153,6 +2153,64 @@ print(string.format("%.6f", written[2087]))
         assert written_collective > -0.3 + 0.05, written_collective
 
 
+class TestPitchLawDirection:
+    """Main-loop finding, 2026-11-24 (`plans/flight-lift-vector/debug-
+    2026-11-24c.md`, "Pitch direction"): the law's pitch is positive =
+    nose up (`LAW_DIR`), command 2001 positive = nose down (`SIGN.
+    pitch = 1.0`, arg 1100 positive = stick forward/nose down,
+    `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.
+    md`). The toy plant fact driving this test's assertion -- independent
+    of the law's own internal domain convention -- is that very same
+    arg-1100 reading: a positive written 2001 command moves the real
+    aircraft's pitch DOWN. So with the aircraft's actual pitch driven
+    below the held `theta_d` (nose too low, the law wants more nose-up),
+    the written command must fall, never rise."""
+
+    def test_pitch_below_theta_d_lowers_the_written_command(self) -> None:
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+pilot_args.pitch = 0.0
+pitch_rad = 0.0
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.0)
+local captured = written[2001]
+-- Plant fact (not the law's own convention): arg 1100/command 2001
+-- positive drives pitch down, so a nose-low aircraft relative to the
+-- held `theta_d` is modelled here as the measured pitch falling below
+-- the take value -- an external disturbance, never written by this
+-- module.
+pitch_rad = pitch_rad - math.rad(5.0)
+local t = 0.0
+for _ = 1, 3 * 60 do
+    t = t + 1.0 / 60.0
+    flight_control.run_flight_control(t)
+end
+print(string.format("%.6f", captured))
+print(string.format("%.6f", written[2001]))
+"""
+        captured, after = (float(x) for x in _run(driver))
+        # Pitch sits below theta_d (wants more nose-up): the written
+        # command must fall, not rise.
+        assert after < captured - 0.001, (captured, after)
+
+    def test_take_stays_bit_exact_on_pitch(self) -> None:
+        """The flip (`LAW_DIR.pitch`) and its inverse (`law_domain` on
+        the captured command, at `law_init_at_take`) must cancel exactly
+        at the take frame, same guarantee `TestCollectiveLawDirection`'s
+        sibling bit-exact tests rely on elsewhere in this file."""
+        driver = """
+ap_parked = false
+ap_seat = "pilot"
+pilot_args.pitch = 0.23
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.0)
+print(string.format("%.6f", written[2001]))
+"""
+        written_pitch = float(_run(driver)[0])
+        assert abs(written_pitch - 0.23) <= 0.0011
+
+
 class TestLawHzScheduling:
     """BL-16 lift-vector law, Stage LV-1 fix (`plans/flight-lift-vector/
     review-lv1.md`, required fix 1) -- `law_update` itself now runs only

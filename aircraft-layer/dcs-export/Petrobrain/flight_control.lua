@@ -145,22 +145,32 @@ local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 
 -- The law's own axis directions, against the command domain above:
 -- `law value = LAW_DIR[axis] * command`, and back again on output
--- (`LAW_DIR` is +-1, its own inverse). The law (`law_update`) reasons
--- in physical terms -- **collective: positive = more lift** (its
--- vertical-acceleration integrator raises `u_c` to climb; the RPM,
--- blade-stall and pedal-limit guards cap a *rising* `u_c`; the torque
--- feed-forward adds right pedal for a rising `u_c`); **pedals:
--- positive = right**. Command 2087 runs the other way for the
--- collective: `SIGN.collective = -1` and arg 1102 positive is
--- collective up (M0 A3, +0.89 against VS), so a positive command is
--- collective DOWN. Before this table existed the law's `u_c` was the
--- command itself, so every collective term had the wrong sign -- the
--- 2026-11-24 data flight drove the lever to full up within ~3 s of
--- every take while the law asked to descend (`plans/flight-lift-
--- vector/debug-2026-11-24c.md`, finding 2). Pedals already agree
--- (command positive = right, debug-2026-11-24b), pitch/roll are
--- unchanged (+1) -- not re-derived here.
-local LAW_DIR = { pitch = 1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
+-- (`LAW_DIR` is +-1, its own inverse). The law (`law_update`/`law_
+-- outputs`) reasons in physical terms -- **collective: positive = more
+-- lift** (its vertical-acceleration integrator raises `u_c` to climb;
+-- the RPM, blade-stall and pedal-limit guards cap a *rising* `u_c`;
+-- the torque feed-forward adds right pedal for a rising `u_c`);
+-- **pedals: positive = right**; **pitch: positive = nose up** (`t_p`/
+-- `theta_d`/`theta_i`/the `k_q` rate damping/the speed-give chain in
+-- `law_update` and `u_pitch` in `law_outputs` are all written against
+-- this). Command 2087 runs the other way for the collective: `SIGN.
+-- collective = -1` and arg 1102 positive is collective up (M0 A3,
+-- +0.89 against VS), so a positive command is collective DOWN. Before
+-- this table existed the law's `u_c` was the command itself, so every
+-- collective term had the wrong sign -- the 2026-11-24 data flight
+-- drove the lever to full up within ~3 s of every take while the law
+-- asked to descend (`plans/flight-lift-vector/debug-2026-11-24c.md`,
+-- finding 2). Command 2001 also runs the other way for pitch: arg 1100
+-- positive is stick forward/nose down (`aircraft-layer/research/2026-
+-- 11-18-bl16-m0-flight-axes-findings.md`), `SIGN.pitch = 1.0` so a
+-- positive written command is nose DOWN too -- the same law-domain-vs-
+-- command-domain class as collective, found from the same data flight
+-- (debug-2026-11-24c, main-loop finding, 2026-11-24): `t_p` rose while
+-- pitch sat below `theta_d` (wanting more nose-up) and `out_pitch`
+-- rising drove pitch further negative. Pedals already agree (command
+-- positive = right, debug-2026-11-24b), roll is unchanged (+1) -- not
+-- re-derived here.
+local LAW_DIR = { pitch = -1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
 
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
 -- defaults off for pedal and collective until M0-B and M0-C" -- each
@@ -2012,6 +2022,12 @@ end
 -- these logs" was the sortie report's own finding. `law`/`last_command`
 -- are `nil` whenever `fc_mode ~= "active"` (no take yet this session) --
 -- every added field prints `"nil"` via `tostring` rather than erroring.
+-- `out_pitch`/`out_roll`/`out_pedals`/`out_collective` are `last_
+-- command` (`fc_last_command`, write/command domain -- what `write_
+-- outputs` is about to send to `LoSetCommand`, before the per-frame
+-- wobble), never the law domain `t_p`/`u_pitch` reason in; `out_pitch`
+-- positive is nose DOWN (arg 1100, `SIGN.pitch = 1.0`) -- the read
+-- that drove the `LAW_DIR.pitch` fix (module header above).
 local function format_trace_line(t, est, raw, law, mode, last_command)
     local l = law or {}
     local c = last_command or {}

@@ -54,7 +54,11 @@ on the ground and the user took off before A1. Conditions were about 180 km/h IA
     at least −0.98..+0.66.
   - Pitch arg 1100: positive is stick forward (nose down). It correlates −0.56 with pitch in A3.
     It sits around +0.2 in cruise, so the stick is not centred and capture must read the actual
-    arg.
+    arg. **2026-11-24** (`plans/flight-lift-vector/debug-2026-11-24c.md`, "Pitch direction,
+    main-loop finding"): this reading is what the law's `LAW_DIR.pitch` fix is derived from —
+    `flight_control.lua`'s `SIGN.pitch = 1.0` carries it through to command 2001 (positive = nose
+    down there too), and the law itself reasons positive = nose up, so `LAW_DIR.pitch = -1.0`
+    (was `+1.0`) is what maps between the two domains correctly.
   - Roll arg 1101 and pedal arg 1103: positive correlates with positive roll rate and yaw rate
     respectively (+0.33..+0.62, +0.23..+0.40), which is weak. B1's sweep settles the pedal.
 - **The operator args 1110–1113 read 0 throughout** with the player in the pilot seat, as in probe
