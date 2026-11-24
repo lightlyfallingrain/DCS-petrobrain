@@ -322,3 +322,200 @@ the law assumes stated explicitly (off, U4). No silent assumption-filling found 
    — i.e. accept the gap as untested until it is flown, per Q1's own terms?
 2. Finding 2: should the SAU-on-at-handover rule get its own backlog ID now, since it is fully
    specified and independent of every lift-vector stage, so it does not quietly disappear?
+
+## Goal check — 2026-11-24 — LV-1 amendment, fourth re-fly
+
+**Verdict:** CONCERNS
+
+Branch `feature/bl16-lift-vector-law` at `efdfd839`. Inputs: `docs/acceptance/2026-11-24-sortie-feedback.md`
+"Fourth re-fly" to the end (the specification); `plan.md` B, D, E, G, I and the LV-2/LV-3 scope;
+`explore-notes.md` (U3, "Slowing down"); `body-layer/ROADMAP/BL-16.md` decisions 3 and 5 and the
+hover note *"the slower the flight, the more gentle inputs need to be"*; the goal check of
+2026-11-20 above (E1–E10). Code read only to confirm existing behaviour: `flight_profile.lua`
+(`speed_accel_cap_mps2 = 0.5`, `theta_min_deg = −15`, `c_theta = 0.5`, the RPM and blade-stall
+collective-rate caps of 0 inside their margins), body-layer `MAX_ACCEL_MPS2 = 1.0`,
+`RETREATING_BLADE_STALL_IAS_KMH = 250`, `MAX_TURN_BANK_DEG = 20` (the bank of a commanded
+continuous turn), and `config/rules/flight.lua` ("turn left/right" with no degrees = continuous
+turn; "stop turn"; "level flight").
+
+### Why
+
+The player hands over mid-whatever and turns to the sight. They can only do that if Petrovich
+**carries on what the aircraft was doing** and, when told to change something, does it **the way the
+player would have** — brisk, small, constant corrections — so the aircraft is never late, never
+lurching and never wandering while nobody watches it.
+
+Asked why once more: the first answer is "fix the turn and speed up the speed change"; the second is
+that **slowness is itself the defect the user flew.** Every complaint in this report is a lag: the
+take levels off before resuming, speed takes 60 s instead of 20, pedal trails collective, pedal
+changes too slowly and oscillates, corrections "lag the actual flight state". The founding promise
+(decision 5, "S-curves, no oscillation") is still the goal; the user's diagnosis is that oscillation
+here comes *from* sluggish corrections, not from fast ones. So the amendment is judged by
+promptness *and* smoothness together, and a fix that buys smoothness by slowing things down again
+moves away from the why.
+
+### Player expectations
+
+These extend E1–E10 of 2026-11-20; where one changes an earlier expectation it says so.
+
+- **E11 — A take in a bank keeps the bank.** On "you have controls" (or an unpark) with |bank| ≥ 5°
+  and no standing heading goal, the bank stays within a few degrees of what it was at the take, the
+  aircraft keeps turning the same way, ball centred, and keeps doing so until the player commands
+  something. With |bank| < 5°, the wings come level and the heading holds on the take heading. The
+  5° is a first cut, tunable. (Decision 3, *"keep the turn going"*; amends E1's "settles into the
+  desired state" for this case.)
+- **E12 — Mode 2 → mode 1 mid-turn never rolls level first.** When mode 2 had a heading goal and
+  was turning, the bank continues smoothly through the handover and the aircraft rolls out once, on
+  the mode-2 heading. No wings-level moment between.
+- **E13 — While a held bank flies, height and speed hold** (main loop's assumption, not yet asked;
+  Q3 below). The altimeter does not sag through the circle.
+- **E14 — Speed change in about 20 s for 100 km/h.** On "speed 250" from 150 km/h level: within 1–2
+  s the nose is at about −15°, collective up and right pedal in with it, ball centred, altitude
+  held. The nose stays near −15° until about 230 km/h, then comes up, collective down, pedals
+  follow, and speed settles on 250 without overshoot or hunting. Total about 20 s. Beyond −15° only
+  briefly and only when height is being traded for speed (no current command asks for that).
+- **E15 — Deceleration mirrors it, with a slow roll-out.** Nose up, collective down, left pedal,
+  promptly; near the target speed, nose down and collective **up smoothly over about 5 s**, so the
+  rotor RPM does not drop and the aircraft does not sink. Consistent with the 2026-11-20 rule
+  *"slowing down is always pitch back and also less collective"*.
+- **E16 — Inputs are fast, frequent and small.** Watching the controls: cyclic moves quickly and
+  often in small steps; pedals keep up with collective changes rather than trailing them; a small
+  collective correction is quick; a large collective change (above all an increase) is spread out.
+  Never one large jump at a fast rate. **Amends E7:** gentleness at low speed is in the *size* of
+  each correction, not in slowing the input rate — *"The input changes themselves can be fast
+  always… the amount of delta needs to get slower as speed slows."*
+- **E17 — Breaks fly as an escape (LV-2).** Bank goes steep and **stays** steep until near the break
+  heading; the nose does not rise (speed is kept, as E5 already said). Sharpens E5's "measured" to
+  "aggressive and controlled".
+
+Not expectations of this amendment (tuning or later stages, recorded so they are not lost): wobble at
+the take; pedal lag on collective increases (covered by E16 as an outcome); ~50 km/h left yaw out of
+control on row 10 (LV-3 low-speed scope, and LV-1's slow-flight row did its job of finding the edge).
+
+### Open assumptions
+
+- **What "hold the bank" is.** Serves the why: a continuous turn at the **bank measured at the take**
+  (averaged over the take's own wobble), held as bank. Would not: reusing the existing commanded
+  continuous turn ("turn left" with no degrees) as is — it flies the turn rate of
+  `MAX_TURN_BANK_DEG` = 20°, so a 40° turn taken over rolls out to 20° and a 10° turn rolls in to
+  20°. Finding 2.
+- **What ends a held bank.** Serves the why: a heading-type command — "turn heading", "turn left/right
+  [NN]", "stop turn", "level flight", a break — ends it; a speed or altitude command changes speed or
+  height *inside* the turn. Would not: any desired-state write ending it. A speed command that
+  re-applies the whole desired state (heading included, e.g. heading = current) would level the
+  aircraft — exactly the levelling the user just rejected, arriving one command later. Q3.
+- **Bank held or turn rate held while speed changes inside the turn.** Serves: bank, as the user
+  said; the turn tightens as speed falls, which is what a pilot holding a bank sees. Would not
+  matter much either way; listed so the plan says which.
+- **The 5° rule's input.** Serves: the averaged bank at the take, with the threshold in the
+  profile. Would not: the single take frame, where the "wobbly" take can flip a 5–6° bank either
+  side of the line.
+- **Mode 2 → mode 1 turn direction.** Serves: keep turning the way the aircraft already turns toward
+  the mode-2 heading (that is what mode 2 chose). Would not: recomputing the shortest arc at the
+  handover, which can only disagree if mode 2 was flying the long way round on a commanded
+  direction — rare, but it would roll the aircraft through level into the other bank.
+- **Where 20 s comes from.** Serves: 20 s is an outcome on the card, reached by whatever lets the
+  nose go to −15° in 1–2 s. Would not: raising `speed_accel_cap_mps2` alone. 100 km/h in 20 s is
+  ~1.4 m/s² *average* with a 1–2 s onset; body-layer's own `MAX_ACCEL_MPS2 = 1.0` ceiling alone
+  means ≥ 28 s plus the S-curve tails. Finding 4 covers the deeper half.
+- **What "pedals move more slowly in Mi-24 anyhow" asks for.** Serves (per the flight report):
+  Petrovich's pedal corrections become faster and more frequent, because the aircraft's own yaw
+  response is already slow — *"pedal inputs change quite slowly, which may cause overshoot and
+  oscillation"*, *"cyclic and pedal changes are slow"*. Would not: the main loop's paraphrase
+  "pedals slower" read as "keep or add a slow pedal rate limit". Finding 1; Q5.
+- **How a large collective increase is made gentle.** Serves: the increase is spread over its time
+  (~5 s at a decel roll-out) **by design**, so RPM never droops. Would not: commanding it fast and
+  relying on the RPM guard — that guard is reactive (`collective_rate_cap_near_rpm_floor = 0` inside
+  a 5 % margin), so RPM droops to the margin first, then collective freezes and the aircraft sinks at
+  the end of a deceleration. Finding 3.
+- **How "fast inputs" meets the blade-stall guard at 230–250 km/h.** Serves: E14's own settle
+  (nose up, collective **down** from ~230) runs into nothing — the guard only caps collective
+  *increases* inside 230–250 km/h. Would not matter unless the acceleration overshoots or sags near
+  250, where collective cannot rise and speed gives (U3) — a silent "does less", per E8. No action;
+  noted because 250 is both the user's example target and the guard's line.
+
+### Findings
+
+1. **"Pedals slower" filled literally keeps the oscillation the user reported.** Lens: purpose.
+   - **Assumption:** the main loop's reading *"pedals slower in the Mi-24 anyway"* becomes "pedal
+     corrections stay slow / get a slower rate than cyclic".
+   - **The user's words:** rows 4 and 7 and the general observations say the pedal is **too slow**
+     now and that is what oscillates. The sentence "pedals move more slowly in Mi-24 anyhow" reads,
+     in context, as a fact about the aircraft, not a request.
+   - **The pilot would see:** yaw offset after every collective change and slow overshoot, again
+     (against E16 and E7's "no oscillation").
+   - **Grounded in:** `2026-11-24-sortie-feedback.md`, rows 4, 7, general observations, answer 3.
+   - **Suggests:** treat it as a question until answered (Q5), and plan pedal toward *faster and
+     with collective* in any case — that is what the report asks for either way.
+
+2. **Reusing the continuous turn for a held bank resets the bank to 20°.** Lens: unit of action /
+   the non-obvious case.
+   - **Assumption:** "hold that bank" is built as the existing mode-1 continuous turn, which is the
+     natural existing mechanism (and should be reused, per "do not reinvent").
+   - **In the code:** the continuous turn flies the turn rate of `MAX_TURN_BANK_DEG` = 20° at
+     current speed.
+   - **The pilot would see:** hand over in a 45° turn, and the aircraft rolls out to 20° and keeps
+     circling wider — a visible attitude change at the take, against E11 and E1's "no bank
+     excursion".
+   - **Grounded in:** user, *"If bank is more than that, maintain bank"*; `flight_control.py`
+     `MAX_TURN_BANK_DEG`; `flight.lua` continuous turn.
+   - **Suggests:** reuse the continuous-turn mechanism, parameterised by the bank captured at the
+     take; "stop turn" / "level flight" already end it.
+
+3. **The RPM guard is not the "gently" the user asked for.** Lens: world truth (the user's).
+   - **Assumption:** "collective up fast" for the speed changes is made safe by the existing RPM and
+     blade-stall guards.
+   - **The user's words:** *"collective needs to be raised fairly slowly to give the engines time to
+     spool up… otherwise rotor RPM drops fast. Say ~5 seconds"*, and earlier *"Rotor blade load is
+     what causes both RPM drop and retreating blade stall."* The spool-up time is something to
+     anticipate, not detect.
+   - **The pilot would see:** at the end of every deceleration, RPM droops, collective freezes, the
+     aircraft settles below its height (against E15).
+   - **Grounded in:** answer 2; explore-notes "Slowing down"; `flight_profile.lua` RPM cap.
+   - **Suggests:** large collective increases are shaped in time by the law itself; the guard stays
+     as the backstop it is.
+
+4. **Two recorded design premises pull against E14 and need restating, not quietly overriding.**
+   Lens: purpose; flags earlier decisions.
+   - **(a) Plan section I / E1:** *"a take 50 km/h below the desired speed is a gentle transition,
+     not a lurch."* With E14, the same speed shaper after an m2→m1 take with desired 200 at 150
+     km/h pitches the nose to −15° within 2 s of the take — which the user may call a lurch, and
+     which lands on top of the take's known wobble. Either the take keeps a gentler speed
+     transition or the brisk profile applies there too; only the user can say (Q2).
+   - **(b) Plan section D:** the pitch target is a half feed-forward (`c_theta = 0.5`) plus a trim
+     loop deliberately "several seconds" slow, the stability argument of the law, and BL-16's
+     *"feedback, not a model… applied incrementally and smoothly"*. The observed −8° and 60 s are
+     what that produces. E14's −15° in 1–2 s cannot come from a several-second trim loop; it needs
+     the pitch to be reached promptly. The user's own rule reconciles this with decision 5 and
+     "feedback, not a model": **many small corrections at a fast cadence** is still incremental
+     feedback, and **no overshoot on the approach** (the settle from ~230) is still the S-curve. What
+     changes is the *onset*: fast. So decision 5 does not conflict with "aggressive, 20 s" — it
+     governs the approach, not the start — but the plan's "slow trim" premise does, and the
+     Architect should say so explicitly rather than retune around it.
+   - **Grounded in:** `plan.md` I and D; `BL-16.md` decision 5 and the lift-vector "feedback, not
+     a model" line; feedback answers 1 and 3; `flight_profile.lua` values above.
+
+5. **Vignette: handover while the player is rolling out.** Lens: the non-obvious case.
+   - **Situation:** the player is rolling out of a turn onto a heading, passing 12° bank, and says
+     "you have controls" so as to look at the sight.
+   - **By the rule:** 12° ≥ 5°, so Petrovich holds 12° and keeps circling, away from the heading the
+     player was rolling out on, until told "stop turn".
+   - **The pilot would see:** a slow, unexpected circle while their eyes are in the sight.
+   - **Grounded in:** the rule as stated; the agent's own reading of what a pilot means by handing
+     over mid-roll-out — so this is a question (Q4), not a finding against the rule.
+
+### Questions for the user
+
+1. Accelerating, you put in "lots more collective… all in 1–2 s"; you also said large collective
+   increases need to be gentle (~5 s at the end of a deceleration). Is the acceleration entry an
+   exception — engines already at cruise power — or should that increase also be spread out?
+2. A take with a speed gap (mode 2 → mode 1, desired 200 while flying 150): fly the brisk speed
+   change straight away, or a gentler one because it is a handover? (Plan I currently says gentle.)
+3. After a take in a bank, does a speed or altitude command end the held turn, or only a heading
+   command, "stop turn" or "level flight"? And does the held turn hold height and speed?
+   (Recommend: only heading-type commands end it; height and speed held.)
+4. If you hand over while rolling out of a turn (bank passing ~12°, coming level), should he keep
+   circling at 12° per the 5° rule, or finish the roll-out? (Recommend: keep the rule as stated —
+   "stop turn" is one phrase — unless this is a handover you make often.)
+5. "Pedals move more slowly in Mi-24 anyhow": do you mean the aircraft's yaw response is slow, so
+   Petrovich's pedal corrections should be **faster** than now? (Recommend: yes, per rows 4 and 7.)
