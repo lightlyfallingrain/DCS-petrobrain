@@ -47,4 +47,33 @@ Asked whether the pedals moved after the take, and which way:
 Left pedal is what moves the ball right (2026-11-20 calibration), so this supports hypothesis 1:
 the ball loop is driving the pedal away from centring.
 
+## Re-fly after the pedal-sign flip (same day, 7f362fa4 + card)
+
+User's words, verbatim:
+
+> Actually, it's worse now, even more left pedal at takeover
+
+> the pedal write is definetely reversed now, so apparently it was not before
+
+Logs: `logs-2026-11-24/refly_flight_trace.log` (law internals now present; this flight starts at
+the line whose `t=0.000` carries `mode=off phi_d=nil`) and `refly_debug.log`. Take t=24.97 (off→m1,
+~135 km/h level), release t=34.98.
+
+Main loop's read of the law trace:
+- **The commanded pedal does not jump at the take**: `out_pedals` −0.302 at t=25.05, −0.295 at
+  25.4, −0.28 at 25.7 — smooth, small. Yet **yaw rate goes −0.5 → −9 °/s within 0.8 s of the
+  take** (heading decreasing, nose left), before the law's pedal changed by more than 0.03. Flight 1
+  shows the same kick (−0.05 → −5.9 °/s within 1 s). Something at the take itself moves the
+  aircraft, which no gain sign can cause — candidates: the actual pedal position is not where the
+  captured value says (capture/write mismatch, i.e. a mirror at the take), or the hardware pedal
+  and `LoSetCommand` combine.
+- After that, the law ran right-pedal per its new convention: `t_y` to its −0.5 limit plus the
+  turn-coordination term −0.33 (heading-hold asked +16 °/s right), `out_pedals` −0.83. The user saw
+  heavy **left** pedal. So a negative command is physically left — the debugger's flip was wrong,
+  matching the user's statement.
+- Sideslip reached 67°, ball +0.65. Collective drove steadily down from 0.106 to −0.01 (u_c_rate
+  −0.05/s) from the take until it stopped — not yet explained.
+- The trace still lacks the **actual** axis args (1100–1103) next to the commands, so the take
+  mismatch cannot be confirmed from the logs.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
