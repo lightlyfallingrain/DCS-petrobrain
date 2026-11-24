@@ -237,6 +237,18 @@ User's report, verbatim (columns: sim time, arg 943 pilot, arg 784 operator, `Lo
   The ball-centring term's actual sign is `pedal_dot = -K_beta * (ball - ball_centre)`
   (`k_ball_pedal = -0.3` in `flight_profile.lua`, corrected along with the collective→pedal
   feed-forward's `rotor_dir` and the turn-coordination nudge, which shared the same assumption).
+
+  **Correction to the correction, 2026-11-24, after the re-fly** (`plans/flight-lift-vector/
+  debug-2026-11-24b.md`): the correction above is itself wrong, and the original statement stands
+  — **positive pedal command = RIGHT**, and the ball-centring term is
+  `pedal_dot = +K_beta * (ball - ball_centre)` (`k_ball_pedal = +0.3`). With the flip applied, the
+  re-fly drove the command from −0.30 to −0.83 while the user saw heavy **left** pedal and said
+  *"the pedal write is definetely reversed now, so apparently it was not before."* The "lots of
+  left pedal" in the first flight was not this loop: the pedal moves left at the instant of the
+  take, before the law changes its output (user, same day: *"There is an immediate pedal movement
+  to left. It does not hold, what player was holding, but moves immediately."*), on all four takes
+  logged that day under both sign conventions. The weak arg-1103-vs-yaw-rate correlation above was
+  never the evidence for the convention; the re-fly is.
 - **Not a fixed mapping:** the slip per unit of pedal depends on airspeed (user). The pedal law must
   centre the ball by feedback (integrating until centred, possibly gain-scheduled by IAS), not by a
   pedal-from-ball map. That matches the lift-vector law's "steer by observation" direction

@@ -219,44 +219,33 @@ M.PROFILES["Mi-24P"] = {
     -- (K_beta) is the ball-centring integrator gain; `k_pedal_from_
     -- collective_rate` (reused from LV-0, unchanged role) is the
     -- torque feed-forward, `rotor_dir` giving its sign ("more
-    -- collective -> more right pedal on the Mi-24P" is now `rotor_dir =
-    -- -1`, corrected below -- the physical claim itself remains
-    -- unproven, see `plans/flight-lift-vector/debug-2026-11-24.md`
-    -- "What remains unproven"); `k_turn_coord_pedal` is now a feed-forward
+    -- collective -> more right pedal on the Mi-24P" -- user, 2026-11-20
+    -- -- is `rotor_dir = +1`); `k_turn_coord_pedal` is a feed-forward
     -- nudge toward the turn at turn entry (same formula LV-0 had,
     -- reframed per F: its only job is to help the ball-centring
     -- integrator catch up, not to hold a deliberate ball offset --
     -- `K_BREAK_PEDAL_BIAS` and its own unwind bookkeeping are gone
     -- entirely, U5).
     --
-    -- **Corrected 2026-11-24** (`plans/flight-lift-vector/
-    -- debug-2026-11-24.md`): the three gains below were all picked
-    -- under "positive pedal command = right"
-    -- (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-
-    -- findings.md`'s own weak +0.23..+0.40 arg-vs-yaw-rate correlation,
-    -- flown hands-on-cyclic in cruise, never an isolated pedal test).
-    -- The 2026-11-24 sortie flew this term for the first time (LV-0 had
-    -- no `k_ball_pedal` at all) and the pilot directly observed "lots
-    -- of left pedal" while the trace's own `ball` ran away to +0.56 --
-    -- left pedal moves the ball *right* (2026-11-20 calibration
-    -- flight, direct and solid), so a ball error that is growing
-    -- *right* was being met with *more left pedal*: positive feedback,
-    -- not the intended "step on the ball". **Positive pedal command is
-    -- therefore physically LEFT, not right** -- every gain in this
-    -- section that assumed the opposite is flipped; `SIGN.pedals` in
-    -- `flight_control.lua` (command = -arg, M0-B, measured twice by a
-    -- direct write test) is untouched, since that part was never in
-    -- question.
-    k_ball_pedal = -0.3,
+    -- **Sign convention: positive pedal command = RIGHT pedal.** The
+    -- first 2026-11-24 debug pass flipped all three gains to "positive
+    -- = left"; the re-fly the same day showed that flip was wrong
+    -- (user: "the pedal write is definetely reversed now, so apparently
+    -- it was not before" -- the trace drove the command to -0.83 while
+    -- the user saw heavy LEFT pedal), so it is reverted here
+    -- (`plans/flight-lift-vector/debug-2026-11-24b.md`). The left pedal
+    -- the first pass blamed on this loop came from the take itself: the
+    -- pedal moves left at the instant of the take, before the law has
+    -- changed its output (same debug report, question 1).
+    k_ball_pedal = 0.3,
     k_pedal_from_collective_rate = 0.25,
-    rotor_dir = -1.0,
-    k_turn_coord_pedal = -0.02,
+    rotor_dir = 1.0,
+    k_turn_coord_pedal = 0.02,
     -- Right pedal is the scarce side (user: "not much right rudder
-    -- left"), which is now the *negative* command side (corrected
-    -- 2026-11-24, same as above) -- the tight 0.5 bound moves from
-    -- `pedal_limit_positive` to `pedal_limit_negative`.
-    pedal_limit_positive = 1.0,
-    pedal_limit_negative = -0.5,
+    -- left") -- the positive command side, so the tight bound is
+    -- `pedal_limit_positive`.
+    pedal_limit_positive = 0.5,
+    pedal_limit_negative = -1.0,
 
     -- Below this residual turn rate (deg/s), a turn-mode roll-out
     -- counts as "settled" and the law switches internally to heading

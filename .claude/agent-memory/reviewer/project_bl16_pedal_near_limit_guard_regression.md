@@ -8,7 +8,12 @@ metadata:
 Reviewed `844213f1` (fix) + `d0b4d6cc` (debugger memory) on `feature/bl16-lift-vector-law`,
 on top of `74c1060b`. Full review in `plans/flight-lift-vector/review-debug-1124.md`.
 
-**The pedal-sign diagnosis and fix are correct and well-evidenced**: "positive pedal command is
+**Superseded 2026-11-24 (debugger second pass, `plans/flight-lift-vector/debug-2026-11-24b.md`):
+the sign flip approved below was wrong and is reverted -- positive pedal command = RIGHT.** The
+"lots of left pedal" came from the take itself, not the loop; the re-fly showed the flip backwards.
+The guard fix (side derived from the coefficient's sign) survives and now selects the positive side.
+
+**The pedal-sign diagnosis and fix are correct and well-evidenced** (as judged then): "positive pedal command is
 physically LEFT" rests on two genuinely independent facts (the 2026-11-20 calibration's solid,
 isolated-input measurement, and the sortie's direct pilot observation), and the new
 `TestBallCentringPedalSign` toy-plant test is grounded in that same calibration fact rather than

@@ -1940,13 +1940,14 @@ end
 
 -- Read-only mirror of `ai_pilot_player_seat` -- `"pilot"`/`"operator"`/
 -- `nil` (unknown this mission). Never gates whether mode 1 may run
--- (Decision 25). **No longer read by `flight_control.lua`'s own
--- capture-source rule** -- M0-J (flight 9) found the camera seat is not
--- the live-controls seat (the operator set can read zero while the
--- player sits there, before requesting control); `flight_control.lua`
--- resolves the live seat from the arg sets themselves instead
--- (`aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`,
--- "Flight 9"). Kept for diagnostics/other callers.
+-- (Decision 25). **Read again by `flight_control.lua`'s voice-take
+-- capture** (user rule 2026-11-24, `plans/flight-lift-vector/debug-
+-- 2026-11-24b.md`: read the controls of the seat the player is in) --
+-- first choice whenever that seat's arg set reads live; M0-J's (flight
+-- 9) finding that the camera seat can read an all-zero set before the
+-- player requests control is why an idle player's seat still falls back
+-- to the live-set rule (`aircraft-layer/research/2026-11-18-bl16-m0-
+-- flight-axes-findings.md`, "Flight 9").
 local function player_seat()
     return ai_pilot_player_seat
 end

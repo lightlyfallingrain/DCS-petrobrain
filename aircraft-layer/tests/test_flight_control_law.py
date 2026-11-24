@@ -133,17 +133,15 @@ local PROFILE = {
     k_phi = 0.03,
     k_phi_i = 0.015,
     k_p = 0.01,
-    -- Corrected 2026-11-24 (`plans/flight-lift-vector/
-    -- debug-2026-11-24.md`): positive pedal command is physically
-    -- LEFT, not right -- all three signs below flipped from the
-    -- "positive = right" assumption, and the two limit magnitudes
-    -- swapped to match.
-    k_ball_pedal = -0.3,
+    -- Positive pedal command = RIGHT pedal (`plans/flight-lift-vector/
+    -- debug-2026-11-24b.md` reverted the first 2026-11-24 pass's flip,
+    -- which the re-fly showed backwards) -- mirrors `flight_profile.lua`.
+    k_ball_pedal = 0.3,
     k_pedal_from_collective_rate = 0.25,
-    rotor_dir = -1.0,
-    k_turn_coord_pedal = -0.02,
-    pedal_limit_positive = 1.0,
-    pedal_limit_negative = -0.5,
+    rotor_dir = 1.0,
+    k_turn_coord_pedal = 0.02,
+    pedal_limit_positive = 0.5,
+    pedal_limit_negative = -1.0,
     pedal_near_limit_margin = 0.1,
     collective_rate_cap_near_pedal_limit = 0.3,
     rotor_rpm_near_floor_margin_pct = 5.0,
@@ -781,8 +779,28 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
         lines = _run(driver)
         # COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR = 0.0 -- a rising c_dot is
         # capped to zero (no further increase) once within 5 pct of
-        # ROTOR_RPM_FLOOR_PCT (85.0), i.e. at or below 90.0.
+        # ROTOR_RPM_FLOOR_PCT (85.0), i.e. strictly below 90.0.
         assert float(lines[0]) <= 1e-9
+
+    def test_the_shipped_dummy_rpm_reading_lets_collective_rise(self) -> None:
+        """`plans/flight-lift-vector/debug-2026-11-24b.md`, question 3:
+        the shipped `ROTOR_RPM_SOURCE = "dummy"` reading (90) sat exactly
+        on floor + margin (85 + 5) and, with `<=`, capped every rising
+        collective to zero -- the 2026-11-24 re-fly sank at 6 m/s with
+        collective frozen. Reads the dummy from the real module, so a
+        later change to the dummy or the margin that re-creates the
+        lockout fails here."""
+        driver = f"""
+local rpm = flight_control.read_rotor_rpm_pct()
+local measured = {_measured(h_m=100.0, w_mps=-5.0)}
+measured.rotor_rpm_pct = rpm
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state.alt_goal_m = 1000.0
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) > 1e-3
 
     def test_a_falling_collective_is_untouched_by_the_rpm_floor(self) -> None:
         driver = f"""
@@ -1222,7 +1240,7 @@ class TestTurnCoordinationPedal:
         assert float(max_pedal) == 0.0
         assert float(pedal_after) == 0.0
 
-    def test_right_turn_pulls_negative_pedal_while_turning(self) -> None:
+    def test_right_turn_pulls_positive_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
             goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 90.0 }, LIMITS, PROFILE)",
@@ -1231,17 +1249,16 @@ class TestTurnCoordinationPedal:
         lines = _run(driver)
         pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
         assert float(pedal_before) == 0.0
-        # Sign corrected 2026-11-24 (`plans/flight-lift-vector/
-        # debug-2026-11-24.md`): positive pedal command is physically
-        # LEFT, not right -- a right turn (`r_d > 0`) now pulls
-        # negative command (physically right pedal).
-        assert float(min_pedal) < -0.05
-        assert float(max_pedal) == 0.0  # never crosses the other way
+        # Positive pedal command = right pedal
+        # (`plans/flight-lift-vector/debug-2026-11-24b.md`): a right
+        # turn (`r_d > 0`) pulls positive (right) pedal.
+        assert float(max_pedal) > 0.05
+        assert float(min_pedal) == 0.0  # never crosses the other way
         # Unwinds: once settled, back to exactly the pre-turn value.
         assert in_band == "true"
         assert float(pedal_after) == 0.0
 
-    def test_left_turn_pulls_positive_pedal_while_turning(self) -> None:
+    def test_left_turn_pulls_negative_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
             goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 270.0 }, LIMITS, PROFILE)",
@@ -1250,10 +1267,9 @@ class TestTurnCoordinationPedal:
         lines = _run(driver)
         pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
         assert float(pedal_before) == 0.0
-        # Sign corrected 2026-11-24 -- a left turn now pulls positive
-        # command (physically left pedal).
-        assert float(max_pedal) > 0.05
-        assert float(min_pedal) == 0.0
+        # A left turn pulls negative (left) pedal.
+        assert float(min_pedal) < -0.05
+        assert float(max_pedal) == 0.0
         assert in_band == "true"
         assert float(pedal_after) == 0.0
 
@@ -1282,10 +1298,10 @@ print(tostring(state.rate_override_deg_s))
         turn_coord_pedal, rate_override = lines
         # The break is active (`rate_override_deg_s` is set) and the
         # nudge is nonzero anyway -- no suppression condition exists in
-        # LV-1 any more. Sign corrected 2026-11-24: a right turn (as
-        # here, heading 90 from 0) now pulls negative command.
+        # LV-1 any more. A right turn (as here, heading 90 from 0)
+        # pulls positive (right) pedal.
         assert rate_override != "nil"
-        assert float(turn_coord_pedal) < 0.0
+        assert float(turn_coord_pedal) > 0.0
 
 
 #: Toy-plant driver for the ball-centring pedal loop (section F,
@@ -1298,7 +1314,8 @@ print(tostring(state.rate_override_deg_s))
 #: `d_t_y` identically `0.0` -- the loop's sign was simply never
 #: exercised). The toy plant links the pedal *command* back to the
 #: ball the same way the real aircraft does (2026-11-20 calibration
-#: flight, direct and solid: left pedal moves the ball right) --
+#: flight, direct and solid: left pedal moves the ball right, so with
+#: positive command = right pedal, `K_PHYS` is negative) --
 #: `ball_target = ball_centre + K_PHYS * pedal_command`, first-order
 #: toward that target each step -- so a wrong-signed gain diverges
 #: instead of centring, exactly the 2026-11-24 sortie's own shape
@@ -1309,7 +1326,7 @@ local measured_take = {measured_take}
 local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
 local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
 local ball = {ball_start}
-local K_PHYS = 0.4
+local K_PHYS = -0.4
 local m
 local max_abs_err = 0.0
 for i = 1, 300 do
@@ -1334,16 +1351,14 @@ class TestBallCentringPedalSign:
     `plans/flight-lift-vector/debug-2026-11-24.md`): "take into a held
     heading" diverged immediately -- the slip ball ran monotonically from
     -0.03 to +0.56 over 8 s while the pilot directly observed "lots of
-    left pedal", and left pedal is confirmed (2026-11-20 calibration) to
-    move the ball *right* -- a positive-feedback loop, not the intended
-    "step on the ball". Root cause: `k_ball_pedal`/`k_pedal_from_
-    collective_rate`*`rotor_dir`/`k_turn_coord_pedal` were all signed
-    under "positive pedal command = right", which the sortie's own
-    directly-observed pedal direction contradicts -- all three flipped
-    in `flight_profile.lua`. These tests drive the closed loop against a
-    toy plant built from the (solid, directly measured) ball/pedal
-    relationship and would fail -- diverge instead of centre -- under
-    the pre-fix sign."""
+    left pedal". The first debug pass read that as this loop's sign
+    being backward and flipped it; the re-fly showed the flip wrong
+    (`plans/flight-lift-vector/debug-2026-11-24b.md`: the left pedal
+    comes from the take itself, and positive command = right pedal).
+    These tests drive the closed loop against a toy plant built from
+    the solid ball/pedal relationship (left pedal moves the ball right)
+    under positive command = right pedal, and diverge under the
+    opposite sign."""
 
     def test_ball_right_of_centre_is_driven_back_to_centre(self) -> None:
         driver = _BALL_CENTRING_DRIVER.format(
@@ -1374,14 +1389,13 @@ class TestCollectiveRateCapNearPedalLimit:
     (`plans/flight-lift-vector/review-debug-1124.md`): the collective-
     near-pedal-limit guard in `law_update` must cap a rising collective
     (`u_c_rate > 0.0`) near the side a collective increase actually
-    pushes `t_y` toward, not a hard-coded limit name. Post the
-    2026-11-24 pedal-sign fix, `k_pedal_from_collective_rate *
-    rotor_dir` is negative, so that side is now `pedal_limit_negative`
-    (the scarce, right-pedal side) -- before this fix the guard still
-    checked `pedal_limit_positive` (now the abundant, left-pedal side)
-    and so neither capped the scarce side nor left the abundant one
-    alone. `t_y` values mirror the review's own mutation
-    (`-0.42`/`0.92`); `h_m`/`alt_goal_m` mirror `TestRotorEnvelopeGuards
+    pushes `t_y` toward, not a hard-coded limit name. With positive
+    command = right pedal (`debug-2026-11-24b.md`), `k_pedal_from_
+    collective_rate * rotor_dir` is positive, so that side is
+    `pedal_limit_positive` (the scarce, right-pedal side); the abundant
+    left side (`pedal_limit_negative`) is never capped. `t_y` values
+    mirror the review's own mutation, on the reverted sign
+    (`0.42`/`-0.92`); `h_m`/`alt_goal_m` mirror `TestRotorEnvelopeGuards
     .test_well_clear_of_both_guards_collective_rises_freely` so only
     the pedal guard is ever in question here, with `w_mps` widened
     (-5.0 -> -10.0) only to confirm first that this scenario's own
@@ -1391,33 +1405,32 @@ class TestCollectiveRateCapNearPedalLimit:
     regardless of the guard, so a reading at or below 0.3 there would
     prove nothing."""
 
-    def test_caps_a_rising_collective_near_the_scarce_negative_limit(
+    def test_caps_a_rising_collective_near_the_scarce_positive_limit(
         self,
     ) -> None:
         driver = f"""
 local measured = {_measured(h_m=100.0, w_mps=-10.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
--- Within PEDAL_NEAR_LIMIT_MARGIN (0.1) of PEDAL_LIMIT_NEGATIVE (-0.5),
--- the scarce side (review's own mutation value).
-state.t_y = -0.42
+-- Within PEDAL_NEAR_LIMIT_MARGIN (0.1) of PEDAL_LIMIT_POSITIVE (0.5),
+-- the scarce (right-pedal) side.
+state.t_y = 0.42
 local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", next_state.dbg_u_c_rate))
 """
         lines = _run(driver)
         assert float(lines[0]) <= 0.3 + 1e-6
 
-    def test_does_not_cap_a_rising_collective_near_the_generous_positive_limit(
+    def test_does_not_cap_a_rising_collective_near_the_generous_negative_limit(
         self,
     ) -> None:
         driver = f"""
 local measured = {_measured(h_m=100.0, w_mps=-10.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
--- Near PEDAL_LIMIT_POSITIVE (1.0), the abundant side a rising
--- collective never pushes `t_y` toward any more (review's own
--- mutation value).
-state.t_y = 0.92
+-- Near PEDAL_LIMIT_NEGATIVE (-1.0), the abundant (left-pedal) side
+-- a rising collective never pushes `t_y` toward.
+state.t_y = -0.92
 local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
 print(string.format("%.6f", next_state.dbg_u_c_rate))
 """

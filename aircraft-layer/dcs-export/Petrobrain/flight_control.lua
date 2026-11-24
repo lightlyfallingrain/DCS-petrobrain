@@ -60,6 +60,13 @@ fully stowed, tracked continuously while `armed`, since the two arg
 sets have already begun a ~1.5 s cross-fade by the time `is_parked()`'s
 own edge fires.
 
+**Revised 2026-11-24 (user rule, `plans/flight-lift-vector/debug-2026-
+11-24b.md`): "controls must be read and written from which ever seat
+player is in".** A voice take now reads the player's own seat
+(`ai_pilot_wheel.player_seat`) first whenever that seat's set reads
+live; the live-set rule above is only the fallback, for an unknown seat
+or a player's seat that reads idle (M0-J's explicit-handover state).
+
 **The Mi-24P arg/cmd/sign table below is partly measured, partly still
 unverified.** 1100-1103/1110-1113 are read-only cockpit animation args
 (not a write channel); `LoSetCommand` 2001/2002/2003/2087 are the real
@@ -836,8 +843,14 @@ local function law_update(state, dt, measured, limits, profile)
         c_dot_nominal = c_dot_nominal - profile.k_collective_speed_give * math.abs(a_f_d)
     end
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
+    -- Strictly below floor + margin (`plans/flight-lift-vector/debug-
+    -- 2026-11-24b.md`, question 3): with `<=`, the shipped dummy reading
+    -- (`ROTOR_RPM_DUMMY_PCT` = 90) sat exactly on 85 + 5 and tripped this
+    -- guard on every frame -- with `collective_rate_cap_near_rpm_floor`
+    -- = 0, collective could never rise in mode 1, and the 2026-11-24
+    -- re-fly sank at 6 m/s with collective frozen and `a_u_d` = +3.
     local rotor_rpm_limited = measured.rotor_rpm_pct
-        <= (limits.rotor_rpm_floor_pct + profile.rotor_rpm_near_floor_margin_pct)
+        < (limits.rotor_rpm_floor_pct + profile.rotor_rpm_near_floor_margin_pct)
     local blade_stall_limited = ias_kmh
         >= (limits.retreating_blade_stall_ias_kmh - profile.retreating_blade_stall_margin_kmh)
     -- The feed-forward (`u_c_ff`, recomputed fresh from the desired
@@ -970,10 +983,9 @@ local function law_update(state, dt, measured, limits, profile)
     -- extra pedal in a turn or break (U5 reverted, `K_BREAK_PEDAL_BIAS`
     -- and its own unwind bookkeeping are gone entirely). `profile.
     -- k_ball_pedal`/`k_pedal_from_collective_rate`*`rotor_dir`/`k_turn_
-    -- coord_pedal` carry the command-domain sign (corrected 2026-11-24,
-    -- `plans/flight-lift-vector/debug-2026-11-24.md`: positive pedal
-    -- command is physically LEFT, not right) -- this formula itself is
-    -- unchanged, only the gains' signs are.
+    -- coord_pedal` carry the command-domain sign: positive pedal
+    -- command = RIGHT pedal (`plans/flight-lift-vector/debug-2026-11-
+    -- 24b.md`, which reverted the first 2026-11-24 pass's flip).
     local ball = measured.ball or profile.ball_centre
     local d_t_y = profile.k_ball_pedal * (ball - profile.ball_centre)
     -- Torque feed-forward: only meaningful while the collective axis is
@@ -1149,6 +1161,10 @@ local fc_reset_epoch = nil
 
 -- The frozen, captured raw per-axis values (`fc_captured.pitch` etc).
 local fc_captured = {}
+-- Which capture branch produced `fc_captured` (`resolve_capture_values`'
+-- own `source`, or the unpark path's) -- diagnostic only, read by the
+-- take's own trace-gated debug line (`debug-2026-11-24b.md`, question 4).
+local fc_capture_source = nil
 
 -- M0-J (flight 9) capture fixes -- never consulted as an active control
 -- source, only snapshotted at a take.
@@ -1182,6 +1198,23 @@ local fc_last_command = nil
 local function read_axis(seat, axis)
     local arg = SEAT_ARGS[seat][axis]
     return safe_call(function() return GetDevice(0):get_argument_value(arg) end)
+end
+
+-- Testing aid (`plans/flight-lift-vector/debug-2026-11-24b.md`, question
+-- 4): the actual cockpit axis args of both seats, as trace text -- the
+-- flight trace showed only the *commanded* values, so a pedal that went
+-- somewhere other than where the command says could not be seen. Read
+-- only when the flight-trace flag is on; never consulted by the law.
+local function trace_axis_args()
+    local parts = {}
+    for _, seat in ipairs({ "pilot", "operator" }) do
+        for _, axis in ipairs({ "pitch", "roll", "collective", "pedals" }) do
+            local v = read_axis(seat, axis)
+            parts[#parts + 1] = "a" .. SEAT_ARGS[seat][axis] .. "="
+                .. ((type(v) == "number") and string.format("%.4f", v) or "nil")
+        end
+    end
+    return table.concat(parts, " ")
 end
 
 -- Sum of |value| across every *enabled* axis for one seat -- the "which
@@ -1246,27 +1279,43 @@ end
 -- current, partly-faded values; if neither has ever been steady, falls
 -- back to the higher-magnitude seat (the old Decision-25 default) so a
 -- take is never refused outright on this account.
+--
+-- **The player's own seat comes first** (user rule, 2026-11-24, `plans/
+-- flight-lift-vector/debug-2026-11-24b.md`: "controls must be read and
+-- written from which ever seat player is in"). When `ai_pilot_wheel.
+-- player_seat()` knows the seat and that seat's set reads live, it is
+-- captured fresh on this frame -- never the other seat, never the last-
+-- steady snapshot. The rule above is now only the fallback, for an
+-- unknown seat or a player's seat that reads idle (M0-J's explicit-
+-- handover state: the player sits there without having requested
+-- control, so that set holds no inputs and capturing it would write
+-- zeros -- the J1 incident). Returns `values, source`; `source` names
+-- the branch taken, for the take's own debug line.
 local function resolve_capture_values()
+    local seat = nil
+    if ai_pilot_wheel ~= nil and ai_pilot_wheel.player_seat ~= nil then
+        seat = safe_call(ai_pilot_wheel.player_seat)
+    end
+    if (seat == "pilot" or seat == "operator") and axis_magnitude(seat) > LIVE_SEAT_ZERO_EPS then
+        return capture_from_seat(seat), "player_seat_" .. seat
+    end
     local mag_pilot = axis_magnitude("pilot")
     local mag_operator = axis_magnitude("operator")
     local pilot_live = mag_pilot > LIVE_SEAT_ZERO_EPS
     local operator_live = mag_operator > LIVE_SEAT_ZERO_EPS
     if pilot_live and not operator_live then
-        return capture_from_seat("pilot")
+        return capture_from_seat("pilot"), "live_pilot"
     end
     if operator_live and not pilot_live then
-        return capture_from_seat("operator")
-    end
-    if pilot_live and operator_live and fc_last_steady_values ~= nil then
-        return fc_last_steady_values
+        return capture_from_seat("operator"), "live_operator"
     end
     if fc_last_steady_values ~= nil then
-        return fc_last_steady_values
+        return fc_last_steady_values, "last_steady"
     end
     if mag_operator > mag_pilot then
-        return capture_from_seat("operator")
+        return capture_from_seat("operator"), "larger_operator"
     end
-    return capture_from_seat("pilot")
+    return capture_from_seat("pilot"), "larger_pilot"
 end
 
 -- Decision 1 REVISED/24's takeover-mode pick, snapshotted once at take
@@ -2434,6 +2483,25 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
         -- parts stamped after this take's own seq.
         local seed, desired_at_take = build_take_seed(measured.psi_deg)
         fc_law = law_init_at_take(measured, fc_limits, command, seed, flight_profile.ACTIVE)
+        -- Testing aid (`debug-2026-11-24b.md`, question 4): one line per
+        -- take -- which seat the player is in, which capture branch ran,
+        -- what it captured, the command written, and both seats' raw args
+        -- on this frame. Same flag as the flight trace.
+        if FLIGHT_TRACE_ENABLED then
+            local seat = nil
+            if ai_pilot_wheel ~= nil and ai_pilot_wheel.player_seat ~= nil then
+                seat = safe_call(ai_pilot_wheel.player_seat)
+            end
+            debug_log(string.format(
+                "flight take t=%.3f origin=%s player_seat=%s source=%s "
+                .. "captured p=%s r=%s c=%s y=%s command p=%s r=%s c=%s y=%s args %s",
+                t, tostring(fc_take_origin), tostring(seat), tostring(fc_capture_source),
+                tostring(fc_captured.pitch), tostring(fc_captured.roll),
+                tostring(fc_captured.collective), tostring(fc_captured.pedals),
+                tostring(command.pitch), tostring(command.roll),
+                tostring(command.collective), tostring(command.pedals),
+                trace_axis_args()))
+        end
         -- The take frame seeds `fc_law` directly and never calls `law_
         -- update` (bit-exact-at-take) -- the first ordinary frame after
         -- this one must see "due immediately", never a stale time left
@@ -2597,7 +2665,8 @@ local function run_flight_control(t)
         local raw = read_estimator_raw(t, flight_profile_active.velocity_source)
         local ran = est_sample(fc_est, t, raw, flight_profile_active)
         if ran and FLIGHT_TRACE_ENABLED then
-            flight_trace_log(format_trace_line(t, fc_est, raw, fc_law, fc_mode, fc_last_command))
+            flight_trace_log(format_trace_line(t, fc_est, raw, fc_law, fc_mode, fc_last_command)
+                .. " " .. trace_axis_args())
         end
         fc_debug_estimator_sample_count = fc_debug_estimator_sample_count + 1
     end
@@ -2732,8 +2801,10 @@ local function run_flight_control(t)
         -- was entered and exited again before any frame ever reached
         -- the threshold (should not happen outside a test harness).
         local values = fc_last_stowed_pilot_capture
+        fc_capture_source = "stowed_pilot"
         if values == nil then
             values = capture_from_seat("pilot")
+            fc_capture_source = "fresh_pilot"
         end
         fc_last_stowed_pilot_capture = nil
         if values == nil then
@@ -2762,12 +2833,13 @@ local function run_flight_control(t)
     end
 
     if fc_mode == "taking" then
-        local values = resolve_capture_values()
+        local values, source = resolve_capture_values()
         if values == nil then
             -- else: stays "taking", retries next frame.
             return
         end
         fc_captured = values
+        fc_capture_source = source
         fc_mode = "active"
         fc_take_seq = fc_pending_take_seq
         fc_pending_take_seq = nil

@@ -245,15 +245,14 @@ flight_profile = {
         k_phi = 0.03,
         k_phi_i = 0.015,
         k_p = 0.01,
-        -- Corrected 2026-11-24 (`plans/flight-lift-vector/
-        -- debug-2026-11-24.md`): positive pedal command is physically
-        -- LEFT, not right -- mirrors `flight_profile.lua`.
-        k_ball_pedal = -0.3,
+        -- Positive pedal command = RIGHT pedal (`plans/flight-lift-
+        -- vector/debug-2026-11-24b.md`) -- mirrors `flight_profile.lua`.
+        k_ball_pedal = 0.3,
         k_pedal_from_collective_rate = 0.25,
-        rotor_dir = -1.0,
-        k_turn_coord_pedal = -0.02,
-        pedal_limit_positive = 1.0,
-        pedal_limit_negative = -0.5,
+        rotor_dir = 1.0,
+        k_turn_coord_pedal = 0.02,
+        pedal_limit_positive = 0.5,
+        pedal_limit_negative = -1.0,
         pedal_near_limit_margin = 0.1,
         collective_rate_cap_near_pedal_limit = 0.3,
         rotor_rpm_near_floor_margin_pct = 5.0,
@@ -402,7 +401,12 @@ end
 """
 
 
-def _run(driver: str, *, rotor_rpm_source: str | None = None) -> list[str]:
+def _run(
+    driver: str,
+    *,
+    rotor_rpm_source: str | None = None,
+    patches: dict[str, str] | None = None,
+) -> list[str]:
     """Assembles core-helper extraction + the mock preamble + the whole
     of `flight_control.lua` (wrapped as an immediately-invoked function
     expression so its own `return M` becomes this expression's value)
@@ -429,6 +433,12 @@ def _run(driver: str, *, rotor_rpm_source: str | None = None) -> list[str]:
         module_source = module_source.replace(
             needle, f'local ROTOR_RPM_SOURCE = "{rotor_rpm_source}"'
         )
+    # `patches`: further exact source-text substitutions, each asserted
+    # present so a renamed line fails loudly instead of silently testing
+    # the unpatched module.
+    for needle, replacement in (patches or {}).items():
+        assert needle in module_source, f"patch target moved/renamed: {needle!r}"
+        module_source = module_source.replace(needle, replacement)
     script = (
         _PREAMBLE
         + "\n"
@@ -1077,33 +1087,95 @@ print(string.format("%.6f", written[2001]))
         # the camera happened to be in.
         assert abs(float(pitch_written) - 0.229) <= 0.0011
 
-    def test_a_cross_fade_at_the_moment_of_take_uses_the_last_steady_set(self) -> None:
-        """Both seats read live at once (a cross-fade in progress) --
-        uses the last frame exactly one of them was live, not either
-        set's own partly-faded current value."""
+    def test_both_seats_live_captures_the_players_own_seat_not_a_snapshot(
+        self,
+    ) -> None:
+        """User rule, 2026-11-24 (`plans/flight-lift-vector/debug-2026-
+        11-24b.md`): "controls must be read and written from which ever
+        seat player is in". Replaces the M0-J test that preferred the
+        last-steady snapshot when both seats read live: with the
+        player's seat known and live, its own current values are
+        captured, never an older snapshot and never the other seat."""
         driver = """
 pilot_args.pitch = 0.3
+pilot_args.pedals = 0.0
 operator_args.pitch = 0.0
 ap_seat = "pilot"
 ap_parked = false
--- A steady frame: only the pilot set is live. Tracked.
+-- A steady frame: only the pilot set is live. Snapshot tracked.
 flight_control.run_flight_control(0.0)
--- Now both read live at once (the fade in progress) and the take lands
--- on this very frame.
+-- Now both read live and the player's (pilot) pedals have moved since
+-- the snapshot; the take lands on this frame.
 pilot_args.pitch = 0.15
+pilot_args.pedals = 0.3
 operator_args.pitch = 0.2
+operator_args.pedals = 0.1
 flight_control.request_take(1, 0.1)
 flight_control.run_flight_control(0.1)
 flight_control.push_flight_control_state(0.1)
 print(sent_lines[#sent_lines])
 print(string.format("%.6f", written[2001]))
+print(string.format("%.6f", written[2003]))
 """
         lines = _run(driver)
-        status_line, pitch_written = lines[0], lines[1]
+        status_line, pitch_written, pedal_written = lines[0], lines[1], lines[2]
         assert _field(status_line, "fc_mode") == "active"
-        # The last steady pilot value (0.3), neither of this frame's
-        # own partly-faded reads (0.15/0.2).
-        assert abs(float(pitch_written) - 0.3) <= 0.0011
+        # The pilot set as it reads now (0.15 / 0.3), not the snapshot
+        # (0.3 / 0.0) and not the operator set (0.2 / 0.1).
+        assert abs(float(pitch_written) - 0.15) <= 0.0011
+        # Pedal command = SIGN.pedals (-1) * captured arg.
+        assert abs(float(pedal_written) - (-0.3)) <= 0.0011
+
+    def test_player_in_operator_seat_with_live_controls_captures_the_operator_set(
+        self,
+    ) -> None:
+        driver = """
+pilot_args.pitch = 0.25
+pilot_args.pedals = 0.2
+operator_args.pitch = 0.1
+operator_args.pedals = -0.05
+ap_seat = "operator"
+ap_parked = false
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+print(string.format("%.6f", written[2001]))
+print(string.format("%.6f", written[2003]))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - 0.1) <= 0.0011
+        assert abs(float(lines[1]) - 0.05) <= 0.0011
+
+    def test_take_debug_line_names_seat_source_and_both_seats_args(self) -> None:
+        """Testing aid (`debug-2026-11-24b.md`, question 4): with the
+        flight-trace flag on, a take logs the player's seat, the capture
+        branch, the captured values and both seats' raw args."""
+        driver = """
+lfs = { writedir = function() return "/nonexistent-petrobrain-test/" end }
+pilot_args.pitch = 0.2
+pilot_args.pedals = 0.3
+ap_seat = "pilot"
+ap_parked = false
+flight_control.request_take(1, 0.0)
+flight_control.run_flight_control(0.1)
+"""
+        lines = _run(
+            driver,
+            patches={
+                "local FLIGHT_TRACE_ENABLED = flight_trace_ok and flight_trace_check == true": (
+                    "local FLIGHT_TRACE_ENABLED = true"
+                ),
+                '            debug_log(string.format(\n                "flight take': (
+                    '            print(string.format(\n                "flight take'
+                ),
+            },
+        )
+        take_lines = [line for line in lines if line.startswith("flight take")]
+        assert len(take_lines) == 1
+        line = take_lines[0]
+        assert "player_seat=pilot" in line
+        assert "source=player_seat_pilot" in line
+        assert "a1103=0.3000" in line
+        assert "a1113=0.0000" in line
 
 
 class TestUnparkWhileOffWritesNothing:
