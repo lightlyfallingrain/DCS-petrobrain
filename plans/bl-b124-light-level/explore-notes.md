@@ -52,6 +52,10 @@ wrecks, is unknown — investigator territory.
   everything *else* fade with light while emitters keep their reach. New sources still to check
   for availability: vehicle/aircraft lights on, explosions, missile plumes; moonlight later.
 
+**Vehicle lights dropped (user, 2026-11-24):** *"Ignore vehicle lights for now. The only case for
+them is friendly units in deep friendly territory anyway."* Remaining new sources to check:
+explosions, missile plumes; moonlight later.
+
 ## Speech
 
 > *"no, the player sees the light/weather situation with his eyes as well."*
