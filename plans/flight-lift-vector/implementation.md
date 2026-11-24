@@ -572,3 +572,210 @@ lengths.
   rate limiter has had time to chase the wrongly-jumped internal target. Caught by reading the
   actual numbers (`debug_scheduling_counts()` plus printed deltas) rather than trusting the first
   green run.
+
+---
+
+## LV-1 amendment (2026-11-24, fourth re-fly)
+
+Implementer pass on `plan.md`'s "LV-1 amendment" section to the end. Branch
+`feature/bl16-lift-vector-law`, built on tip `7204baeeb7481510439ff9c5cb14d9ed12c96c0b` (the
+engine-RPM-correction-carried version of the amendment, already consistent throughout the plan
+text at this tip — no stale rotor-RPM passages found).
+
+### Files Changed
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_profile.lua` — `c_theta` 0.5→0.85, `speed_accel_
+  cap_mps2` 0.5→1.9 (section B); new `spooled_rpm_pct` (97.0), `engine_rpm_gentle_floor_pct`
+  (74.0), `collective_rate_gentle_min_per_s` (0.2) for the engine-RPM-gated collective schedule
+  (section C); new `k_ball_pedal_p` (0.3), `k_pedal_from_collective_rate` 0.25→0.6 (section D).
+  **No new `bank_hold_threshold_deg` field** — see "Departure from the plan" below.
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua`:
+  - New module-level `ENGINE_RPM_SOURCE`/`read_engine_rpm_pct()` (args 40/41, lower-of-two),
+    mirroring `ROTOR_RPM_SOURCE`/`read_rotor_rpm_pct()`'s existing shape; ships `"dummy"` per U9.
+  - `read_measured()` gains `engine_rpm_pct`/`engine_rpm_valid`.
+  - New estimator ring `est.rings.bank` and derived field `est.phi_bar` (averaged bank, `w_v_s`
+    window, reused per the plan) — the plan's own diagrams assumed this running average already
+    existed ("already warm every mode"); it did not, so this is new code, not a reused signal.
+    Merged onto `measured.phi_bar` in `run_active_frame`, guarded on `fc_est.primed` same as every
+    other estimator-derived field.
+  - `law_init_at_take`: the take rule (E11) — a known mode-2 heading target still forces heading
+    mode unconditionally; otherwise `measured.phi_bar` (falling back to `measured.bank_deg`) against
+    `limits.takeover_level_bank_deg` decides heading vs. a new `bank_hold_deg` (signed, degrees).
+    `turn_mode` is never set `true` by a take any more — it stays live only for a live "turn
+    left/right" command via `law_apply_goal`. Pedal `t_y` seed changed to back out the new
+    proportional ball term (see D below) so bit-exactness at take is preserved.
+  - `law_apply_goal`: `goal.turn`/`goal.heading_deg` branches both now clear `next_state.bank_
+    hold_deg = nil` (Co-moving Fields, Q3 — only a heading-type command ends a held bank).
+  - `law_update` Step 1: new `state.bank_hold_deg ~= nil` branch — `r_d = law_turn_rate_at_bank
+    (bank_hold_deg, v_t)` every frame (bypasses the turn-rate shaper entirely; `a_r,d` resolves to
+    `g*tan(bank_hold_deg)` by construction, no new formula in section D). **E12 fix**: in the
+    ordinary heading-mode `else` branch, `rate_limit` is now `math.max(rate_limit, abs(state.
+    r_ref))` whenever no break override is active — an inherited rate from an m2→m1 unpark (mode
+    2's own AI autopilot can hand over a rate above the ordinary `max_turn_bank_deg` ceiling) is no
+    longer clamped down to that ceiling on the very first `law_update` frame; it decays through the
+    critically-damped heading-error term instead. `in_band_heading` also now requires `bank_hold_
+    deg == nil` (a held bank has no heading to be "in band" of).
+  - New engine-RPM-gated collective-rate taper (section C), inside the existing `if u_c_rate > 0.0`
+    guard, after the pedal-limit/RPM-floor/blade-stall guards: linear taper between `engine_rpm_
+    gentle_floor_pct` and `spooled_rpm_pct`, floor `collective_rate_gentle_min_per_s`, increases
+    only (decreases never gated).
+  - `law_outputs`: new proportional ball term `k_ball_pedal_p * (ball - ball_centre)`, added fresh
+    every call (never integrated, same "position overlay" shape as `turn_coord_pedal`).
+  - `read_estimator_raw`/`format_trace_line`: trace-gated reads and new columns for args 40/41/
+    838/839/42/845 (`eng40`/`eng41`/`eng838`/`eng839`/`rot42`/`rot845`), plus `phi_bar`/`bank_hold`
+    — per the correction box's "log them so flight can calibrate them."
+  - New read-only getters `M.get_phi_bar`/`M.takeover_level_bank_deg` (same posture as `M.mode_
+    info`) for `flight_desired.lua`'s mirror, below.
+- `aircraft-layer/dcs-export/Petrobrain/flight_desired.lua` — new `desired.bank_hold_deg` field;
+  `reseed_from_measured()` now mirrors the law's own take decision (reads `flight_control.get_
+  phi_bar`/`takeover_level_bank_deg`, same fallback-to-"heading" posture on either being
+  unavailable); `clear_desired`/`reseed_from_overlay`/`convert_turn_to_heading_for_m2`/`apply_
+  set`'s `heading_deg` and `turn` branches all clear `bank_hold_deg` (Co-moving Fields table); new
+  `fd_bank_hold` status field.
+- `body-layer/src/belief/flight_control.py` — `MAX_ACCEL_MPS2` 1.0→2.0 (so the wire ceiling never
+  clamps below the Lua-side `speed_accel_cap_mps2` raise); comment restructured so the generator's
+  first-sentence extraction renders a short summary, not the whole justification (`config/
+  defaults.toml`, read back after regenerating — root `CLAUDE.md`'s own habit).
+- `body-layer/config/defaults.toml` — regenerated (`tools/generate_defaults.py --write`) for the
+  `MAX_ACCEL_MPS2` change. No other tunables touched (D is Lua-only; the plan names no body-layer
+  constant for sections C/D).
+
+### Not built as written, and why
+
+- **Section C's "Decisions answered"/"what reading the code turned up" rotor-vs-engine-RPM
+  passages were already corrected at this tip** (the dispatching task named this; confirmed by
+  reading the plan directly — no stale text found). Nothing to redo there.
+- **No new `bank_hold_threshold_deg` profile constant.** The plan's section A asks for one
+  (first cut 5.0); code-reading found `fc_limits.takeover_level_bank_deg` (wire-tunable,
+  `body-layer`'s `TAKEOVER_LEVEL_BANK_DEG`, default 5.0) already states exactly this rule in its
+  own docstring ("at takeover, |bank| under this holds heading; at or above it, the turn in
+  progress continues") and is already the live input to `law_init_at_take`'s own decision. Adding
+  a second, Lua-only threshold next to it would be exactly the "a second way nobody decided on"
+  root `CLAUDE.md` warns against. Reused `fc_limits.takeover_level_bank_deg` instead; said so here
+  rather than silently departing. If the user later wants the take threshold tunable independently
+  of the wire's takeover threshold, that is a one-line follow-up (`bank_hold_threshold_deg` in
+  `flight_profile.lua`, read in `law_init_at_take` in place of `limits.takeover_level_bank_deg`).
+- **E12's root cause, traced rather than guessed, with one gap**: the plan flagged this as "named
+  by its symptom, not its line." Reading `law_init_at_take`'s unpark branch found the rate (`r_
+  ref`) was already seeded bit-exact from the measured turn rate at take — not the bug. The actual
+  defect is one step later, in `law_update`'s own heading-mode `else` branch: `rate_limit` (the
+  ceiling `next_state.r_ref` is clamped to) is derived from `max_turn_bank_deg` at the CURRENT
+  speed, with no floor at the rate already being flown — so an inherited rate above that ceiling
+  (plausible whenever mode 2's own AI autopilot was flying a tighter turn than `max_turn_bank_deg`
+  would produce) gets clamped down on the very first `law_update` frame after the take, which reads
+  as a sudden partial "straightening." Fixed by flooring `rate_limit` at `abs(state.r_ref)` when no
+  break override is active — a no-op on every ordinary frame (state.r_ref is already within the
+  ceiling by construction of this same clamp one step earlier), and new behaviour only on the
+  take-plus-one frame. **The gap**: this is reasoned from the code and the plan's own stated goal
+  state, not re-derived against the fourth re-fly's own t=366.5/409.5 trace rows — those rows
+  belong to item 8 (a *voice* take at high bank engaging heading-hold, which section A's bank-hold
+  mechanism fixes outright) per the sortie report's own item numbering, not item 9 (the m2→m1
+  mid-turn case E12 is actually about), and no unpark-specific trace was brought back with this
+  report to check the fix's exact transient against. Flagging this gap explicitly, as the plan
+  asked, rather than reporting it as fully confirmed.
+- **Section D's pedal integrator split** (`t_y_p` at `law_outputs`, backed out of `t_y`'s own take
+  seed) is a new split not named verbatim in the plan, needed to keep Decision 24's bit-exact-at-
+  take guarantee once a non-integrated proportional term exists — the same pattern this module
+  already uses for `u_c_ff`/`u_c_i` (collective feed-forward vs. integrator). Said here since it is
+  a structural choice the plan did not spell out, not a deviation from its intent (Q5/finding 1).
+- **Existing tests rewritten, not merely extended** (`TestTakeoverModeSelection`,
+  `TestUnparkTakeSeedFromMode2SetTargets`'s two `turn_mode` assertions): the plan's own E11/finding
+  2 explicitly retires the old "hold the measured rate forever" take mechanism these tests pinned,
+  replacing it with `bank_hold_deg` — this is the amendment's own test list ("bank-hold take at
+  |φ| ≥ 5° holds bank... < 5° heading hold"), not an incidental rewrite. Flagged per root
+  `CLAUDE.md`'s escalation rule rather than changed silently; `TestBitExactAtTake` (the output
+  guarantee itself) was not touched.
+- **The whole-module test harness's `flight_profile.ACTIVE` mirror** (`test_flight_control_lua.py`)
+  keeps the PRE-amendment values for `c_theta`/`speed_accel_cap_mps2`/`k_pedal_from_collective_
+  rate` (0.5/0.5/0.25), with only the four new fields added at values that are inert for every
+  pre-existing scenario (`k_ball_pedal_p`: inert because no test in that file sets a non-centred
+  `slip_ball_*_raw`, confirmed by grep; `spooled_rpm_pct`/`engine_rpm_gentle_floor_pct`/
+  `collective_rate_gentle_min_per_s`: inert because `measured.engine_rpm_pct` is never set away
+  from the dummy-source default there). That file's own docstring says these should mirror
+  production ("a mismatched value here would show up as a changed `fc_*` wire field, not a Lua
+  error") — raising the three changed values for real would touch numeric assertions across a
+  2291-line file within this task's effort budget, with uncertain blast radius. New, dedicated
+  coverage for the actual amendment behaviour (brisk speed-up, the pedal proportional term, the
+  engine-RPM schedule) was added in `test_flight_control_law.py` instead, using local `PROFILE.x =
+  ...` overrides inside the affected drivers only (the same technique `test_flight_control_lua.py`
+  itself already uses at line ~2024). **Flagging for the Reviewer**: the three stale values in
+  `test_flight_control_lua.py` are a known, named gap, not an oversight.
+
+### Tests Added
+
+- `aircraft-layer/tests/test_flight_control_law.py`:
+  - `TestTakeoverModeSelection` (rewritten) — 4.9°→heading/`bank_hold_deg=nil`; 5.1°→`bank_hold_
+    deg≈5.1`; `measured.phi_bar` preferred over raw `bank_deg` when present (the averaged-bank
+    finding); falls back to raw `bank_deg` when `phi_bar` absent.
+  - `TestBankHoldTake` — a sustained bank-hold run holds bank/height/speed (E13); a heading-type
+    command (`heading_deg` or `turn`) ends the hold (Q3); a speed/altitude command does not (Q3).
+  - `TestUnparkTakeSeedFromMode2SetTargets` (one test rewritten) — the no-seed mid-break case now
+    asserts `bank_hold_deg` (not `turn_mode`) and that the bank is held close to its captured value,
+    not just "nonzero."
+  - `TestUnparkMidTurnRateNeverSlammedToTheOrdinaryCeiling` — the E12 fix: a 12°/s inherited rate
+    (above the ~4.7°/s ceiling at this scenario's speed/`max_turn_bank_deg`) changes by <1°/s on
+    the first `law_update` frame, not slammed to the ceiling.
+  - `TestSpeedChannelIsBrisk` — with `c_theta=0.85`/`speed_accel_cap_mps2=1.9` (local override),
+    the toy plant's own along-track acceleration exceeds 1.5 m/s² within 5 s of a 150→250 km/h
+    command and settles within 5% of the target, no overshoot runaway.
+  - `TestPedalReachesCollectiveStepTarget` — the proportional ball term is already a substantial
+    fraction of its steady value within 1 s of a ball offset appearing, unlike the pure integrator.
+  - `TestEngineRpmGatedCollectiveSchedule` — identical collective rate at `spooled_rpm_pct` (97%)
+    and fully-up (100%); strictly tapered and floored at `collective_rate_gentle_min_per_s` at the
+    spooled-down reference (74%); a collective *decrease* is never gated regardless of engine RPM.
+  - `TestBitExactAtTakeWithTheNewPedalProportionalTerm` — pedal output equals the captured command
+    exactly even with the ball well off centre at the take (the one pre-existing bit-exact test
+    that defaults `ball` to `profile.ball_centre` via `_measured()`'s own absence of the field,
+    which would not have exercised the new term at all).
+- `aircraft-layer/tests/test_flight_desired_lua.py` — extended the `flight_control` mock with
+  `get_phi_bar`/`takeover_level_bank_deg` (nil by default, so every pre-existing `reseed_from_
+  measured` test is unaffected): low-bank take still reseeds heading; high-bank take holds that
+  bank (`fd_hdg_mode="bank"`, `fd_bank_hold` set, height/speed still captured); no-`phi_bar` take
+  falls back to heading; `set heading`/`set turn` while holding a bank both clear `fd_bank_hold`.
+- `aircraft-layer/tests/test_flight_control_estimator.py` — added the new `bank` ring/`phi_bar`
+  field to the file's own `new_est()` helper (required just to keep every pre-existing test in
+  this file from erroring on a nil ring; no new scenario test added here — `est_sample`'s own
+  `phi_bar` computation is exercised indirectly by every `TestBankHoldTake`/`TestUnparkTakeSeed...`
+  toy-plant test above via the real module, not re-tested in isolation given the ring-averaging
+  mechanism itself is unchanged, reused code).
+- `aircraft-layer/tests/test_flight_control_lua.py` — added the four new `flight_profile.ACTIVE`
+  fields only (no new test class — see "Not built as written" above for why the shared harness's
+  three changed-value gaps were not closed here).
+
+### Checks
+
+- `aircraft-layer`: `ruff format --check src tests` — pass (90 files); `ruff check src tests` —
+  pass; `cd aircraft-layer && .venv/bin/mypy src` — pass (29 files, no issues); `lua5.5 -e
+  loadfile(...)` syntax check on all three touched Lua files — pass (`luac5.1` not installed in
+  this environment; this is the available equivalent). `pytest tests -q` (full suite) — pass, 1173
+  passed. `.claude/scripts/fast-tests.sh aircraft-layer` — pass, 1027 passed (parallel).
+- `body-layer`: `ruff format --check src tests` — pass (230 files); `ruff check src tests` — pass;
+  `cd body-layer && .venv/bin/mypy src` — pass (93 files, no issues); `tools/generate_defaults.py
+  --write` run and the diff checked (`MAX_ACCEL_MPS2` only, comment now renders a short first
+  sentence). Full serial suite (`pytest tests -q`) — pass, 3791 passed, 4 xfailed, 0 failed.
+  `.claude/scripts/fast-tests.sh body-layer` (parallel/xdist) — 1 failed
+  (`test_crew_text_poll_loop_survives_a_raising_poll_and_keeps_going`), confirmed pre-existing and
+  unrelated: passes in isolation and in the full serial run; it is a background-thread timing
+  assertion (`len(runner.store.observations) == 1` racing a second poll cycle) that this task's
+  changes (two unrelated lines in `belief/flight_control.py`, a regenerated `defaults.toml`) could
+  not plausibly cause. Not fixed here (out of scope; flagged for whoever owns test flakiness).
+
+### Notable Discoveries
+
+- **The plan's own diagrams assumed an estimator signal ("the averaged bank, already warm every
+  mode") that did not exist in code.** `measured.bank_deg` was always the raw, single-frame
+  `LoGetADIPitchBankYaw` read — no running average of it anywhere. Built one (new `est.rings.bank`/
+  `est.phi_bar`, reusing `w_v_s`) rather than silently reading the raw value and calling it
+  "averaged" — the plan's own "Tuning constants" paragraph already half-acknowledged this would
+  need a real window, just not that the base signal itself was missing.
+- **A wire-tunable constant already existed for what the plan asked as a new Lua-only one**
+  (`bank_hold_threshold_deg` vs. `fc_limits.takeover_level_bank_deg`/`TAKEOVER_LEVEL_BANK_DEG`),
+  found only by reading `law_init_at_take` and the body-layer module it is sent from, not by
+  trusting the plan's own account of what existed. Worth a general note: "first cut, new profile
+  constant" in a plan is itself an assumption, not a verified fact, when the same-named rule has a
+  plausible home elsewhere in the codebase already.
+- **`fast-tests.sh`'s parallel (xdist) run surfaced a pre-existing flaky test that the full serial
+  suite does not** — a background-thread test asserting an exact poll count/observation count
+  without synchronizing on the actual condition it needs (it waits on one `threading.Event` but
+  then asserts a second, unguarded count). Not this task's to fix, but worth flagging: `-n auto`
+  changes CPU scheduling pressure enough to turn a timing-marginal test red.
