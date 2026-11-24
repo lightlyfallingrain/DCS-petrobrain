@@ -157,3 +157,86 @@ subprojects' format/lint/type/fast-test commands from freshly built venvs in thi
 pre-existing `.venv` was present to inherit). Did not re-run a live DCS session — no acceptance
 testing exists outside a live sortie, per this role's own scope; the branch to fly, once the two
 required fixes land, is `feature/bl16-lift-vector-law`.
+
+### Re-review
+
+Reviewed `d1043934..a58d3069` (one commit) — the implementer's fix pass for the two required fixes
+above — against this file, `implementation.md`'s new "Required fixes (review-lv1-amendment.md),
+implementer pass" section, and the plan's section C correction box.
+
+**Required fix 1 (combined production values).** `TestAmendmentProductionValuesTogether`
+(`aircraft-layer/tests/test_flight_control_law.py`) adds two scenarios, both setting
+`PROFILE.c_theta = 0.85`, `PROFILE.speed_accel_cap_mps2 = 1.9`, `PROFILE.k_pedal_from_collective_rate
+= 0.6` together via the driver string, with `k_ball_pedal_p` left at `_PROFILE`'s shared 0.3
+(confirmed equal to the shipped `flight_profile.lua` value) — read the Lua driver text directly,
+not just the class docstring, to confirm all three are actually set in the same run rather than
+only named in a comment. Mutation-tested rather than taken on faith:
+
+- A large, flipped `k_pedal_from_collective_rate = -20.0` (replacing the production 0.6 inside the
+  same driver) makes `test_row4_like_climb_and_speed_change_is_stable` fail — confirmed by running
+  it standalone with the substitution and restoring the file to the committed state immediately
+  after. The test is not decorative.
+- A small sign flip alone (`+` → `-` on the production torque feed-forward term in
+  `flight_control.lua`'s `law_update`, restored immediately after) does **not** fail either new
+  test — probed numerically (a throwaway driver outside the committed test, not kept): with the
+  flip, `max_abs_ball` is actually *smaller* (0.105 vs 0.158) because the ball settles to a bounded
+  non-zero offset rather than diverging, since `k_ball_pedal_p`'s own proportional feedback on
+  `ball` dominates the toy plant's stability regardless of the feed-forward's sign — the
+  feed-forward only shifts the equilibrium the P-loop corrects toward, it is not what keeps the
+  loop stable. So the toy plant's bound/no-growing-oscillation assertions check *amendment-
+  configuration stability*, which is what required fix 1 asked for, but do **not** independently
+  verify the torque feed-forward's sign — that was already hand-verified against the integral
+  terms' own sign/shape in the base review ("Sign conventions hold") and isn't re-litigated by
+  this test. Noting this so it isn't mistaken for sign coverage it doesn't provide; not a fix,
+  since the test was never required to carry that burden and the sign was checked elsewhere.
+- The toy plant's coupling direction (`measured.ball = measured.ball + (k_yaw_from_collective_rate
+  * state.dbg_u_c_rate - outputs.pedals) * dt`) is the right shape for "more collective → ball
+  disturbance, pedal output subtracts it" given `outputs.pedals` already carries the production
+  law's own sign — consistent with the base review's sign-convention finding, not a new, separate
+  claim this toy plant proves on its own.
+- Bit-exactness-at-take assertions in both new tests pass against the real `law_outputs` call, not
+  a stubbed one.
+
+**Required fix 2 (`spooled_rpm_pct`).** `flight_profile.lua` now reads `93.0`, with a rewritten
+comment citing the user's three verbatim readings (93%/98-100%/74%) from
+`docs/acceptance/2026-11-24-sortie-feedback.md`, matching the plan's own correction box ("At or
+above normal cruise output (~93%) → fast") exactly — checked both documents side by side. Mirrored
+consistently in `test_flight_control_law.py`'s shared `_PROFILE`, `test_flight_control_lua.py`'s
+own mirror, and `TestEngineRpmGatedCollectiveSchedule`'s boundary test
+(`test_schedule_inactive_when_engine_rpm_is_at_or_above_spooled`, now exercising 93.0). No stray
+`97.0` remains anywhere in either test file (grepped both). The adjacent boundary test
+(`test_schedule_tapers_the_increase_when_engine_rpm_is_spooled_down`, 74.0) and the
+never-gates-a-decrease test are unaffected by the threshold move and still read correctly against
+the new value.
+
+**Optional refinement (E12 decay test).** `test_inherited_rate_decays_toward_the_heading_hold_
+equilibrium` is meaningful, not decorative — mutation-tested by zeroing the damping coefficient
+(`2.0 * profile.law_zeta * ...` → `0.0 * profile.law_zeta * ...` in `law_update`'s heading branch,
+restored immediately after): the test then fails exactly as expected (`8.84 > 4.7`), confirming it
+actually exercises the critically-damped decay the comment describes rather than asserting a bound
+wide enough to pass regardless.
+
+**Checks**, run fresh in this worktree (`.venv` built from scratch, Python 3.12, `pip install ruff
+mypy pytest pytest-xdist`): `ruff format --check` / `ruff check src tests` clean; `mypy src` clean
+(29 files); `luac5.1 -p` clean on every `dcs-export/*.lua`; `.claude/scripts/fast-tests.sh
+aircraft-layer` — 1030 passed; full `pytest tests -q` — 1176 passed, matching
+`implementation.md`'s own figure exactly. body-layer is untouched by this commit (confirmed via
+the commit's file list) and was already checked clean in the prior review pass.
+
+No further required fixes. Both of the prior pass's required fixes are correctly addressed, and
+the optional refinement taken strengthens rather than merely pads the test suite.
+
+### Re-review Verdict
+
+APPROVED
+
+### Re-review Confidence
+
+Full read of the one-commit diff (`d1043934..a58d3069`, all four touched files) against both
+required fixes' own text and the plan's correction box. Mutation-tested the three new/changed
+tests directly against the real Lua law (large-gain flip, small sign flip, zeroed damping term),
+each time restoring `flight_control.lua`/`flight_profile.lua` to the committed state immediately
+after and confirming a clean `git status --porcelain` before moving on. Ran all four of
+aircraft-layer's own checks (format, lint, strict mypy, Lua syntax) plus both the fast-test and
+full-test commands from a freshly built venv. Did not re-run a live DCS session — unchanged from
+the prior pass's own statement; the branch to fly is still `feature/bl16-lift-vector-law`.
