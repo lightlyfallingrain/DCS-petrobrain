@@ -67,6 +67,31 @@ firing hook (`aircraft-layer/dcs-export/petrobrain-firing-events-hook.lua`) alre
 **Rockets too (user, 2026-11-24):** *"Treat missile and rocket launch similarly."* A rocket launch
 is the same few-second light source as a missile launch.
 
+## Answers to the goal check's questions (user, 2026-11-24)
+
+> *"1,2,3 - I think I have notes about that in the concept doc I wrote about the light levels?*
+> *4 - treat same, we're mainly concerned about ground unit detection. Would really be silhouetted
+> against the twilight sky and very visible, but ignore for now.*
+> *5 - use binoculars as long as they can viably see, then 9K113 only while there is enough light
+> to see with the orange filter. After that naked eyesight only for light sources detection.*
+> *6 - mission should always have both readable. Error if not.*
+> *7 - as recommended"*
+
+- **Q1–Q3 (full-dark and full-day end points, mission date):** main loop searched
+  `docs/concept/detection-in-non-perfect-conditions.md` and every branch — the doc has only the
+  three dawn points (−28, −18, +2 min around a 05:18 sunrise, Syria, N31°35′ E40°17′) and the
+  qualitative "In real darkness, cannot see anything"; no end points, no mission date. Raised with
+  the user (pending).
+- **Q4 aircraft:** same factor as ground units for now; the twilight-sky silhouette (more visible)
+  is noted and ignored.
+- **Q5 optic policy as light falls:** binoculars while they can still viably see; then the 9K113
+  only, while its orange filter still gives enough light; after that, naked eye only, and only for
+  light sources.
+- **Q6 missing time/date:** the mission always has both; if not readable, **error** (fail loud),
+  not a daylight fallback.
+- **Q7 pilot-seat mask:** a measurement row on this card only; making the mask per-seat is its own
+  item.
+
 ## Speech
 
 > *"no, the player sees the light/weather situation with his eyes as well."*
