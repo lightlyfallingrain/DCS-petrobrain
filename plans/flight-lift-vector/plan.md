@@ -364,6 +364,12 @@ plus a trim learnt from observation**:
 - `K_φ`, `K_θ` give the trim loops time constants of several seconds, at least three times slower
   than the estimator lag plus the attitude response; that separation is the stability argument,
   and the toy plant checks it with the plant's gains deliberately wrong.
+  **Superseded in part, 2026-11-24** (see "LV-1 amendment" below): this slow-trim premise is what
+  produced the 60 s, −8° acceleration the fourth re-fly measured against a 20 s, −15° target. The
+  trim loop's *time constant* is unchanged (it still exists to learn the fuselage trim the
+  feed-forward cannot know); what changes is that the **onset** of a commanded speed change no
+  longer waits on it — see the amendment's "Speed changes" for the feed-forward split that makes
+  this consistent with decision 5 ("S-curves, no oscillation") rather than abandoning it.
 - The inner attitude loop is today's form, `u = T + k(target − attitude) − k_d·(Euler rate)`, with
   `T` integrating and solved at take for a bit-exact first frame.
 
@@ -443,6 +449,13 @@ accepted at any airspeed from LV-1 on (only on-ground still refuses). **The law 
 it is not assumed to repair the erratic voice take** (alignment finding 4): LV-0's card retests the
 take on Stage 3 alone.
 
+**Superseded in part, 2026-11-24** (see "LV-1 amendment" below): "a take 50 km/h below the desired
+speed is a gentle transition, not a lurch" no longer holds for the *speed* channel specifically —
+a take with a speed gap now flies the brisk speed change at once (Q2 answer, "brisk"), restating
+rather than quietly overriding this sentence. The bank/heading side of a take is **also** revised
+(the "maintains current state" rule now holds a captured *bank*, not a heading, when |bank| ≥ 5°)
+— see the amendment's take-mode design.
+
 **J. Recovery.** When a break settles (Decision 27's clearing, kept), the class becomes ordinary and
 the altitude shaper chases the standing goal from where the break left it (its reference is never
 snapped). When an absorber gave (speed, height, bank), its reference is **re-seated** to measured
@@ -502,7 +515,10 @@ SAU H, K and T off itself before each new take.
      signs and axes; the noise of `a` in steady flight is small against 0.5 m/s².
 2. **LV-1 — forward-flight law, no hand-back (gated on LV-0's frame answers).** B–F, H, I, the
    ordinary chain in G, the gain schedule `G(V)` **defined down to 0** with its gentlest value at the
-   low end. The removed pieces in the table go, **including the 80 km/h hand-back** (U1): Lua's IAS
+   low end. **Amended 2026-11-24** (fourth re-fly, "LV-1 amendment" below): this build also carries
+   the new take-mode bank hold (A), the rebalanced speed feed-forward (B), the rotor-RPM-gated
+   collective schedule (C), and the raised pedal gains (D) — not a new stage, the same LV-1 card
+   reflown. The removed pieces in the table go, **including the 80 km/h hand-back** (U1): Lua's IAS
    release and `too_slow` take refusal, body-layer `TOO_SLOW` with its speech line and rules-README
    entry, and **every commanded-speed floor** (U8, no floor): `MIN_IAS_KMH` is removed outright,
    `clamp_speed`'s lower bound becomes 0, and the desired-state unpark clamp loses its speed floor
@@ -710,3 +726,342 @@ Open:
   "floored at 50 km/h" or "until LV-3" (Affected Modules, the LV-1 build, the Co-moving table, the
   LV-1 card's low-speed rows), and the U2 unpark clamp from desired-state Stage 3 loses its speed
   floor too (its ceiling and the AGL floor stay).
+
+## LV-1 amendment (2026-11-24, fourth re-fly)
+
+Architect pass. Branch `feature/bl16-lift-vector-law`, detached at tip `46d6a5f2` (the user's
+answers to this report's questions; no new code since LV-0/LV-1 were first built). Inputs read in
+full: `docs/acceptance/2026-11-24-sortie-feedback.md` "Fourth re-fly" to the end; `alignment.md`'s
+"Goal check — 2026-11-24" (E11–E17, findings 1–5, questions 1–5, now all answered); this plan's
+sections B, D, E, F, G, I (amended above); `explore-notes.md` U3 "Slowing down"; `body-layer/
+ROADMAP/BL-16.md` decisions 3 and 5. Code read: `flight_control.lua` (`law_init_at_take`,
+`law_update`'s D/E/F/G sections, `check_envelope`, `read_rotor_rpm_pct`/`ROTOR_RPM_SOURCE`),
+`flight_profile.lua` (every gain named below), `flight_desired.lua` (`desired`, `reseed_from_
+measured`, `reseed_from_overlay`, `convert_turn_to_heading_for_m2`, `apply_set`, `derive_mode`/
+`tick`'s mode-edge dispatch), `body-layer/src/belief/flight_control.py` (`MAX_TURN_BANK_DEG`,
+`clamp_speed`, `MAX_ACCEL_MPS2`), `body-layer/src/rules/actions.py`/`crew_console.py` (`axes_*`
+bodies — confirmed every `flight.*` action writes only the field(s) it changes; `axes_set_speed`/
+`axes_set_altitude` never touch `hdg_mode`, already satisfying Q3 by construction, see "What
+reading the code turned up" below).
+
+**What reading the code turned up (step 3a), before designing anything new.** Two things this
+amendment needs already exist and are not reinvented:
+
+1. **Speed/altitude commands already never touch `hdg_mode`.** `flight_desired.lua`'s `apply_set`
+   branches on `heading_deg ~= nil` / `turn ~= nil` to write `hdg_mode`; the `alt_m`/`ias_kmh`
+   branches write only those fields. So Q3's answer ("only heading-type commands end a held
+   turn; height and speed hold through it") is **already true of the wire protocol** — no change
+   needed there, only in what a "held turn" *is* (below). The alignment's own worry ("a speed
+   command that re-applies the whole desired state would level the aircraft") does not apply to
+   this codebase's `apply_set` shape; it would apply to a different, whole-state-write design this
+   project does not have.
+2. **A rotor-RPM read already exists, flagged for exactly this use, and is not yet turned on.**
+   `read_rotor_rpm_pct()`/`ROTOR_RPM_SOURCE` (`flight_control.lua`) reads cockpit draw arg 42
+   (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`) behind a `"dummy"`/
+   `"arg_proxy"` switch, shipped as `"dummy"` (fixed 90%) "until a flight confirms arg 42 tracks
+   rotor RPM and resolves its calibration." Q1's engine-state rule (fast collective when the
+   engines are already at normal output, gradual when they are spooled down) is exactly a function
+   of this one reading — no new telemetry, no engine/torque proxy needs inventing; this is the
+   calibration flight that reading was always waiting for.
+
+### Why this amendment is judged (restated from `alignment.md`)
+
+Every complaint in the fourth re-fly is a lag — the take levels before resuming, speed takes 60 s
+instead of 20, pedal trails collective — and the user's own diagnosis is that **the oscillation
+comes from being slow, not from being fast.** So this amendment is judged by promptness and
+smoothness together: a fix that buys smoothness by slowing anything down further is moving away
+from the goal, not toward it.
+
+### Design Overview (diagrams)
+
+**1. Take-mode decision.** What a "you have controls" or unpark with no standing goal does, now
+that a bank is held directly rather than mapped onto the fixed-rate continuous turn.
+
+```mermaid
+flowchart TB
+  TAKE["take (off/taking -> m1)<br/>no m2 standing goal to carry"] --> AVG["read averaged bank phi_bar<br/>(estimator's own running average,<br/>already warm every mode)"]
+  AVG --> CMP{"abs(phi_bar) &lt; 5 deg?<br/>(profile, tunable)"}
+  CMP -- yes --> HDG["hdg_mode = heading<br/>heading_deg = measured heading<br/>(today's behaviour, unchanged)"]
+  CMP -- no --> BANK["hdg_mode = bank (NEW)<br/>bank_hold_deg = phi_bar (signed)<br/>heading free-runs, no psi_ref"]
+  HDG --> HOLD1["alt_m / ias_kmh captured as today<br/>(apply_set never touches these on a<br/>heading-type command either way)"]
+  BANK --> HOLD2["alt_m / ias_kmh captured the same way<br/>-> height and speed hold through the circle (E13)"]
+  BANK --> END{"next command"}
+  END -- "turn heading / turn L-R [NN] /<br/>stop turn / level flight" --> EXIT["apply_set's existing heading/turn<br/>branches overwrite hdg_mode --<br/>already end bank mode, no change"]
+  END -- "speed / altitude" --> STAY["bank_hold_deg untouched,<br/>circle continues (per Q3)"]
+```
+
+**2. Speed change, 150 -> 250 (E14), what makes it 20 s instead of 60.** The shaper's own S-curve
+(kept, decision 5) is unchanged; what changes is how promptly `theta_i`/collective reach the shaper's
+own demand, and whether the engines can take the collective fast.
+
+```mermaid
+sequenceDiagram
+  participant Pilot as "speed 250" command
+  participant Shaper as speed shaper (B, kept)
+  participant Pitch as cyclic (D)
+  participant Coll as collective (E)
+  participant RPM as rotor RPM read (NEW: arg_proxy)
+  participant Pedal as pedal (F)
+  Pilot->>Shaper: a_f,d up to speed_accel_cap_mps2 (schedule-scaled)
+  Shaper->>Pitch: a_f,d ~1.8-1.9 m/s^2 (unchanged formula)
+  Note over Pitch: theta_ff now reaches close to atan(a_f,d/g)<br/>within 1-2s (feed-forward split revised,<br/>not the slow trim loop alone)
+  Pitch->>Coll: n_d from a_d (unchanged feed-forward)
+  RPM->>Coll: rotor RPM % this frame
+  alt Coll: RPM near 100% (level cruise before the command)
+    Coll->>Coll: collective rate near its stop/pedal/rate cap -- fast, ~6s to full (E14)
+  else Coll: RPM below spooled threshold (after a deceleration/descent)
+    Coll->>Coll: rate tapered by RPM -- gradual, ~5s (E15 roll-out)
+  end
+  Coll->>Pedal: torque FF scaled with collective RATE (k_pedal_from_collective_rate, raised)
+  Pedal->>Pedal: + proportional ball term (NEW) -- keeps up with the aircraft's own ~0.9/s cap
+  Note over Shaper,Pedal: near 230km/h the shaper settles (B, unchanged) --<br/>nose up, collective down, pedals follow, no overshoot
+```
+
+### Decisions answered (continuing U1–U8 above)
+
+**Answered 2026-11-24 (user, verbatim), Q1 — collective-increase rate:** *"at higher speed,
+collective can be increased faster. At level flight the engines are already at high/normal
+output, so increasing collective is no problem. When descending or decelerating or both, the
+engines spool down as torque is not needed. Then adding lot's of collective in that state quickly
+slows down the rotor... That is why collective increase need to be gradual, when engine RPM is
+low initially. When engine RPM is high initially, the collective increase can be fast as well."*
+Built as a **rotor-RPM-gated collective-rate schedule** (new, see "Collective rate" below),
+reading the existing `read_rotor_rpm_pct()` once its calibration is confirmed (U9).
+
+**Answered 2026-11-24, Q2 — speed-change character:** *"brisk."* Built: the speed channel's own
+feed-forward reaches its target promptly (1-2 s), superseding section I's "gentle transition" for
+the speed channel specifically, on a take with a speed gap as well as an ordinary command.
+
+**Answered 2026-11-24, Q3 — what ends a held bank:** *"as recommended"* — only a heading-type
+command ("turn heading", "turn N left/right", "stop turn"/"level flight") ends it; height and
+speed hold through it. Already true of `apply_set`'s shape (finding 1 above); the only new work is
+giving the held state (`hdg_mode = "bank"`) the same immunity the existing "heading"/"turn" modes
+already have, which it gets for free from the same per-field write discipline.
+
+**Answered 2026-11-24, Q4 — handover mid-roll-out:** *"as recommended"* — keep the 5° rule as
+stated; "stop turn" is one phrase. A take at 12° mid-roll-out holds 12° until the player says so
+(vignette 5, accepted as a known, named consequence of the rule rather than a defect).
+
+**Answered 2026-11-24, Q5 — pedal rate:** *"The Mi-24 limits pedal movement speed. We have
+measurements... From there you can get the actual pedal delta speed."* Measured: the aircraft
+itself caps pedal-arg travel at ~0.90-0.91/s (p99 0.72, max 1.29/s across the fourth re-fly's
+hand-flown rows) on top of M0's τ ≈ 0.25 s lag; Petrovich's own pedal moved at p99 **0.16/s** —
+about 5× below what the aircraft allows. Read as: the law's own commanded pedal rate should be
+free to approach the aircraft's ~0.9/s cap; nothing here asks for a *slower* pedal, and finding 1
+of the goal check (treating "pedals move more slowly in Mi-24 anyhow" as a request to slow them
+further) is explicitly wrong and closed by this answer.
+
+### A. Take rule — E11/E12 (new `hdg_mode = "bank"`)
+
+**Where this lives: entirely in `flight_desired.lua`/`flight_control.lua` (Lua), not a round trip
+through body-layer.** The take event (off/taking → m1, no m2 goal to carry) is detected and
+measured in Lua already (`reseed_from_measured`, called from `tick`'s mode-edge dispatch); adding
+a network hop to ask body-layer "what was the bank" would add latency to exactly the moment
+decision 24 requires to be bit-exact, for a value only Lua has first. This also keeps the rule out
+of the wire protocol's closed vocabularies — body-layer never states a bank angle, matching
+`[[BL-16]]`'s "no LAN message carries a raw flight-axis value" invariant in spirit (this is an
+attitude goal, not an axis write, but the same reasoning against a network round trip applies).
+
+- **New `desired` field:** `bank_hold_deg` (signed, degrees), alongside the existing `heading_deg`/
+  `turn_dir`/`turn_rate_deg_s`/`turn_style`. New `hdg_mode` value: `"bank"` (today's are `"heading"`
+  and `"turn"`).
+- **`reseed_from_measured()` (off/taking → m1, no m2 carry) reads the estimator's own averaged
+  bank** `φ̄` (the running average already kept warm every mode, LV-0's "A. Estimator" — reused, not
+  a new signal) rather than the raw single-frame bank, so a wobbly take cannot flip a 5-6° bank
+  across the line (open assumption, "the 5° rule's input," now settled this way).
+  - `|φ̄| < 5°` (profile `bank_hold_threshold_deg`, tunable, first cut 5.0 per the user's own
+    figure): unchanged — `hdg_mode = "heading"`, `heading_deg` = measured heading.
+  - `|φ̄| ≥ 5°`: `hdg_mode = "bank"`, `bank_hold_deg = φ̄`. `heading_deg`/`turn_dir`/
+    `turn_rate_deg_s` are cleared (nil) — heading free-runs, there is no reference to chase.
+  - `alt_m`/`ias_kmh` are captured exactly as today, in both branches — height and speed hold
+    through the held bank for free, no change needed (E13).
+- **The law (section D) gets a third `a_r,d` source, not a third mechanism.** Section C's
+  `a_r,d = λ·V_t·r_d + …` (turn-rate-driven, what the existing continuous turn and break use) is
+  **not** reused for a held bank — finding 2's own point: that mechanism flies the turn rate
+  `MAX_TURN_BANK_DEG` produces at the current speed, so a 45° take rolls out to 20°, visibly, at
+  the take. Instead, when `hdg_mode == "bank"`: `a_r,d = g·tan(bank_hold_deg)` directly — the
+  geometric relation a steady bank implies, bypassing the turn-rate path entirely. Section D's
+  existing formula `φ_ff = atan(a_r,d/(g+a_u,d))` then recovers `φ_ff ≈ bank_hold_deg` unchanged
+  (in level flight; `a_u,d` near zero), so **no new formula in section D**, only a new source for
+  one of its inputs in section C. Turn rate is whatever the held bank and the *current, changing*
+  speed produce (`ψ̇ = g·tan(bank_hold_deg)/V_t`) — the turn tightens as speed falls inside the
+  held bank, same as a real pilot holding a bank would fly it (the open assumption's own answer:
+  "bank, as the user said").
+- **Ending the held bank needs no new code.** `apply_set`'s existing `heading_deg ~= nil` and
+  `turn ~= nil` branches unconditionally overwrite `hdg_mode`, regardless of its current value —
+  they already end `"bank"` the same way they already end `"turn"` today. The **one thing that
+  must be added**, so nothing leaks: both branches must also clear `bank_hold_deg = nil` (the
+  Co-moving table below is where this is checked explicitly, because exactly this kind of leak —
+  a new field a pre-existing branch doesn't know about — is this project's own recorded failure
+  mode, `[[BL-B71]]`).
+- **E12, mode 2 → mode 1 mid-turn (the "first goes level, then resumes" bug).** This is **not**
+  the take-rule case above — the `desired` table is correctly left untouched on the m2→m1 edge
+  (`tick`'s own comment: *"`desired` is left exactly as it stood; `law_init_at_take` reads it as
+  the unpark seed"*) — `hdg_mode` is already whatever mode 2's standing heading goal was. The bug
+  is in `law_init_at_take`'s unpark branch failing decision 24's own bit-exact guarantee for the
+  *rate* state, not the attitude: the first frame must seed `φ_i` (or whatever state feeds `φ_ff`)
+  from the **measured** bank/turn-rate exactly, so the heading shaper's S-curve starts already
+  turning at the measured rate and closes the gap to the standing heading goal by adjusting rate
+  smoothly — never by snapping the rate reference to 0 first and re-accelerating into the turn.
+  This is a fix inside a function LV-1 already owns and is already touching (for the new `"bank"`
+  branch above); it does not need its own stage. **Flagged, not fully traced** — the exact field
+  responsible for the "first goes level" transient wants one more read of `law_init_at_take`'s
+  unpark branch against the fourth re-fly's own trace (t=366.5/409.5, alignment finding, "Take
+  from a bank, heading-hold case") before the implementer writes the fix; the goal-state in the
+  table above is what the fix must achieve, not a line number.
+
+### B. Speed changes — E14/E15
+
+**The feed-forward/trim split (section D) is rebalanced for onset, not reverted.** Decision 5
+("S-curves, no oscillation") and the "feedback, not a model" principle both survive: what changes
+is how much of `θ_d` the feed-forward itself supplies on the first second of a commanded change,
+versus how much is left for the several-seconds-slow trim loop to learn.
+
+- **`c_theta` is raised** from 0.5 toward a value close to the full kinematic tilt (the user's own
+  figure: "about `atan(a/g)`, slightly more" — about 12° of nose-down for 1.9 m/s², against
+  `atan(1.9/9.81) ≈ 10.9°`). First cut: `c_theta = 0.85` (profile), leaving `θ_i` a smaller but
+  still real residual to learn — the fuselage-trim unknown section D's own comment names, not
+  reintroducing a model of it.
+- **The slow trim loop's own time constant (`k_theta_trim`) is unchanged** — it still exists for
+  exactly the reason section D gives it, to learn what the feed-forward cannot know. What moves is
+  the feed-forward's own share, so the *onset* no longer waits three-trim-time-constants to reach
+  the target.
+- **Deceleration roll-out (E15) stays `θ_i`-driven, by the same mechanism, not a new one**: as
+  speed approaches the target from above, the shaper's own S-curve (B, kept) reduces `a_f,d`
+  itself, which both `Δθ_ff` and `θ_i` already track — no separate "roll-out mode" needed; the
+  gentleness the user asked for at the very end of a deceleration (collective up over ~5 s) comes
+  from the collective side (C below), not from slowing the pitch channel back down.
+- **Section I's "gentle transition" on a take with a speed gap is restated for the speed channel
+  only** (dated note added to section I above): a take 50 km/h below the desired speed now flies
+  the same brisk `c_theta`-led pitch change as an ordinary command (Q2, "brisk"). The *bank* side
+  of a take is unaffected by this — section A above is what governs it, and it stays bit-exact and
+  gentle by construction (the shaper's own S-curve, never skipped).
+
+### C. Collective rate — E14/E15/Q1, the rotor-RPM-gated schedule
+
+**New, profile-level: `collective_rate_cap_from_rpm(rpm_pct)`.** Replaces nothing — the existing
+reactive guards (`collective_rate_cap_near_rpm_floor`, `rotor_rpm_near_floor_margin_pct`) stay
+exactly as they are, as the backstop they were always meant to be (alignment finding 3: "the RPM
+guard is not the 'gently' the user asked for... the spool-up time is something to anticipate, not
+detect"). This is the anticipatory layer above it:
+
+- At/above a `spooled_rpm_pct` threshold (profile, first cut 97%): the collective-increase rate is
+  capped only by the existing physical/pedal-margin caps — fast, matching the user's own 1-2 s full
+  collective at level cruise (E14).
+- Below it, down to the existing reactive margin: the increase rate is linearly tapered toward a
+  gentle minimum (profile, first cut consistent with the user's own "~5 seconds" figure for a full
+  collective swing starting from a spooled-down state).
+- **Decreases are never gated by this** — spooling down is not the hazard; only a sharp *increase*
+  while the engines are behind is.
+- **One reading drives both E14 and E15 without a manoeuvre-class special case.** A level-cruise
+  acceleration finds RPM already near 100% (fast); a deceleration's own roll-out collective-up
+  finds RPM drooped from several seconds of low demand (gentle) — the same formula, read at the
+  moment the increase is asked for, produces both outcomes the user described without the law
+  having to know which manoeuvre it is in.
+
+### D. Pedals — E16/Q5
+
+- **`k_ball_pedal` gains a proportional term.** Today's pedal loop is integral-only on the ball
+  (`ṭ_y = λ·K_β·(ball − centre)`); the measured row-4 climb needed a pedal response the pure
+  integrator cannot give fast enough (ball grew to 0.12 over ~15 s before the integrator caught
+  up). Add `t_y += K_β,p·(ball − centre)` (new profile field `k_ball_pedal_p`, first cut same order
+  of magnitude as the existing integral gain) alongside the unchanged integral term — a standard
+  PI, not a new loop shape, and finding 2 (never a heading/yaw-rate loop in forward flight) is
+  untouched: this is still purely a ball-centring term.
+- **`k_pedal_from_collective_rate` (the torque feed-forward) is raised** from 0.25 toward the
+  measured ~0.6 the row-4 climb needed per unit collective rate.
+- **No yaw-rate damping term is added in forward flight.** This resolves the conflict the
+  alignment flagged between Q5 and plan F's "finding 2" (never a heading/yaw-rate loop in forward
+  flight): Q5's own words are about the aircraft's *physical* pedal-travel limit, not about adding
+  a new sensed term — the measured gap (0.16/s commanded against a ~0.9/s aircraft cap) is fully
+  explained by the two gain increases above, with no rate-limit anywhere in the pedal path
+  currently tighter than the aircraft's own (`OUTPUT_RATE_LIMIT_PER_S = 4.0` is already well above
+  it). **Recommendation, not yet a decision needed:** keep finding 2 as stated through LV-1; if the
+  raised ball/torque gains do not close the row-10 slow-flight yaw gap (LV-3 scope, not retested by
+  this amendment), that is the point at which a yaw-rate term gets its own look, in LV-3, against
+  the hover regime's pedal-yaw-loop section (F) rather than bolted onto forward flight.
+
+### E. Input shape — E16
+
+**Satisfied by construction, no new mechanism.** "Fast, frequent, small corrections, never one big
+delta at a fast rate" is what a rate-limited, feed-forward-led loop running at `law_hz` (30 Hz)
+already produces once B–D above let it reach its target promptly: each 1/30 s step moves by a
+rate-capped delta, so the output is inherently a sequence of small steps at a fast cadence, not one
+jump — the *size* of each correction already shrinks as the remaining error shrinks (the
+shaper/integrator combination), which is exactly "gentleness in the size, not the rate" (E16's own
+amendment to E7). No profile constant is added for this section; it is the sum of A–D.
+
+### F. Breaks — LV-2, recorded only
+
+The user's own words, for the LV-2 section when it is built: *"Break turn starts fine, but then
+nose rises too much and bank smooths soon. Could fly breaks more agressively, it is an escape
+manouvre."* No design here — LV-2 is not in scope for this amendment, and designing against one
+flight's worth of break feedback before LV-1's own fixes are flown risks tuning around a symptom
+B-E above may already change (break entry currently shares the same pitch/collective channels).
+
+### Co-moving Fields
+
+Trigger (6a): `hdg_mode` is written both internally (take, roll-out settle, m2→m1 carry) and
+externally (`apply_set`, a wire command), with several fields that must move with it
+(`heading_deg`, `turn_dir`, `turn_rate_deg_s`, `turn_style`, and the new `bank_hold_deg`). Grepped
+every construction/write site of `desired.hdg_mode` in `flight_desired.lua` at the detached tip:
+`clear_desired`, `reseed_from_measured`, `reseed_from_overlay`, `convert_turn_to_heading_for_m2`,
+the m2→m1 carry (a deliberate no-op), `apply_set`'s `heading_deg`/`turn` branches, and
+`law_init_at_take`/`law_apply_goal` on the `flight_control.lua` side (the one place that *reads*
+`hdg_mode` to decide what the law flies).
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `hdg_mode`, `heading_deg`, `turn_dir`, `turn_rate_deg_s`, `turn_style`, `bank_hold_deg` (NEW) | internal | `clear_desired` (mode → off) | all nil/default; next take rebuilds from scratch |
+| same | internal (NEW branch) | `reseed_from_measured`, `|φ̄| < 5°` | `hdg_mode = "heading"`, `bank_hold_deg = nil`, `heading_deg` = measured heading |
+| same | internal (NEW branch) | `reseed_from_measured`, `|φ̄| ≥ 5°` | `hdg_mode = "bank"`, `bank_hold_deg = φ̄`, `heading_deg`/`turn_dir`/`turn_rate_deg_s` = nil |
+| same | internal | `reseed_from_overlay` (off → m2) | `hdg_mode = "heading"` from the overlay's held heading; `bank_hold_deg` must be set nil here too (new field, not yet written by this existing function) |
+| same | internal | `convert_turn_to_heading_for_m2` (m1/off → m2, standing turn) | `hdg_mode = "heading"`; `bank_hold_deg` must be set nil here too (same reason — a standing `"bank"` take could reach this edge directly) |
+| same | internal (deliberate no-op) | m2 → m1 carry | `desired` untouched; `law_init_at_take`'s unpark branch (E12 above) is what must seed the law's own state bit-exact from whatever `hdg_mode` already is, `"bank"` included |
+| same | external (`apply_set`, `heading_deg` branch) | "turn heading", a break's heading target | `hdg_mode = "heading"`, `turn_dir = nil`; **`bank_hold_deg` must be set nil here too** (not written today — the one new write this branch needs) |
+| same | external (`apply_set`, `turn` branch) | "turn left/right [no degrees]", "stop turn" (`turn = 0`) | `hdg_mode = "turn"`; **`bank_hold_deg` must be set nil here too** (same, new write) |
+| `alt_m`, `alt_ref`, `ias_kmh` | external (`apply_set`, separate branches) | any altitude/speed command, any `hdg_mode` | unchanged by this amendment — already never touch `hdg_mode`/`bank_hold_deg` (finding 1) |
+
+### Tuning constants
+
+All new constants are declared in `flight_profile.lua` (Lua-edited data, this subproject's own
+loop-constant convention — no `tuning.py`-equivalent exists outside body-layer, root `CLAUDE.md`):
+`bank_hold_threshold_deg` (5.0), the bank-averaging window (reuse `w_v_s`/a similarly-sized new
+window rather than inventing a second one — first cut: reuse the existing velocity window's time
+constant, since both exist to reject the same vibration), `c_theta` (raised 0.5 → 0.85),
+`spooled_rpm_pct` and the gentle-minimum collective rate it tapers to (new), `k_ball_pedal_p`
+(new), `k_pedal_from_collective_rate` (raised 0.25 → ~0.6, pending the arg-42 calibration row, U9).
+None of these governs anything a `tuning.py` constant already covers — grepped `flight_profile.lua`
+in full (reproduced above) and `body-layer/config/defaults.toml`'s flight-control keys
+(`MAX_TURN_BANK_DEG`, `MAX_ACCEL_MPS2`) before naming any of them; no existing key overlaps.
+
+### Risks & Unknowns (amendment-specific)
+
+- **`ROTOR_RPM_ARG_PILOT` (42)'s calibration is still unconfirmed** ("value × 100 = %RPM, unless
+  the dial goes over 100%" — unverified). The collective-rate schedule in C is only as good as
+  this reading; see U9.
+- **E12's exact defect is named by its symptom, not its line.** The implementer may find the fix
+  is smaller (or in a different function) than `law_init_at_take`'s unpark branch once the trace is
+  read against the code directly.
+- **`c_theta = 0.85` is a first cut**, like every gain in this plan; LV-1's card (speed
+  150→220→150, now reflown) is where it is measured, same posture as the rest of section D.
+- **The pedal gain increases (D) are not retested against the slow-flight row (row 10)** in this
+  amendment — that row is LV-3 scope per the task's own framing, and per the alignment's "not
+  expectations of this amendment" list.
+
+### Decisions Requiring User Input (amendment)
+
+- **U9: Confirm the rotor-RPM arg-42 calibration before the collective-rate schedule (C) goes
+  live, or ship it provisionally?** — recommend: add one calibration row to the (already-being-
+  reflown) LV-1 card — hold a steady low-power descent/deceleration until RPM visibly droops on the
+  cockpit gauge, compare the `arg_proxy` reading logged in the trace against the gauge by eye, then
+  confirm or correct `ROTOR_RPM_ARG_SCALE_MAX_PCT`. Keep `ROTOR_RPM_SOURCE = "dummy"` (today's
+  fixed 90%, meaning the new schedule never gentles — same absence of protection LV-1 already
+  has today) until that row confirms the scale; never flip `arg_proxy` on blind, since a wrong
+  calibration could gentle too little (RPM droop, the original fault) or too much (a brisk
+  acceleration the user explicitly asked for becomes sluggish again).
+- **U10: Should E12's fix (the "first goes level" unpark bug) get its own focused debugging pass
+  before LV-1 ships, or ride inside LV-1's own build and card?** — recommend: inside LV-1 — it is a
+  defect in a function (`law_init_at_take`'s unpark branch) LV-1 is already touching for the new
+  `"bank"` take-mode seeding, and LV-1's card already has a bank-handover row to retest it against
+  (rows 8-9). A separate debugging pass would retest the same code path twice.
