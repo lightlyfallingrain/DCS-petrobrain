@@ -160,17 +160,18 @@ local SIGN = { pitch = 1.0, roll = 1.0, pedals = -1.0, collective = -1.0 }
 -- collective term had the wrong sign -- the 2026-11-24 data flight
 -- drove the lever to full up within ~3 s of every take while the law
 -- asked to descend (`plans/flight-lift-vector/debug-2026-11-24c.md`,
--- finding 2). Command 2001 also runs the other way for pitch: arg 1100
--- positive is stick forward/nose down (`aircraft-layer/research/2026-
--- 11-18-bl16-m0-flight-axes-findings.md`), `SIGN.pitch = 1.0` so a
--- positive written command is nose DOWN too -- the same law-domain-vs-
--- command-domain class as collective, found from the same data flight
--- (debug-2026-11-24c, main-loop finding, 2026-11-24): `t_p` rose while
--- pitch sat below `theta_d` (wanting more nose-up) and `out_pitch`
--- rising drove pitch further negative. Pedals already agree (command
--- positive = right, debug-2026-11-24b), roll is unchanged (+1) -- not
--- re-derived here.
-local LAW_DIR = { pitch = -1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
+-- finding 2). Pitch agrees with the law already: arg 1100/command 2001
+-- positive is stick AFT/nose UP, not forward (the 2026-11-24-c "positive
+-- = forward" reading was a one-off instrument misread, superseded by
+-- the third re-fly, `docs/acceptance/2026-11-24-sortie-feedback.md`:
+-- `LAW_DIR.pitch = -1` made the pitch loop positive feedback -- `t_p`
+-- rising while pitch sat below `theta_d` drove `out_pitch`/arg 1100
+-- toward -1 (full forward) and pitched the nose further down, -0.5 deg
+-- to -86 deg in 8 s). `SIGN.pitch = 1.0` and the law domain already
+-- matches it, so `LAW_DIR.pitch = 1.0` (no conversion). Pedals already
+-- agree (command positive = right, debug-2026-11-24b), roll is
+-- unchanged (+1) -- not re-derived here.
+local LAW_DIR = { pitch = 1.0, roll = 1.0, pedals = 1.0, collective = -1.0 }
 
 -- Per-axis enable flags (plan, M1 bullet: "a per-axis enable flag that
 -- defaults off for pedal and collective until M0-B and M0-C" -- each
@@ -2026,8 +2027,9 @@ end
 -- command` (`fc_last_command`, write/command domain -- what `write_
 -- outputs` is about to send to `LoSetCommand`, before the per-frame
 -- wobble), never the law domain `t_p`/`u_pitch` reason in; `out_pitch`
--- positive is nose DOWN (arg 1100, `SIGN.pitch = 1.0`) -- the read
--- that drove the `LAW_DIR.pitch` fix (module header above).
+-- positive is nose UP (arg 1100, `SIGN.pitch = 1.0`) -- the `LAW_DIR.
+-- pitch = -1` fix this read drove was itself reverted 2026-11-24 by the
+-- third re-fly (module header above).
 local function format_trace_line(t, est, raw, law, mode, last_command)
     local l = law or {}
     local c = last_command or {}

@@ -2154,19 +2154,22 @@ print(string.format("%.6f", written[2087]))
 
 
 class TestPitchLawDirection:
-    """Main-loop finding, 2026-11-24 (`plans/flight-lift-vector/debug-
-    2026-11-24c.md`, "Pitch direction"): the law's pitch is positive =
-    nose up (`LAW_DIR`), command 2001 positive = nose down (`SIGN.
-    pitch = 1.0`, arg 1100 positive = stick forward/nose down,
+    """Third re-fly, 2026-11-24 (`docs/acceptance/2026-11-24-sortie-
+    feedback.md`, "Third re-fly"; `plans/flight-lift-vector/debug-
+    2026-11-24c.md`, superseded section): the law's pitch is positive =
+    nose up (`LAW_DIR`), and command 2001 positive is ALSO nose up
+    (`SIGN.pitch = 1.0`, arg 1100 positive = stick aft/nose up -- the
+    `LAW_DIR.pitch = -1.0` main-loop finding this test originally
+    encoded was flown and made the loop positive feedback; reverted,
     `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.
     md`). The toy plant fact driving this test's assertion -- independent
     of the law's own internal domain convention -- is that very same
     arg-1100 reading: a positive written 2001 command moves the real
-    aircraft's pitch DOWN. So with the aircraft's actual pitch driven
+    aircraft's pitch UP. So with the aircraft's actual pitch driven
     below the held `theta_d` (nose too low, the law wants more nose-up),
-    the written command must fall, never rise."""
+    the written command must rise, never fall."""
 
-    def test_pitch_below_theta_d_lowers_the_written_command(self) -> None:
+    def test_pitch_below_theta_d_raises_the_written_command(self) -> None:
         driver = """
 ap_parked = false
 ap_seat = "pilot"
@@ -2176,7 +2179,7 @@ flight_control.request_take(1, 0.0)
 flight_control.run_flight_control(0.0)
 local captured = written[2001]
 -- Plant fact (not the law's own convention): arg 1100/command 2001
--- positive drives pitch down, so a nose-low aircraft relative to the
+-- positive drives pitch up, so a nose-low aircraft relative to the
 -- held `theta_d` is modelled here as the measured pitch falling below
 -- the take value -- an external disturbance, never written by this
 -- module.
@@ -2191,8 +2194,8 @@ print(string.format("%.6f", written[2001]))
 """
         captured, after = (float(x) for x in _run(driver))
         # Pitch sits below theta_d (wants more nose-up): the written
-        # command must fall, not rise.
-        assert after < captured - 0.001, (captured, after)
+        # command must rise, not fall.
+        assert after > captured + 0.001, (captured, after)
 
     def test_take_stays_bit_exact_on_pitch(self) -> None:
         """The flip (`LAW_DIR.pitch`) and its inverse (`law_domain` on
