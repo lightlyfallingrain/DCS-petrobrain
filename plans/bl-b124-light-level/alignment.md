@@ -29,8 +29,15 @@ pilot stops believing him in daylight too.
   he cannot see himself.
 - **E4** — In real darkness no optic sees an unlit unit: *"In real darkness, cannot see anything."*
   Petrovich reports nothing that is not giving off light.
-- **E5** — At night, a light source (firing and burning today; explosions and missile plumes if DCS
-  exposes them) is seen out to the player bubble. Vehicle lights are out of scope (user, recorded at
+- **E5** — At night, a light source is seen out to the player bubble. The sources are firing and
+  burning today, explosions if DCS exposes them, and a missile launch.
+  - A launch's plume is visible **for a few seconds**, from the launch event itself (the firing hook
+    already carries `S_EVENT_SHOT`).
+  - The smoke trail is **not** a night cue (user: *"Missile plume is certainly not reported, but
+    that is the same thing as missile launch, the plume is there for a few seconds. And smoke
+    trail, though that we do not see in the dark."*).
+  - So at night a launch must not get `[[BL-B72]]`/`[[BL-B74]]`'s long daytime smoke-dissipation
+    tail. It gets a few-second flash. Vehicle lights are out of scope (user, recorded at
   `f2f37ab8`: *"Ignore vehicle lights for now. The only case for them is friendly units in deep
   friendly territory anyway."*). An unlit vehicle driving at night therefore stays unseen. It gives **presence only, at
   where the light was**. It never gives class or type, and it does not light up the units around it
@@ -112,6 +119,14 @@ pilot stops believing him in daylight too.
     it cannot resolve, and may stall on them.
   - Whether he should *prefer* the sight at dusk is a behaviour question for the user. It is not
     settled by "no speech change".
+- **How long a launch stays visible at night.**
+  - Serves the why: the plume lasts a few seconds from `S_EVENT_SHOT`, then the launcher is an
+    ordinary decaying contact.
+  - Would not: reusing the daytime launch-smoke rule (`[[BL-B72]]`: *"SAM launch shows where the
+    launcher was for quite a while"*, `[[BL-B74]]`, not built) unchanged at night. That reveals the
+    launcher from a trail the user says cannot be seen in the dark, which breaks E5.
+  - If BL-B74 is built later, its smoke tail has to fade with light level, as the user's words
+    imply.
 - **Air targets.** All measurements are a BTR-60 on the ground.
   - Obvious filling: the same factor for aircraft. A helicopter silhouetted against a bright
     twilight sky may in fact stay visible longer than a vehicle on dark ground. That is the agent's
