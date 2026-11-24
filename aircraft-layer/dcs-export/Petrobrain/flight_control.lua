@@ -645,6 +645,13 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         -- take" reasoning as every other field above: nothing is added
         -- to `t_y` before the first `law_update` frame.
         turn_coord_pedal = 0.0,
+        -- Debug-2026-11-24 diagnostic-only fields (same posture as
+        -- `turn_coord_pedal` above): zero at take, nothing has run yet.
+        dbg_r_d = 0.0,
+        dbg_a_f_d = 0.0,
+        dbg_a_r_d = 0.0,
+        dbg_a_u_d = 0.0,
+        dbg_u_c_rate = 0.0,
     }
 end
 
@@ -786,6 +793,18 @@ local function law_update(state, dt, measured, limits, profile)
     local a_f_d = a_ref_v + profile.k_speed_error * (next_state.v_ref - measured.ias_mps)
     local a_r_d = measured.v_t_mps * math.rad(r_d)
 
+    -- Debug-2026-11-24 (`plans/flight-lift-vector/debug-2026-11-24.md`):
+    -- `r_d`/`a_f_d`/`a_r_d`/`a_u_d` are locals, never persisted, so a
+    -- flight trace could not see them -- the gap this pass's own task
+    -- named ("the trace carries no law internals"). `dbg_*` fields
+    -- below are diagnostic-only, same posture as `fc_debug_estimator_
+    -- sample_count` above: never read by any `law_*`/`est_*` function,
+    -- never sent on any wire, only for `format_trace_line`.
+    next_state.dbg_r_d = r_d
+    next_state.dbg_a_f_d = a_f_d
+    next_state.dbg_a_r_d = a_r_d
+    next_state.dbg_a_u_d = a_u_d
+
     -- The estimator's own measured acceleration (section A) -- never
     -- `LoGetAccelerationUnits`, never an IAS/VS derivative any more
     -- (the old `a_x_f`/`a_z_f`/`TAU_ACCEL_FILTER_S` channel, replaced).
@@ -846,6 +865,10 @@ local function law_update(state, dt, measured, limits, profile)
     if (state.u_c >= 1.0 and u_c_rate > 0.0) or (state.u_c <= -1.0 and u_c_rate < 0.0) then
         u_c_rate = 0.0
     end
+    -- Debug-2026-11-24 -- diagnostic-only, same posture as `dbg_r_d`
+    -- above: the collective-to-pedal torque feed-forward's own driving
+    -- term, never persisted before this pass.
+    next_state.dbg_u_c_rate = u_c_rate
     -- Section G: how much of the nominal collective rate the envelope
     -- would not allow this frame -- the shortfall the ordinary chain
     -- hands down to speed, then turn rate. Height gives last, by
@@ -925,7 +948,12 @@ local function law_update(state, dt, measured, limits, profile)
     -- Section F: pedals fly the slip ball, always -- never a heading or
     -- yaw-rate loop in forward flight (finding 2), and no deliberate
     -- extra pedal in a turn or break (U5 reverted, `K_BREAK_PEDAL_BIAS`
-    -- and its own unwind bookkeeping are gone entirely).
+    -- and its own unwind bookkeeping are gone entirely). `profile.
+    -- k_ball_pedal`/`k_pedal_from_collective_rate`*`rotor_dir`/`k_turn_
+    -- coord_pedal` carry the command-domain sign (corrected 2026-11-24,
+    -- `plans/flight-lift-vector/debug-2026-11-24.md`: positive pedal
+    -- command is physically LEFT, not right) -- this formula itself is
+    -- unchanged, only the gains' signs are.
     local ball = measured.ball or profile.ball_centre
     local d_t_y = profile.k_ball_pedal * (ball - profile.ball_centre)
     -- Torque feed-forward: only meaningful while the collective axis is
@@ -1846,16 +1874,35 @@ local function read_estimator_raw(t, velocity_source)
     return raw
 end
 
-local function format_trace_line(t, est, raw)
+-- Debug-2026-11-24 (`plans/flight-lift-vector/debug-2026-11-24.md`): the
+-- 2026-11-24 sortie's own trace carried no law internals at all (`mode`,
+-- `phi_d`/`theta_d`, `t_r`/`t_p`/`t_y`, `turn_coord_pedal`, `u_c`/
+-- `u_c_rate`, `r_d`, `a_r_d`/`a_f_d`/`a_u_d`, `phi_i`/`theta_i`, the
+-- written axis values) -- "which loop drives it cannot be read from
+-- these logs" was the sortie report's own finding. `law`/`last_command`
+-- are `nil` whenever `fc_mode ~= "active"` (no take yet this session) --
+-- every added field prints `"nil"` via `tostring` rather than erroring.
+local function format_trace_line(t, est, raw, law, mode, last_command)
+    local l = law or {}
+    local c = last_command or {}
     return string.format(
         "t=%.3f v_n=%.3f v_u=%.3f v_e=%.3f a_f=%.4f a_r=%.4f a_u=%.4f vg=%.3f vgf=%.3f vgr=%.3f "
         .. "phidot=%.3f thetadot=%.3f psidot=%.3f ball=%.4f lambda=%.3f "
-        .. "vec_n=%s vec_u=%s vec_e=%s au_x=%s au_y=%s au_z=%s aoa=%s aoss=%s",
+        .. "vec_n=%s vec_u=%s vec_e=%s au_x=%s au_y=%s au_z=%s aoa=%s aoss=%s "
+        .. "mode=%s phi_d=%s bank=%.3f theta_d=%s pitch=%.3f t_r=%s t_p=%s t_y=%s "
+        .. "turn_coord_pedal=%s u_c=%s u_c_rate=%s r_d=%s a_f_d=%s a_r_d=%s a_u_d=%s "
+        .. "phi_i=%s theta_i=%s out_pitch=%s out_roll=%s out_pedals=%s out_collective=%s",
         t, est.v.n, est.v.u, est.v.e, est.a.f, est.a.r, est.a.u, est.v_g, est.v_g_f, est.v_g_r,
         est.euler.phi_dot, est.euler.theta_dot, est.euler.psi_dot, est.ball, est.lambda,
         tostring(raw.vec_n), tostring(raw.vec_u), tostring(raw.vec_e),
         tostring(raw.accel_units_x), tostring(raw.accel_units_y), tostring(raw.accel_units_z),
-        tostring(raw.aoa), tostring(raw.aoss))
+        tostring(raw.aoa), tostring(raw.aoss),
+        tostring(mode), tostring(l.phi_d), raw.phi_deg, tostring(l.theta_d), raw.theta_deg,
+        tostring(l.t_r), tostring(l.t_p), tostring(l.t_y),
+        tostring(l.turn_coord_pedal), tostring(l.u_c), tostring(l.dbg_u_c_rate),
+        tostring(l.dbg_r_d), tostring(l.dbg_a_f_d), tostring(l.dbg_a_r_d), tostring(l.dbg_a_u_d),
+        tostring(l.phi_i), tostring(l.theta_i),
+        tostring(c.pitch), tostring(c.roll), tostring(c.pedals), tostring(c.collective))
 end
 
 -- Runs one estimator step (plan, section A). `raw` is `read_estimator_
@@ -2530,7 +2577,7 @@ local function run_flight_control(t)
         local raw = read_estimator_raw(t, flight_profile_active.velocity_source)
         local ran = est_sample(fc_est, t, raw, flight_profile_active)
         if ran and FLIGHT_TRACE_ENABLED then
-            flight_trace_log(format_trace_line(t, fc_est, raw))
+            flight_trace_log(format_trace_line(t, fc_est, raw, fc_law, fc_mode, fc_last_command))
         end
         fc_debug_estimator_sample_count = fc_debug_estimator_sample_count + 1
     end

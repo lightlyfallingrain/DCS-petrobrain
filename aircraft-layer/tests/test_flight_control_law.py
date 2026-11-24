@@ -133,12 +133,17 @@ local PROFILE = {
     k_phi = 0.03,
     k_phi_i = 0.015,
     k_p = 0.01,
-    k_ball_pedal = 0.3,
+    -- Corrected 2026-11-24 (`plans/flight-lift-vector/
+    -- debug-2026-11-24.md`): positive pedal command is physically
+    -- LEFT, not right -- all three signs below flipped from the
+    -- "positive = right" assumption, and the two limit magnitudes
+    -- swapped to match.
+    k_ball_pedal = -0.3,
     k_pedal_from_collective_rate = 0.25,
-    rotor_dir = 1.0,
-    k_turn_coord_pedal = 0.02,
-    pedal_limit_positive = 0.5,
-    pedal_limit_negative = -1.0,
+    rotor_dir = -1.0,
+    k_turn_coord_pedal = -0.02,
+    pedal_limit_positive = 1.0,
+    pedal_limit_negative = -0.5,
     pedal_near_limit_margin = 0.1,
     collective_rate_cap_near_pedal_limit = 0.3,
     rotor_rpm_near_floor_margin_pct = 5.0,
@@ -1217,7 +1222,7 @@ class TestTurnCoordinationPedal:
         assert float(max_pedal) == 0.0
         assert float(pedal_after) == 0.0
 
-    def test_right_turn_pulls_positive_pedal_while_turning(self) -> None:
+    def test_right_turn_pulls_negative_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
             goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 90.0 }, LIMITS, PROFILE)",
@@ -1226,16 +1231,17 @@ class TestTurnCoordinationPedal:
         lines = _run(driver)
         pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
         assert float(pedal_before) == 0.0
-        # Sign assumption (module header, `K_TURN_COORD_PEDAL`'s own
-        # comment): a right turn (`r_d > 0`) pulls positive ("right")
-        # pedal.
-        assert float(max_pedal) > 0.05
-        assert float(min_pedal) == 0.0  # never crosses the other way
+        # Sign corrected 2026-11-24 (`plans/flight-lift-vector/
+        # debug-2026-11-24.md`): positive pedal command is physically
+        # LEFT, not right -- a right turn (`r_d > 0`) now pulls
+        # negative command (physically right pedal).
+        assert float(min_pedal) < -0.05
+        assert float(max_pedal) == 0.0  # never crosses the other way
         # Unwinds: once settled, back to exactly the pre-turn value.
         assert in_band == "true"
         assert float(pedal_after) == 0.0
 
-    def test_left_turn_pulls_negative_pedal_while_turning(self) -> None:
+    def test_left_turn_pulls_positive_pedal_while_turning(self) -> None:
         driver = _TURN_PEDAL_DRIVER.format(
             measured_take=_measured(collective_enabled=False),
             goal_apply="state = flight_control.law_apply_goal(state, { heading_deg = 270.0 }, LIMITS, PROFILE)",
@@ -1244,8 +1250,10 @@ class TestTurnCoordinationPedal:
         lines = _run(driver)
         pedal_before, min_pedal, max_pedal, pedal_after, in_band = lines
         assert float(pedal_before) == 0.0
-        assert float(min_pedal) < -0.05
-        assert float(max_pedal) == 0.0
+        # Sign corrected 2026-11-24 -- a left turn now pulls positive
+        # command (physically left pedal).
+        assert float(max_pedal) > 0.05
+        assert float(min_pedal) == 0.0
         assert in_band == "true"
         assert float(pedal_after) == 0.0
 
@@ -1274,9 +1282,91 @@ print(tostring(state.rate_override_deg_s))
         turn_coord_pedal, rate_override = lines
         # The break is active (`rate_override_deg_s` is set) and the
         # nudge is nonzero anyway -- no suppression condition exists in
-        # LV-1 any more.
+        # LV-1 any more. Sign corrected 2026-11-24: a right turn (as
+        # here, heading 90 from 0) now pulls negative command.
         assert rate_override != "nil"
-        assert float(turn_coord_pedal) > 0.0
+        assert float(turn_coord_pedal) < 0.0
+
+
+#: Toy-plant driver for the ball-centring pedal loop (section F,
+#: `k_ball_pedal`) -- new coverage added 2026-11-24
+#: (`plans/flight-lift-vector/debug-2026-11-24.md`), since no existing
+#: test ever set `measured.ball` away from `profile.ball_centre` (the
+#: default `_measured()` table has no `ball` key at all, so `law_
+#: update`'s own `measured.ball or profile.ball_centre` fallback made
+#: every pre-existing scenario read the ball as already centred,
+#: `d_t_y` identically `0.0` -- the loop's sign was simply never
+#: exercised). The toy plant links the pedal *command* back to the
+#: ball the same way the real aircraft does (2026-11-20 calibration
+#: flight, direct and solid: left pedal moves the ball right) --
+#: `ball_target = ball_centre + K_PHYS * pedal_command`, first-order
+#: toward that target each step -- so a wrong-signed gain diverges
+#: instead of centring, exactly the 2026-11-24 sortie's own shape
+#: (`ball` running away from `ball_centre` smoothly, no oscillation
+#: yet, before the secondary bank/yaw coupling joins in).
+_BALL_CENTRING_DRIVER = """
+local measured_take = {measured_take}
+local command = {{ pitch = 0.0, roll = 0.0, pedals = 0.0, collective = 0.0 }}
+local state = flight_control.law_init_at_take(measured_take, LIMITS, command, nil, PROFILE)
+local ball = {ball_start}
+local K_PHYS = 0.4
+local m
+local max_abs_err = 0.0
+for i = 1, 300 do
+    m = {{ pitch_deg = 0, bank_deg = 0, psi_deg = state.psi_ref, ias_mps = 150.0 / 3.6,
+           v_t_mps = 150.0 / 3.6, w_mps = 0, h_m = 200.0, asl_m = 200.0, p_deg_s = 0,
+           q_deg_s = 0, r_deg_s = 0, rotor_rpm_pct = 100.0, collective_enabled = false,
+           ball = ball }}
+    state = flight_control.law_update(state, 0.1, m, LIMITS, PROFILE)
+    local out = flight_control.law_outputs(state, m, PROFILE)
+    local ball_target = PROFILE.ball_centre + K_PHYS * out.pedals
+    ball = ball + (ball_target - ball) * (0.1 / 0.5)
+    local err = math.abs(ball - PROFILE.ball_centre)
+    if err > max_abs_err then max_abs_err = err end
+end
+print(string.format("%.6f", ball))
+print(string.format("%.6f", max_abs_err))
+"""
+
+
+class TestBallCentringPedalSign:
+    """2026-11-24 sortie (`docs/acceptance/2026-11-24-sortie-feedback.md`,
+    `plans/flight-lift-vector/debug-2026-11-24.md`): "take into a held
+    heading" diverged immediately -- the slip ball ran monotonically from
+    -0.03 to +0.56 over 8 s while the pilot directly observed "lots of
+    left pedal", and left pedal is confirmed (2026-11-20 calibration) to
+    move the ball *right* -- a positive-feedback loop, not the intended
+    "step on the ball". Root cause: `k_ball_pedal`/`k_pedal_from_
+    collective_rate`*`rotor_dir`/`k_turn_coord_pedal` were all signed
+    under "positive pedal command = right", which the sortie's own
+    directly-observed pedal direction contradicts -- all three flipped
+    in `flight_profile.lua`. These tests drive the closed loop against a
+    toy plant built from the (solid, directly measured) ball/pedal
+    relationship and would fail -- diverge instead of centre -- under
+    the pre-fix sign."""
+
+    def test_ball_right_of_centre_is_driven_back_to_centre(self) -> None:
+        driver = _BALL_CENTRING_DRIVER.format(
+            measured_take=_measured(collective_enabled=False),
+            ball_start=0.3,
+        )
+        lines = _run(driver)
+        final_ball, max_abs_err = (float(v) for v in lines)
+        # Starts 0.27 off centre (0.3 - profile.ball_centre=0.03);
+        # centring, not diverging, means the error shrinks well below
+        # its starting value and never grows past it.
+        assert max_abs_err <= 0.27 + 1e-6
+        assert abs(final_ball - 0.03) < 0.05
+
+    def test_ball_left_of_centre_is_driven_back_to_centre(self) -> None:
+        driver = _BALL_CENTRING_DRIVER.format(
+            measured_take=_measured(collective_enabled=False),
+            ball_start=-0.3,
+        )
+        lines = _run(driver)
+        final_ball, max_abs_err = (float(v) for v in lines)
+        assert max_abs_err <= 0.33 + 1e-6
+        assert abs(final_ball - 0.03) < 0.05
 
 
 class TestAntiWindupPreventsTheRetestDivergence:

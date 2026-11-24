@@ -245,12 +245,15 @@ flight_profile = {
         k_phi = 0.03,
         k_phi_i = 0.015,
         k_p = 0.01,
-        k_ball_pedal = 0.3,
+        -- Corrected 2026-11-24 (`plans/flight-lift-vector/
+        -- debug-2026-11-24.md`): positive pedal command is physically
+        -- LEFT, not right -- mirrors `flight_profile.lua`.
+        k_ball_pedal = -0.3,
         k_pedal_from_collective_rate = 0.25,
-        rotor_dir = 1.0,
-        k_turn_coord_pedal = 0.02,
-        pedal_limit_positive = 0.5,
-        pedal_limit_negative = -1.0,
+        rotor_dir = -1.0,
+        k_turn_coord_pedal = -0.02,
+        pedal_limit_positive = 1.0,
+        pedal_limit_negative = -0.5,
         pedal_near_limit_margin = 0.1,
         collective_rate_cap_near_pedal_limit = 0.3,
         rotor_rpm_near_floor_margin_pct = 5.0,
