@@ -108,7 +108,36 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
   </div>
 
   <div class="gate">
-    <h2>Re-fly 2026-11-24 (4th) &mdash; pitch direction back</h2>
+    <h2>Re-fly 2026-11-24 (5th) &mdash; your amendment</h2>
+    <div class="block">
+      <div class="expect"><strong>New:</strong> take at 5&deg;+ bank keeps the bank and circles; under 5&deg; holds heading. Mode 2 &rarr; 1 mid-turn no longer levels first. Speed changes brisk. Pedal answers the ball at once, 0.6 per unit collective. Engine-RPM collective rule built but <strong>off</strong> until calibrated. <code>git pull</code> on both machines.</div>
+
+      <div class="label">1 &middot; Rows 8&ndash;9: take in a 30&deg; bank</div>
+      <div class="expect">He keeps the bank and circles, height and speed held. &ldquo;Speed &hellip;&rdquo; or &ldquo;hold &hellip; m&rdquo; must <strong>not</strong> stop the circle. &ldquo;Turn heading NNN&rdquo; rolls out onto it; &ldquo;stop turn&rdquo; levels. Once as mode 2 &rarr; 1 mid-turn: keeps turning to the mode-2 heading.</div>
+      <div class="chk"><input type="checkbox" data-k="r5a" id="r5a"><label for="r5a">Bank take, circle, exits, mode 2 &rarr; 1</label></div>
+
+      <div class="label">2 &middot; Row 3: 150 &rarr; 250 &rarr; 150</div>
+      <div class="expect">About 20&nbsp;s each way. Nose to about &minus;14&deg; with collective and right pedal together; settles on 250 without overshoot.</div>
+      <div class="chk"><input type="checkbox" data-k="r5b" id="r5b"><label for="r5b">Speed changes flown</label></div>
+
+      <div class="label">3 &middot; Row 4: climb and descend 100&nbsp;m</div>
+      <div class="expect">Pedal keeps up with the collective &mdash; no yaw offset, no weave.</div>
+      <div class="chk"><input type="checkbox" data-k="r5c" id="r5c"><label for="r5c">Climb and descent flown</label></div>
+
+      <div class="label">4 &middot; Row 1 once</div>
+      <div class="expect">Level take: no new wobble from the quicker pedal.</div>
+      <div class="chk"><input type="checkbox" data-k="r5d" id="r5d"><label for="r5d">Level take flown</label></div>
+
+      <div class="label">5 &middot; RPM calibration</div>
+      <div class="expect">Hold each about 10&nbsp;s and note the mission time: level 170&nbsp;km/h; a fast acceleration; a fast descent, collective full down. Read engine and rotor RPM off the gauges.</div>
+      <div class="chk"><input type="checkbox" data-k="r5e" id="r5e"><label for="r5e">Three RPM states held and read</label></div>
+
+      <div class="record-box"><div class="label">Record</div>Did the circle hold, and which commands ended it? How long did 150&rarr;250 take; did rotor RPM go near 85%? Any yaw on climbs? The three RPM readings with mission times.</div>
+    </div>
+  </div>
+
+  <div class="gate">
+    <h2>Superseded &mdash; 4th re-fly (pitch direction back)</h2>
     <div class="block">
       <div class="expect">3rd re-fly: take clean, <strong>no pedal kick</strong> (offset fix works). Then he pushed the stick <strong>full forward</strong> while trying to raise the nose &mdash; last round's pitch flip was wrong. Now back. Collective and pedal fixes stay. <code>git pull</code> again on both machines.</div>
       <div class="label">Do</div>
