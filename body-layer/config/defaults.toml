@@ -277,10 +277,10 @@ HANDOVER_ACK_TIMEOUT_S = 3.0
 # source: belief/flight_control.py:HEADING_BAND_DEG
 HEADING_BAND_DEG = 5.0
 
-# The speed channel's own along-track acceleration ceiling -- no probe ever measured a step-response accel figure for this (M0-E was not flown), so this is a placeholder, owed by M0-E like every gain `Export.lua`'s own "M2 control law constants" block names.
+# The speed channel's own along-track acceleration ceiling.
 # status: agreed-guess | range: 0.1 .. 5.0
 # source: belief/flight_control.py:MAX_ACCEL_MPS2
-MAX_ACCEL_MPS2 = 1.0
+MAX_ACCEL_MPS2 = 2.0
 
 # The altitude channel's own vertical-speed ceiling -- M0-A's reference manoeuvre flew a "5 m/s climb and descent of 100 m", reused here as the shaper's own rate limit rather than measured for this purpose.
 # status: judgement | range: 1.0 .. 15.0

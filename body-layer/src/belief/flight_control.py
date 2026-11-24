@@ -132,13 +132,17 @@ MAX_CLIMB_VS_MPS: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: The speed channel's own along-track acceleration ceiling -- no
-#: probe ever measured a step-response accel figure for this (M0-E was
-#: not flown), so this is a placeholder, owed by M0-E like every gain
-#: `Export.lua`'s own "M2 control law constants" block names.
+#: The speed channel's own along-track acceleration ceiling. Raised
+#: 1.0 -> 2.0 by the LV-1 amendment (2026-11-24, fourth re-fly, Q2
+#: "brisk"/E14): the user's own flown acceleration (150->250 km/h in
+#: ~20 s) sustains 1.6-1.9 m/s^2, which the old 1.0 ceiling alone could
+#: not reach (>=28 s plus the S-curve tails) regardless of how fast the
+#: pitch/collective channels react -- `Export.lua`'s own `speed_accel_
+#: cap_mps2` (`flight_profile.lua`) is raised alongside this one, to
+#: the same ~1.9 figure, so this wire ceiling never clamps below it.
 MAX_ACCEL_MPS2: Final[float] = tuning.real(
     "belief.flight_control.MAX_ACCEL_MPS2",
-    1.0,
+    2.0,
     lo=0.1,
     hi=5.0,
     status="agreed-guess",
