@@ -64,6 +64,9 @@ firing hook (`aircraft-layer/dcs-export/petrobrain-firing-events-hook.lua`) alre
 `S_EVENT_SHOT` (missile/rocket launches, initiator position resolved at event time) alongside
 `S_EVENT_SHOOTING_START/_END` (gun bursts) — no new DCS read needed for this source.
 
+**Rockets too (user, 2026-11-24):** *"Treat missile and rocket launch similarly."* A rocket launch
+is the same few-second light source as a missile launch.
+
 ## Speech
 
 > *"no, the player sees the light/weather situation with his eyes as well."*
