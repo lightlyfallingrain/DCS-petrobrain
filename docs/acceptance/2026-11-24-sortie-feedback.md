@@ -137,4 +137,13 @@ player's pedal offset then), and the left kick at every take. The stick holds ex
 so the stick write replaces rather than adds — why the pedals differ is unknown. Not proven;
 predictions: `a1103` doubles at the take; a take with the hardware pedals centred has no kick.
 
+## Take B result: additive hypothesis falsified
+
+> I tried the take with pedals centered. Still the kick. No matter what pedal position I hold, there is always the kick. Both seats.
+
+So the kick does not scale with the player's pedal offset. That points to a constant offset on the
+pedal write or capture, not to an added hardware position. Probe v2's constant ~0.16 in both seats
+fits a constant offset better. The trace from this flight (`a1103` next to `out_pedals`) gives its
+size and sign.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
