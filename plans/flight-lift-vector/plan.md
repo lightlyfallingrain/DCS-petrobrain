@@ -939,6 +939,31 @@ versus how much is left for the several-seconds-slow trim loop to learn.
 
 ### C. Collective rate — E14/E15/Q1, the rotor-RPM-gated schedule
 
+> **Corrected 2026-11-24, same day (main loop, from the user's cockpit readings):** gate on
+> **engine** RPM, not rotor RPM. User, verbatim: *"In level flight, 170 km/h — engine RPM steady
+> at ~93%, rotor RPM steady at ~96%. Fast acceleration — engine RPM ~98-100%, rotor RPM ~88%. Fast
+> descent at collective full down — engine RPM ~74%, rotor RPM ~100%. When rotor RPM drops below
+> ~85%, the generator trips off -> loss of electrical power. Therefore 85% is the rotor RPM low
+> limit."* (`docs/acceptance/2026-11-24-sortie-feedback.md`). The two move in opposite directions:
+> spooled-down engines (74%) coincide with the **highest** rotor RPM (100%), so a rotor-RPM gate
+> would allow a fast increase exactly when the engines are behind. Therefore:
+> - **The schedule below reads engine RPM**: pilot args **40/41** (left/right engine), operator
+>   **838/839** (`aircraft-layer/research/2026-11-19-mi24p-readable-args-recon.md`, DCS-BIOS
+>   cross-reference, calibration unconfirmed); use the lower of the two. At or above normal cruise
+>   output (~93%) → fast; tapering toward ~74% (fully spooled down) → gentle, ~5 s. First-cut
+>   thresholds from the user's readings, tunable.
+> - **Rotor RPM (arg 42/845) keeps only its existing role**, the reactive floor guard, and the floor
+>   is **85% because the generator trips below it** (electrical loss), not a soft preference. A
+>   fast acceleration already runs ~88%, so the 5% guard margin above 85% will engage during the
+>   brisk accelerations E14 asks for; that interaction is the implementer's to test on the toy
+>   plant and the card's to check.
+> - **Calibration (U9, reworded):** log args 40, 41, 42 (and 838/839/845) in the flight trace and
+>   calibrate against the user's three reference states; until confirmed, the schedule stays off
+>   (always "fast", today's behaviour) and the RPM guard stays on its dummy.
+>
+> Wherever the text below says "RPM" for the schedule, read **engine RPM**; diagram 2's "rotor RPM
+> read" participant likewise means engine RPM.
+
 **New, profile-level: `collective_rate_cap_from_rpm(rpm_pct)`.** Replaces nothing — the existing
 reactive guards (`collective_rate_cap_near_rpm_floor`, `rotor_rpm_near_floor_margin_pct`) stay
 exactly as they are, as the backstop they were always meant to be (alignment finding 3: "the RPM
@@ -1051,7 +1076,11 @@ in full (reproduced above) and `body-layer/config/defaults.toml`'s flight-contro
 
 ### Decisions Requiring User Input (amendment)
 
-- **U9: Confirm the rotor-RPM arg-42 calibration before the collective-rate schedule (C) goes
+- **U9 (reworded 2026-11-24 after the user's RPM readings — the schedule is on engine RPM, args
+  40/41/838/839; rotor RPM 42/845 stays the 85% generator-trip floor; see C's correction):**
+  calibrate both from one logged flight against the user's three reference states, schedule and
+  guard off until then. Original wording kept below for the record.
+- **U9 (original): Confirm the rotor-RPM arg-42 calibration before the collective-rate schedule (C) goes
   live, or ship it provisionally?** — recommend: add one calibration row to the (already-being-
   reflown) LV-1 card — hold a steady low-power descent/deceleration until RPM visibly droops on the
   cockpit gauge, compare the `arg_proxy` reading logged in the trace against the gauge by eye, then

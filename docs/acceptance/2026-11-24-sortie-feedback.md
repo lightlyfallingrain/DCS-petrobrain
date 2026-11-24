@@ -345,6 +345,34 @@ Main loop's reading:
    of the τ 0.25 s lag. Petrovich's own pedal moved at p99 **0.16 /s**, p95 0.06 /s: about 5×
    below what the aircraft allows.
 
+### Engine and rotor RPM, user's cockpit readings
+
+> In level flight, 170 km/h
+>
+> * engine RPM steady at ~93%
+> * rotor RPM steady at ~96%
+>
+> Fast acceleration
+>
+> * engine RPM ~98-100%
+> * rotor RPM ~88%
+>
+> Fast descent at collective full down
+>
+> * engine RPM ~74%
+> * rotor RPM ~100%
+>
+> When rotor RPM drops below ~85%, the generator trips off -> loss of electrical power. Therefore 85% is the rotor RPM low limit.
+>
+> using cockpit instrument readings, not raw data
+
+Main loop: **engine RPM and rotor RPM move in opposite directions** across these states. "Engines
+spooled down" (Q1) shows on **engine** RPM (74% in a fast descent) while rotor RPM is then at its
+highest (100%). So the collective-increase rate must be gated on engine RPM, not rotor RPM — a
+rotor-RPM gate would allow a fast increase exactly when the engines are spooled down. Rotor RPM's
+own role is the hard floor: 85% = generator trip (electrical loss), so the RPM guard's floor is
+85% plus margin, and a fast acceleration already runs at ~88%, close to it.
+
 ### Fourth re-fly logs (`logs-2026-11-24/refly4_*`, session starting trace line 3532)
 
 Main loop's read:
