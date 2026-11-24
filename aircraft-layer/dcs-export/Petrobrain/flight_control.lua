@@ -409,6 +409,12 @@ local function law_clamp(v, lo, hi)
     return v
 end
 
+local function law_sign(v)
+    if v > 0.0 then return 1.0 end
+    if v < 0.0 then return -1.0 end
+    return 0.0
+end
+
 -- Turn rate (deg/s) for a coordinated turn at `bank_deg`, at true
 -- airspeed `v_t_mps` -- `g*tan(bank)/V`, converted from rad/s to deg/s.
 -- Guards a near-zero/absent airspeed (returns 0 -- "no rate" is the
@@ -847,7 +853,21 @@ local function law_update(state, dt, measured, limits, profile)
     local u_c_rate_nominal = (u_c_candidate - state.u_c) / dt
     local u_c_rate = u_c_rate_nominal
     if u_c_rate > 0.0 then
-        if state.t_y >= (profile.pedal_limit_positive - profile.pedal_near_limit_margin) then
+        -- Debug-2026-11-24 fix round -- which pedal limit a collective
+        -- increase actually pushes `t_y` toward is whatever sign
+        -- `k_pedal_from_collective_rate * rotor_dir` (section F's own
+        -- torque feed-forward coefficient) carries, not a fixed limit
+        -- name: deriving it here means a future sign correction to
+        -- that coefficient or to `rotor_dir` moves this guard with it,
+        -- rather than stranding it on the wrong side again.
+        local pedal_push_sign = law_sign(profile.k_pedal_from_collective_rate * profile.rotor_dir)
+        if pedal_push_sign > 0.0
+            and state.t_y >= (profile.pedal_limit_positive - profile.pedal_near_limit_margin)
+        then
+            u_c_rate = math.min(u_c_rate, profile.collective_rate_cap_near_pedal_limit)
+        elseif pedal_push_sign < 0.0
+            and state.t_y <= (profile.pedal_limit_negative + profile.pedal_near_limit_margin)
+        then
             u_c_rate = math.min(u_c_rate, profile.collective_rate_cap_near_pedal_limit)
         end
         -- Only a further *increase* is ever capped by either guard --
