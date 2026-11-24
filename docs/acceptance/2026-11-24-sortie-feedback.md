@@ -91,4 +91,23 @@ ball-loop gain sign.
 > Could be that pedals are read from copilot.
 > -> controls must be read and written from which ever seat player is in
 
+## User's controls and DCS settings (answer to the trim questions)
+
+> These flights were with SAU off, so I did not press pedal trimmer.
+> The Pedal Damper and/or Adjustable stops (SAU thing) may affect this. But I did also try with them off and still the pedal take over jumps.
+>
+> My Mi-24 special settings:
+> - Stick Trimmer Mode: Joystick Without Springs and FFB
+> - Pedals Trimmer Mode: Instant Trim
+> - Pedals Microswitch Logic: Enable/Disable by presence/absence of pedal movement
+> - Pedals Trimmer Button: do not trim
+>
+> I have the Pedals Microswitch Button bound to my joystick and that is what I use (and refer to as pedal trimmer) when I want the SAU to hold my heading.
+> My controllers are not spring centered, cyclic, pedal and collective axises remain where I put them. Not FFB, I just removed the springs.
+
+Main loop's note: the stick runs a no-springs trimmer mode and holds exactly at a take; the pedals
+run "Instant Trim", a mode meant for spring-centred pedals, and only the pedals jump. That points the
+trim-offset hypothesis (`plans/flight-lift-vector/debug-2026-11-24b.md`) at the pedal trimmer mode,
+not at a trimmer press. Not proven; the next trace (`a1103` next to `out_pedals`) gives the offset.
+
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
