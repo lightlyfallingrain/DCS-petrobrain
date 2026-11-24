@@ -516,8 +516,8 @@ SAU H, K and T off itself before each new take.
 2. **LV-1 — forward-flight law, no hand-back (gated on LV-0's frame answers).** B–F, H, I, the
    ordinary chain in G, the gain schedule `G(V)` **defined down to 0** with its gentlest value at the
    low end. **Amended 2026-11-24** (fourth re-fly, "LV-1 amendment" below): this build also carries
-   the new take-mode bank hold (A), the rebalanced speed feed-forward (B), the rotor-RPM-gated
-   collective schedule (C), and the raised pedal gains (D) — not a new stage, the same LV-1 card
+   the new take-mode bank hold (A), the rebalanced speed feed-forward (B), the **engine**-RPM-gated
+   collective schedule (C; corrected 2026-11-24 from rotor RPM), and the raised pedal gains (D) — not a new stage, the same LV-1 card
    reflown. The removed pieces in the table go, **including the 80 km/h hand-back** (U1): Lua's IAS
    release and `too_slow` take refusal, body-layer `TOO_SLOW` with its speech line and rules-README
    entry, and **every commanded-speed floor** (U8, no floor): `MIN_IAS_KMH` is removed outright,
@@ -763,6 +763,11 @@ amendment needs already exist and are not reinvented:
    engines are already at normal output, gradual when they are spooled down) is exactly a function
    of this one reading — no new telemetry, no engine/torque proxy needs inventing; this is the
    calibration flight that reading was always waiting for.
+   **Superseded 2026-11-24 (same day, user's cockpit readings, see C's correction):** Q1's rule is
+   a function of **engine** RPM, not rotor RPM — the two move oppositely (descent: engine 74%,
+   rotor 100%). A **new read is needed**: engine RPM args 40/41 (pilot) and 838/839 (operator),
+   lower of the two, calibration unconfirmed. Arg 42/845 (`read_rotor_rpm_pct`) keeps only the
+   85% generator-trip floor guard. Both get logged in the trace and calibrated from one flight (U9).
 
 ### Why this amendment is judged (restated from `alignment.md`)
 
@@ -800,16 +805,16 @@ sequenceDiagram
   participant Shaper as speed shaper (B, kept)
   participant Pitch as cyclic (D)
   participant Coll as collective (E)
-  participant RPM as rotor RPM read (NEW: arg_proxy)
+  participant RPM as engine RPM read (NEW: args 40/41, 838/839)
   participant Pedal as pedal (F)
   Pilot->>Shaper: a_f,d up to speed_accel_cap_mps2 (schedule-scaled)
   Shaper->>Pitch: a_f,d ~1.8-1.9 m/s^2 (unchanged formula)
   Note over Pitch: theta_ff now reaches close to atan(a_f,d/g)<br/>within 1-2s (feed-forward split revised,<br/>not the slow trim loop alone)
   Pitch->>Coll: n_d from a_d (unchanged feed-forward)
-  RPM->>Coll: rotor RPM % this frame
-  alt Coll: RPM near 100% (level cruise before the command)
+  RPM->>Coll: engine RPM % this frame (lower engine)
+  alt Coll: engine RPM at or above ~93% (level cruise before the command)
     Coll->>Coll: collective rate near its stop/pedal/rate cap -- fast, ~6s to full (E14)
-  else Coll: RPM below spooled threshold (after a deceleration/descent)
+  else Coll: engine RPM spooled down toward ~74% (after a deceleration/descent)
     Coll->>Coll: rate tapered by RPM -- gradual, ~5s (E15 roll-out)
   end
   Coll->>Pedal: torque FF scaled with collective RATE (k_pedal_from_collective_rate, raised)
@@ -825,8 +830,10 @@ output, so increasing collective is no problem. When descending or decelerating 
 engines spool down as torque is not needed. Then adding lot's of collective in that state quickly
 slows down the rotor... That is why collective increase need to be gradual, when engine RPM is
 low initially. When engine RPM is high initially, the collective increase can be fast as well."*
-Built as a **rotor-RPM-gated collective-rate schedule** (new, see "Collective rate" below),
-reading the existing `read_rotor_rpm_pct()` once its calibration is confirmed (U9).
+Built as an **engine-RPM-gated collective-rate schedule** (new, see "Collective rate" below),
+reading a **new** engine-RPM read (args 40/41, operator 838/839, lower of the two) once its
+calibration is confirmed (U9). *(Corrected 2026-11-24: first written as rotor-RPM-gated via
+`read_rotor_rpm_pct()`; the user's readings showed that inverts the rule — see C.)*
 
 **Answered 2026-11-24, Q2 — speed-change character:** *"brisk."* Built: the speed channel's own
 feed-forward reaches its target promptly (1-2 s), superseding section I's "gentle transition" for
@@ -937,7 +944,7 @@ versus how much is left for the several-seconds-slow trim loop to learn.
   of a take is unaffected by this — section A above is what governs it, and it stays bit-exact and
   gentle by construction (the shaper's own S-curve, never skipped).
 
-### C. Collective rate — E14/E15/Q1, the rotor-RPM-gated schedule
+### C. Collective rate — E14/E15/Q1, the engine-RPM-gated schedule (corrected from rotor RPM)
 
 > **Corrected 2026-11-24, same day (main loop, from the user's cockpit readings):** gate on
 > **engine** RPM, not rotor RPM. User, verbatim: *"In level flight, 170 km/h — engine RPM steady
