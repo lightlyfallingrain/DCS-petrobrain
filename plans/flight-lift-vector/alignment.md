@@ -519,3 +519,74 @@ control on row 10 (LV-3 low-speed scope, and LV-1's slow-flight row did its job 
    "stop turn" is one phrase — unless this is a handover you make often.)
 5. "Pedals move more slowly in Mi-24 anyhow": do you mean the aircraft's yaw response is slow, so
    Petrovich's pedal corrections should be **faster** than now? (Recommend: yes, per rows 4 and 7.)
+
+## Plan alignment — 2026-11-24 — LV-1 amendment
+
+**Verdict:** CONCERNS
+
+Checked `plan.md` "LV-1 amendment (2026-11-24, fourth re-fly)" to the end (branch
+`feature/bl16-lift-vector-law`, detached at `2ce1b61a`) against the goal check above (E11–E17) and
+the five answered questions, plus `docs/acceptance/2026-11-24-sortie-feedback.md`'s own answers.
+
+| expectation | stage | status |
+|---|---|---|
+| E11 — take in a bank keeps the bank | A | met — new `hdg_mode="bank"`, `bank_hold_deg=φ̄` (averaged), 5° threshold, `a_r,d = g·tan(bank_hold_deg)` bypassing the turn-rate path finding 2 named |
+| E12 — mode2→mode1 mid-turn never rolls level first | A (E12 sub-section) | met, flagged — fix located in `law_init_at_take`'s unpark branch by symptom (t=366.5/409.5 trace), not yet by line; ships inside LV-1 per answered U10, not its own stage |
+| E13 — height/speed held through a held bank | A, diagram 1 (HOLD2) | met — explicit, both in prose ("E13" cited directly) and the diagram |
+| E14 — speed change ~20 s, −15° onset in 1–2 s | B, C | met in design intent; **contradicted in part** by stale rotor-RPM text in C's own header and lead-in — see Finding 1 |
+| E15 — deceleration mirrors it, collective up over ~5 s | C | met — same RPM-gated taper formula serves both, by design; same Finding 1 caveat on which RPM it reads |
+| E16 — fast, frequent, small corrections; pedal keeps up with collective | D, E | met, with an unverified margin — gain increases (ball P-term, torque FF 0.25→~0.6) are asserted to close the 0.16/s → ~0.9/s gap from one measured case (row 4); not computed for rows 7/8-9's conditions. Not a contradiction — same "first cut, card measures" posture as every other gain here — but worth naming, see Finding 2 |
+| E17 — breaks fly as an aggressive escape | F → **LV-2** | deferred → Stage LV-2 (`F. Breaks — LV-2, recorded only`; the user's verbatim complaint is carried into F's text, and the roadmap diagram names LV-2's card "breaks, floor, RPM dummy") |
+| Q1 — collective rate depends on engine state, not manoeuvre | C (same-day correction) | met for the corrected design itself; **contradicted** by un-updated text elsewhere in the same section's lead-in and the "Decisions answered" paragraph — Finding 1 |
+| Q2 — speed change is brisk, including on a speed-gap take | B, I (dated note) | met — section I itself carries the restriction to the speed channel, not silently overridden |
+| Q3 — only heading-type commands end a held turn; height/speed hold | A, "What reading the code turned up" §1 | met — shown to be already true of `apply_set`'s per-field writes, confirmed by a direct code read, not merely asserted |
+| Q4 — keep the 5° rule as stated, vignette 5 accepted | "Decisions answered" | met — no design change, accepted as a named consequence |
+| Q5 — pedal should get faster, not slower | D, "Decisions answered" | met — explicitly closes goal-check Finding 1, with the measured aircraft cap (~0.9/s) and Petrovich's own rate (p99 0.16/s) as the gap to close |
+
+### Findings
+
+1. **Three passages still reason on the wrong RPM after the same-day engine/rotor correction.**
+   Lens: evidence rule / purpose.
+   - **Assumption:** the correction box at the top of section C ("gate on **engine** RPM, not rotor
+     RPM... wherever the text *below* says RPM, read engine RPM") fully supersedes every earlier
+     mention.
+   - **In the plan:** it does not reach backward. Three places still describe the *rotor*-RPM
+     reading as the mechanism:
+     - The section's own header, unchanged: `### C. Collective rate — E14/E15/Q1, **the
+       rotor-RPM-gated schedule**`.
+     - "Decisions answered," Q1: *"Built as a **rotor-RPM-gated** collective-rate schedule (new,
+       see 'Collective rate' below), reading the existing `read_rotor_rpm_pct()` once its
+       calibration is confirmed (U9)."* `read_rotor_rpm_pct()` reads arg 42 — rotor RPM, not the
+       engine args (40/41/838/839) the correction requires.
+     - "What reading the code turned up," point 2: *"A rotor-RPM read already exists, flagged for
+       exactly this use... no new telemetry, no engine/torque proxy needs inventing; this is the
+       calibration flight that reading was always waiting for."* This directly contradicts the
+       correction, which **does** require a new read (args 40/41, operator 838/839) that no cited
+       function currently reads.
+   - **The pilot would see:** if an implementer builds from these three passages rather than the
+     correction box, the schedule gates on rotor RPM — exactly the inversion the user's cockpit
+     readings were given to prevent (fast collective allowed precisely when the engines are
+     spooled down, because rotor RPM is then at its *highest*, 100%).
+   - **Grounded in:** `plan.md` lines ~940 (header), ~828–829 (Q1 decision text), ~758–765 ("what
+     reading the code turned up" point 2), against the correction box immediately below the header
+     and the user's cockpit readings in the sortie feedback.
+   - **Suggests:** before Implementer, reword the header to "the engine-RPM-gated schedule," amend
+     the Q1 decision paragraph to name args 40/41/838/839 and drop "reading the existing
+     `read_rotor_rpm_pct()`," and correct point 2 to say a new engine-RPM read is needed (it is not
+     "the calibration flight that reading was always waiting for" — that line described the rotor
+     read, now relegated to the unchanged generator-trip floor).
+
+2. **Pedal gain increases are asserted to close the 0.9/s gap from a single measured case.** Lens:
+   evidence rule. Not a contradiction — the plan explicitly treats `c_theta`, the collective
+   schedule's thresholds, and these pedal gains the same way ("first cut... measured on the LV-1
+   card"), which is this project's own established posture for every gain in this law. Flagging
+   only because the task asked specifically: the row-4 climb's measured "~0.6 per unit collective
+   rate" is the only case computed; rows 7 and 8–9 (take at 70 km/h, take-from-bank) are not
+   checked against whether the same gain reaches close to ~0.9/s under their own collective-rate
+   and ball-error magnitudes. No suggested change — the card is where this gets settled, same as
+   the rest of section D.
+
+### Questions for the user
+- None — all open questions from the goal check (Q1–Q5) are answered and the answers are reflected
+  in the plan's decisions (modulo Finding 1's stale text, which is a plan-wording fix, not a
+  question).
