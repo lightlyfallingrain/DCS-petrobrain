@@ -475,3 +475,21 @@ different flight segment than the trace sent (a later mission run, or T+ counted
 other than mission time). Partial fit only: with the 0–110% gauge scale (arg × 110), level flight
 in this trace reads engine ~91–92%, rotor ~96% — consistent with the level reading. The full
 calibration needs the trace that covers T+0:51 / 1:10 / 2:10.
+
+**RPM trace received (`logs-2026-11-25/rpm_*`, user: *"The trace for RPMs"*), T+ = mission time.**
+Calibration, gauge reading vs arg at the three moments:
+
+| state | t | engine args 40/41 | engine gauge | rotor arg 42 | rotor gauge |
+|---|---|---|---|---|---|
+| level 170 | 51 | 0.830 / 0.832 | 92 | 0.872 | 97 |
+| fast accel | 70 | 0.900 / 0.887 | 99 / 98 | 0.811 | 90 |
+| full-down descent | 130 | 0.665 / 0.666 | 74 | 0.915 | 101 |
+
+**gauge % = arg × 110** (the 0–110 % scale) fits all six within 1.1 % — inside needle-reading
+precision. Args 838/839 equal 40/41; 845 equals 42 (pilot and operator gauges are one value).
+
+**Finding that matters for the law:** in the user's hand-flown fast acceleration (collective
+0.13 → full in ~3 s, t=58–62), rotor RPM fell to **85.4 %** at t=65 — at the generator-trip
+floor — then recovered to ~90 % by t=70, where the user read it. A brisk full-collective
+acceleration therefore sits on the 85 % limit; the rotor-RPM guard has to bite there, not be a
+formality.
