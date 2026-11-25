@@ -135,3 +135,83 @@ re-review Stages 1–3's own code beyond what Stage 4 renamed/threaded through i
 (`review-stages-1-3.md`) already covers that ground and nothing in this diff reopens it. The
 frozen-feed scenario was reproduced directly against the real function, not asserted from
 reading.
+
+### Fix round (commit `baba22f4`)
+
+**Re-reviewed on `feature/bl-b124-light-level`, fast-forwarded cleanly (HEAD was a strict
+ancestor of `baba22f4`, tree clean, no divergence).**
+
+**Required Fix 1 — fixed, and the fix is correct.** The guard at `_resolve_sun_elevation_deg`
+(`body.py`) is now `if fresh is not None and fresh != runner.light_level_last_clock:` — a
+sample counts as fresh only when it differs from the one already stored, so a dead/frozen
+feed (same cached `mission_clock` dict served forever) now falls into the pre-existing
+unavailable/grace-window/one-shot-error path instead of silently refreshing the timers every
+poll. Both the function's own docstring and the `light_level_unavailable_since_wall` field
+comment were updated to match the new condition — the old prose was the exact premise the
+defect lived under, and both now correctly state "genuinely new" rather than "parsed."
+
+Verified three ways, independently of the implementer's own mutation note:
+
+1. **Reproduced the original defect's absence, by mutation against the real function.**
+   Reverted the guard to the pre-fix `fresh is not None`, ran the three new tests —
+   `test_a_frozen_feed_serving_the_same_dict_forces_dark_and_logs`,
+   `test_repeated_identical_sample_does_not_reset_the_unavailable_timer`,
+   `test_extrapolation_keeps_advancing_through_a_run_of_repeated_samples` — and all three
+   failed for the stated reason (the extrapolation one with a direct numeric mismatch,
+   `75.940... != 75.933...`; the other two on the `is None`/equality assertions). Restored the
+   file; `diff` against the pre-mutation copy was empty, confirming an exact restore. This is
+   the same reproduction this review ran against the original defect, now run against the
+   fix's absence — the three tests are the ones actually carrying the fix, not decorative.
+2. **Dead feed → forced-dark + one error: confirmed directly**, by reading the new
+   `test_a_frozen_feed_serving_the_same_dict_forces_dark_and_logs` test and its pass under the
+   restored code: ~57 simulated minutes of an identical repeated dict, then the wall-clock
+   timer pushed past `MISSION_CLOCK_MAX_AGE_S`, ends in `SIGHT_FULL_DARK_SUN_ELEV_DEG` and
+   `light_level_error_logged is True` — the exact outcome Required Fix 1 asked for.
+3. **Healthy feed at 1 Hz, body-layer polling faster, cannot trip the error falsely or stall
+   extrapolation — checked by reading the numbers, not assumed.** A genuine sample seen on
+   several consecutive fast polls before the Hook's next 1 Hz update *will* repeat the dict and
+   *will* start `light_level_unavailable_since_wall` ticking on the first repeat (the guard
+   cannot distinguish "about to get a new sample next tick" from "the feed just died" — it has
+   no other signal to go on, same limitation the Required Fix's own remedy text names as
+   unresolved). But `MISSION_CLOCK_MAX_AGE_S` defaults to 5.0 s (`lo=2.0`/`hi=30.0`,
+   `perception/light_level.py`) against a 1 Hz source, i.e. several poll cycles of slack — the
+   timer clears back to `None` the moment the next genuinely-new sample arrives, long before
+   5 s elapses under any live cadence, so no false error is reachable at the shipped default.
+   Extrapolation does not stall either: `light_level_last_clock_model_time_s` is only
+   reassigned on a genuinely-new sample now, so a run of repeats keeps extrapolating from the
+   *last real* sample's capture time rather than re-anchoring (and therefore freezing) on every
+   repeat — `test_extrapolation_keeps_advancing_through_a_run_of_repeated_samples` is exactly
+   this case and passes.
+4. **Mission restart reset — confirmed.** `ConsolePerceptionRunner.reset_for_new_mission`'s own
+   docstring lists `light_level_last_clock`/`light_level_last_clock_model_time_s`/
+   `light_level_unavailable_since_wall`/`light_level_error_logged`/
+   `light_level_sun_elevation_deg` among the fields that reset to their declared default on a
+   genuine DCS mission (re)start, and `_reset_mission_state` calls it. A frozen sample from a
+   mission that just ended cannot leak across a restart and be compared against the new
+   mission's first real sample as "unchanged."
+
+**Scope held**: only `body-layer/src/body.py`, its own tests, and `implementation.md` changed
+— no aircraft-layer file touched (`git show --stat baba22f4`), consistent with the fix being
+entirely on the consumer side of the existing wire shape, not a wire/schema change. The
+Optional Refinement on wall-clock-vs-sim-time was correctly left as a live-test-card item, not
+silently folded into this fix — `implementation.md`'s own "Review fix round" section gives the
+reasoning (reworking four pre-existing tests for an optional refinement would exceed the
+required fix's own scope).
+
+**Checks, this round**: `ruff format --check`/`ruff check` clean on `body-layer/src`,
+`body-layer/tests`; `cd body-layer && .venv/bin/mypy src` clean (94 files); body-layer full
+suite (`pytest tests -q -m "not slow" -n auto`, run against the real venv since this worktree
+carries none of its own) — 3772 passed, 4 xfailed (the review's prior 3769 + the 3 new tests,
+exactly accounted for). No tunable changed, so `config/defaults.toml` correctly untouched.
+
+### Fix Round Verdict
+APPROVED
+
+### Fix Round Review Confidence
+Full read of the fix commit's diff (`body.py`, `test_body.py`, `implementation.md`).
+Mutation-verified the fix itself (guard reverted, all three new tests failed for the stated
+reason, restore confirmed exact by `diff`). The healthy-feed-at-1Hz concern was checked
+analytically against the shipped default and bounds, not reproduced with a live 1 Hz
+simulation — the margin (5 s grace vs. ~1 s cadence) is wide enough that this is adequate
+confidence without a timed reproduction, and the live test card already carries the one
+scenario (a deliberate pause) that genuine-cadence analysis alone cannot settle.
