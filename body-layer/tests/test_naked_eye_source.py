@@ -2243,6 +2243,32 @@ def test_launch_flash_wins_over_burning_for_the_same_unit() -> None:
     assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
 
 
+def test_at_full_dark_only_the_light_source_is_visible() -> None:
+    """`BL-B124`'s own central claim (plan's "two independent mechanisms"
+    diagram): the ambient light factor and the emitter bypass are
+    structurally separate, so at full dark (`light_factor` forced to
+    `(0.0, 0.0, 0.0)`, same as `body._resolve_sun_elevation_deg` would
+    hand `NakedEyePerceptionSource` once a mission's clock is unreadable
+    or the sun is below `SIGHT_FULL_DARK_SUN_ELEV_DEG`) an ordinary T-72B
+    at 500 m -- comfortably inside its own 2333.33 m clear-day `lowres`
+    presence threshold (`test_visibility.py`'s own derivation) -- is
+    invisible, while a second T-72B at 9 km with a `LAUNCH_FLASH` entry
+    still comes through, presence only, exactly as it would in daylight."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects, firing=_launch_flash_active_map("unit_2"))
+    source.light_factor = (0.0, 0.0, 0.0)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
+
+
 # -- Cluster-level fold, genuine multi-member clusters (`plans/
 # taking-fire-visible-shooter/debug.md` review: every fold test above --
 # `member_emitter_kinds` and `member_targets_ownship` alike -- used a
