@@ -26,6 +26,10 @@ pilot can trust what Petrovich does and does not report.
   once the mission runs = error (Q6), never a daylight fallback. Where this amendment and older
   text below disagree, **this amendment wins** (the "Affected modules" MI-3/MI-6 and `Export.lua`
   bullets, the first diagram's inputs, Stage 1, U2).
+- **Hybrid channel (plan check Finding 1):** user, 2026-11-25: *"\"DCS's own AI Petrovich puts in
+  its target list\" this will be phased out. Ignore this path completely."* `HybridPerceptionSource`
+  (ED's `list_indication`) gets **no** light gate and is not touched by this work; the light factor
+  applies to the naked-eye/optic path only.
 
 ### Inputs read in full
 

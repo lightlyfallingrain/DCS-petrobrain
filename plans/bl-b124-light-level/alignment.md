@@ -246,3 +246,13 @@ column at 3 km identified as BMPs at sunset.
 ### Questions for the user
 
 1. Does ED's own engine detector (the gate behind `list_indication`, i.e. the `HybridPerceptionSource` channel) already degrade with darkness on its own, or does this work need to add a light gate to that channel too? Nothing in this plan or its investigator notes checked this, and it is load-bearing for E4 ("Petrovich reports nothing that is not giving off light") — production runs both perception channels every poll into one `ContactStore`.
+
+### Resolution — 2026-11-25 (main loop)
+
+- **Finding 1 / the hybrid-channel question:** user: *"\"DCS's own AI Petrovich puts in its target
+  list\" this will be phased out. Ignore this path completely."* No light gate on
+  `HybridPerceptionSource`; recorded in the plan's amendment. Concern closed.
+- **Finding 2:** accepted as noted — rename when moonlight is built.
+- **Finding 3:** fixed in the plan's Risks section (4ed01f52).
+
+Verdict after resolution: **ALIGNED** — proceed to Implementer.
