@@ -105,8 +105,8 @@ SIGHT_FULL_DARK_SUN_ELEV_DEG: float = tuning.real(
 #: is a first-cut estimate per the explore-notes, not a measurement -- the
 #: test card's dawn pass narrows it. `lo=1.0` keeps this value
 #: structurally above the nearest measured anchor (+0.3 deg) by at least
-#: a few tenths of a degree, for the same reconciliation reason as
-#: `SIGHT_FULL_DARK_SUN_ELEV_DEG`'s `hi` bound above.
+#: a few tenths of a degree, so the piecewise-linear curve below never
+#: has to reconcile an override that crosses a fixed anchor.
 EYE_FULL_DAYLIGHT_SUN_ELEV_DEG: float = tuning.real(
     "perception.light_level.EYE_FULL_DAYLIGHT_SUN_ELEV_DEG",
     6.0,
