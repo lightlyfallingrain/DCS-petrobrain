@@ -42,6 +42,13 @@ _FLIGHT_CONTROL_LUA = (
     / "flight_control.lua"
 )
 
+#: review-debug-1125.md required fix 1 -- `TestAmendmentProductionValuesTogether`'s own tests
+#: below read the shipped `omega_speed`/`k_speed_error`/`c_theta`/`speed_accel_cap_mps2` from
+#: this file directly (via the Lua driver's own `dofile`), rather than retyping them, so the
+#: fifth re-fly's own gap (a profile constant moved, no committed test ever ran the new value)
+#: cannot recur a third time on the same four fields.
+_FLIGHT_PROFILE_LUA = _FLIGHT_CONTROL_LUA.parent / "flight_profile.lua"
+
 _EXEC_TOOLS: tuple[str, ...] = ("luajit", "lua5.5", "lua5.1", "lua")
 
 
@@ -2085,12 +2092,14 @@ print(string.format("%.6f", second_half_max_speed_err))
         # 0.3) comes back out untouched, with the raised gains active.
         assert abs(take_pitch - 0.0) < 1e-6
         assert abs(take_collective - 0.3) < 1e-6
-        # Stable: the pitch reference stays well inside a plausible
-        # envelope rather than running away (theta_min/max_deg is +-15,
-        # but theta_d's feed-forward is not itself clamped to that --
-        # 30 deg is a generous "did not diverge" bound, not a tuned
-        # limit).
-        assert max_abs_theta_d < 30.0
+        # Stable: `theta_d` (the sum `theta_i + delta_theta_ff`) never
+        # exceeds `theta_min/max_deg` (review-debug-1125.md required fix
+        # 2 -- this used to be a loose "did not diverge" bound at 30 deg
+        # since only `theta_i` alone was clamped; the combined clamp
+        # added in the fifth re-fly now bounds the real invariant
+        # directly, see `TestCombinedThetaDClamp` below for a scenario
+        # that actually drives the sum past the bound on its own).
+        assert max_abs_theta_d <= 15.0 + 1e-6
         # Ball/pedal keep up: the crude yaw-coupling plant never drives
         # the ball anywhere near its usable range (+-0.5), and the
         # pedal never sits pinned at its own limit -- both signs the
@@ -2192,6 +2201,192 @@ print(string.format("%.6f", max_overshoot_second))
         # No growing oscillation: overshoot in the second half of the
         # run is not larger than in the first half.
         assert overshoot_second <= overshoot_first + 0.5
+
+    @staticmethod
+    def _speed_shaper_no_windup_metrics(
+        start_kmh: float, target_kmh: float
+    ) -> tuple[float, float, int, str]:
+        """review-debug-1125.md required fix 1 -- the fifth re-fly's own
+        anti-windup fix (the `dv_ref` braking-distance ceiling), proved
+        against the actual shipped profile constants (`omega_speed`,
+        `k_speed_error`, `c_theta`, `speed_accel_cap_mps2`, read from
+        `flight_profile.lua` itself, not retyped) rather than the fourth
+        re-fly's superseded `c_theta=0.85` this class's other two tests
+        still use. `LIMITS.max_accel_mps2` is overridden to 2.0, the
+        shipped `belief.flight_control.MAX_ACCEL_MPS2` on the body-layer
+        side (`aircraft-layer/CLAUDE.md`'s wire-field table) -- this
+        file has no cross-subproject import, so the figure is a literal
+        here, not read live; the debug report's own sweep used this
+        same figure, cited verbatim ("production max_accel_mps2=2.0").
+
+        Returns `(max_dv_ref, max_overshoot_mps, sign_changes, final_ias_line)`.
+        `max_dv_ref` is the mutation-sensitive measurement: `dv_ref` is
+        bounded by construction to `min(limits.max_accel_mps2,
+        dv_ref_ceiling)` in the shipped law, so it can never exceed
+        `limits.max_accel_mps2` -- deleting the ceiling's own clamp
+        entirely (not merely reverting to the pre-fix static-only bound,
+        which this specific 150<->250 step does not actually
+        distinguish from the shipped ceiling -- both stay pegged at the
+        same 2.0 cap for the whole saturated stretch, see
+        `plans/flight-lift-vector/implementation.md`) lets `dv_ref`
+        climb to ~4.8, more than double the production ceiling,
+        confirmed by mutation."""
+        driver_template = """
+local PRODUCTION_PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+PROFILE.omega_speed = PRODUCTION_PROFILE.omega_speed
+PROFILE.k_speed_error = PRODUCTION_PROFILE.k_speed_error
+PROFILE.c_theta = PRODUCTION_PROFILE.c_theta
+PROFILE.speed_accel_cap_mps2 = PRODUCTION_PROFILE.speed_accel_cap_mps2
+LIMITS.max_accel_mps2 = 2.0
+local measured = {measured}
+local command = { pitch = 0, roll = 0, pedals = 0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = {target_kmh} }, LIMITS, PROFILE)
+local dt = 0.05
+local plant_ax_gain = 0.17
+local trim_pitch = -3.5
+local target_mps = {target_kmh} / 3.6
+local start_kmh = {start_kmh}
+local target_kmh = {target_kmh}
+local max_dv_ref = 0.0
+local max_overshoot = 0.0
+local sign_changes, prev_sign = 0, nil
+for i = 1, 700 do  -- 35 s
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local tau = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau)
+    measured.q_deg_s = (state.theta_d - measured.pitch_deg) / tau
+    local ax = plant_ax_gain * (trim_pitch - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    if math.abs(state.dv_ref) > max_dv_ref then max_dv_ref = math.abs(state.dv_ref) end
+    local err = measured.ias_mps - target_mps
+    if (target_kmh > start_kmh and err > 0.0) or (target_kmh < start_kmh and err < 0.0) then
+        if math.abs(err) > max_overshoot then max_overshoot = math.abs(err) end
+    end
+    local sign = err > 0.02 and 1 or (err < -0.02 and -1 or 0)
+    if sign ~= 0 then
+        if prev_sign ~= nil and sign ~= prev_sign then sign_changes = sign_changes + 1 end
+        prev_sign = sign
+    end
+end
+print(string.format("%.6f", max_dv_ref))
+print(string.format("%.6f", max_overshoot))
+print(string.format("%d", sign_changes))
+print(string.format("%.6f", measured.ias_mps))
+"""
+        driver = (
+            driver_template.replace("{profile_path}", str(_FLIGHT_PROFILE_LUA))
+            .replace("{target_kmh}", str(target_kmh))
+            .replace("{start_kmh}", str(start_kmh))
+            .replace(
+                "{measured}",
+                _measured(
+                    pitch_deg=-3.5,
+                    ias_mps=start_kmh / 3.6,
+                    v_t_mps=start_kmh / 3.6 + 2.0,
+                ),
+            )
+        )
+        lines = _run(driver)
+        max_dv_ref, max_overshoot, sign_changes_str, final_ias = lines
+        return (
+            float(max_dv_ref),
+            float(max_overshoot),
+            int(sign_changes_str),
+            final_ias,
+        )
+
+    def test_150_to_250_no_windup_at_shipped_speed_shaper_values(self) -> None:
+        """150->250 km/h at the actual shipped `omega_speed=0.5`,
+        `k_speed_error=0.30`, `c_theta=0.90` (debug-2026-11-25.md's
+        second iteration) -- the fourth re-fly's own 0.85/0.2/0.15 this
+        class's other two tests still run is now superseded, and no
+        other committed test before this one ever ran the current
+        numbers together (review-debug-1125.md required fix 1)."""
+        max_dv_ref, max_overshoot, sign_changes, final_ias_s = (
+            self._speed_shaper_no_windup_metrics(150.0, 250.0)
+        )
+        # The mutation-sensitive invariant: `dv_ref` is bounded by
+        # construction to `limits.max_accel_mps2` (2.0) in the shipped
+        # law -- deleting the braking-distance ceiling's own clamp
+        # entirely lets it climb to ~4.8 instead (confirmed by
+        # mutation, see this method's own class docstring above).
+        assert max_dv_ref <= 2.0 + 1e-6
+        # No hunting: one sign change (the final settle), not a real
+        # oscillation -- debug-2026-11-25.md's own sweep at these values.
+        assert sign_changes <= 1
+        # Bounded overshoot -- debug-2026-11-25.md measured <=0.07 m/s
+        # on the stiffer 2.0/deg toy plant; this realistic-gain plant's
+        # own figure is larger (~0.41 m/s) but still small relative to
+        # the ~27.8 m/s step, not a runaway.
+        assert max_overshoot <= 1.0
+        # Settles near the target within the second iteration's own
+        # ~20-22s window, generous margin for this plant's own lag.
+        assert abs(float(final_ias_s) - 250.0 / 3.6) < 1.0
+
+    def test_250_to_150_no_windup_at_shipped_speed_shaper_values(self) -> None:
+        """The mirror direction, same production values -- debug-2026-
+        11-25.md's second iteration names both directions explicitly
+        (20.3s/21.5s, 19.7s/20.7s across the two plant-gain estimates)."""
+        max_dv_ref, max_overshoot, sign_changes, final_ias_s = (
+            self._speed_shaper_no_windup_metrics(250.0, 150.0)
+        )
+        assert max_dv_ref <= 2.0 + 1e-6
+        assert sign_changes <= 1
+        assert max_overshoot <= 1.0
+        assert abs(float(final_ias_s) - 150.0 / 3.6) < 1.0
+
+
+class TestCombinedThetaDClamp:
+    """review-debug-1125.md required fix 2 -- `theta_d` (section D) is
+    `law_clamp(theta_i + delta_theta_ff, theta_min_deg, theta_max_deg)`:
+    `theta_i` alone is already bounded to `[theta_min_deg, theta_max_deg]`
+    above this line, so the combined clamp only ever does anything when
+    `delta_theta_ff` (the feed-forward, never itself clamped) pushes the
+    *sum* past the bound `theta_i` alone sits inside. Presetting
+    `state.theta_i` to its own bound and then driving a large `a_f_d`
+    (via a big speed-goal step) in the same direction is what forces
+    exactly that: `theta_i` alone contributes nothing left to clamp, so
+    only `delta_theta_ff` pushing the sum over the line can trip this
+    assertion -- confirmed by mutation (removing the `law_clamp(...)`
+    wrapper around the sum lets `theta_d` reach -16.42 instead of -15.0
+    at `i=1` in this exact scenario)."""
+
+    def test_theta_i_plus_delta_theta_ff_is_clamped_to_the_bound(self) -> None:
+        driver = """
+local measured = {measured}
+local command = { pitch = 0, roll = 0, pedals = 0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+-- `theta_i` alone contributes no headroom to clamp -- it starts
+-- already pinned at its own bound, so only `delta_theta_ff` pushing
+-- the combined sum past it can trip the assertion below.
+state.theta_i = PROFILE.theta_min_deg
+-- A large step drives a sustained positive `a_f_d` (desired forward
+-- deceleration -- the law tracks IAS down toward a much higher
+-- commanded speed is backwards; a *much higher* goal against a lower
+-- current IAS drives `a_f_d` positive, which `law_theta_ff_deg` turns
+-- into a NEGATIVE `delta_theta_ff` -- the same sign as the pinned
+-- `theta_i`, so the two add rather than cancel).
+state = flight_control.law_apply_goal(state, { ias_kmh = 400.0 }, LIMITS, PROFILE)
+local dt = 0.05
+local max_abs_theta_d = 0.0
+for i = 1, 10 do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    if math.abs(state.theta_d) > max_abs_theta_d then max_abs_theta_d = math.abs(state.theta_d) end
+end
+print(string.format("%.6f", max_abs_theta_d))
+""".replace(
+            "{measured}",
+            _measured(pitch_deg=0.0, ias_mps=40.0, v_t_mps=42.0),
+        )
+        lines = _run(driver)
+        max_abs_theta_d = float(lines[0])
+        # The real invariant (review-debug-1125.md required fix 2): the
+        # *sum* never exceeds `theta_max_deg` (15.0) -- not the old
+        # 30 deg "did not diverge" bound, which this scenario would
+        # pass even with the combined clamp removed entirely.
+        assert max_abs_theta_d <= 15.0 + 1e-6
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:
