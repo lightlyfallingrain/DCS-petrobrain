@@ -608,6 +608,17 @@ SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
 # source: perception/gaze.py:SIGHT_AHEAD_WINDOW_DWELL_S
 SIGHT_AHEAD_WINDOW_DWELL_S = 30.0
 
+[perception.light_level]
+# Above this sun elevation, the naked eye (and every other optic) is at its full clear-day range -- today's unmodified behaviour.
+# status: judgement | range: 1.0 .. 15.0
+# source: perception/light_level.py:EYE_FULL_DAYLIGHT_SUN_ELEV_DEG
+EYE_FULL_DAYLIGHT_SUN_ELEV_DEG = 6.0
+
+# Below this sun elevation, every optic -- including the 9K113's orange filter -- sees nothing but light sources (plan E4: "In real darkness, cannot see anything.").
+# status: judgement | range: -30.0 .. -6.0
+# source: perception/light_level.py:SIGHT_FULL_DARK_SUN_ELEV_DEG
+SIGHT_FULL_DARK_SUN_ELEV_DEG = -12.0
+
 [perception.naked_eye_source]
 # `plans/attack-run-sortie-fixes/plan.md` (BL-B70 §9) -- how stale the attack-run target's own live LOS verdict may be before `belief.attack_run._no_look_cause` treats it as no verdict at all (`"unknown"`, fail-open) rather than a real `"obstructed"` call; a *smaller* value here is the dangerous direction, since it starts discarding genuinely fresh verdicts and reporting `"unknown"` instead.
 # status: agreed-guess | range: 0.5 .. 3.0
