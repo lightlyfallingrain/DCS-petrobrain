@@ -58,6 +58,7 @@ from belief.optic_policy import (
     sight_look_optic,
 )
 from perception.gaze import GLASS_BUDGET_PER_CYCLE_S
+from perception.light_level import SIGHT_FULL_DARK_SUN_ELEV_DEG, light_factor
 from perception.optics import (
     BINOCULAR_OPTIC,
     SIGHT_NARROW_OPTIC,
@@ -4636,3 +4637,62 @@ class TestAreaCheckLook:
         assert state.phase is OpticPhase.SEARCHING
         assert decision.optic is BINOCULAR_OPTIC
         assert state.area_look_reports["AREA"] == prior_report
+
+
+class TestBlB124SunElevationPerOptic:
+    """`BL-B124` Stage 4's own correctness fix (`_light_factor_for`'s own
+    docstring): `improvement_window_m` compares `UNAIDED_OPTIC` against
+    `BINOCULAR_OPTIC` in one call, and each optic's measured light-factor
+    curve is genuinely different (the user's own dawn anchors -- the
+    plan's -3.5 deg anchor, `perception.light_level._MEASURED_FACTORS`,
+    gives the naked eye a class factor of 0.500 and binoculars 0.143).
+    A shared factor applied to both sides (the defect Stage 4 fixed in
+    the Stage 3 plumbing it inherited) would shrink both bounds by the
+    *same* ratio; this test fails if that regresses."""
+
+    def test_improvement_window_m_shrinks_each_bound_by_its_own_optics_factor(
+        self,
+    ) -> None:
+        sun_elev = -3.5
+        # Sanity: the two optics' own curves really do differ at this
+        # anchor -- if this ever stopped being true the rest of the test
+        # would prove nothing.
+        assert light_factor(UNAIDED_OPTIC, sun_elev) != light_factor(
+            BINOCULAR_OPTIC, sun_elev
+        )
+
+        lower_m, upper_m = improvement_window_m(
+            "T-72", current_level="presence", sun_elevation_deg=sun_elev
+        )
+        lower_m_full, upper_m_full = improvement_window_m(
+            "T-72", current_level="presence", sun_elevation_deg=None
+        )
+        assert lower_m_full > 0.0
+        assert upper_m_full > 0.0
+        lower_ratio = lower_m / lower_m_full
+        upper_ratio = upper_m / upper_m_full
+        # Each bound shrank by its own optic's factor -- the two ratios
+        # must not coincide, since the eye's and binoculars' own class
+        # factors at this anchor (0.500 vs 0.143) do not.
+        assert lower_ratio != pytest.approx(upper_ratio, rel=0.05)
+
+    def test_sight_can_still_improve_resolves_sight_narrows_own_factor(
+        self,
+    ) -> None:
+        """`sight_can_still_improve` is reached as a bare `can_improve`
+        callback, wrapped in a closure by `_decide_sighting` so the real
+        `sun_elevation_deg` reaches it -- called directly here the same
+        way that closure would call it."""
+        target = _target(object_type="T-72", current_level="presence", range_m=1.0)
+        # Comfortably inside SIGHT_NARROW_OPTIC's own dimmed class
+        # threshold at the -3.5 deg anchor (0.618 of its clear-day reach)
+        # -- the function must still say "yes", proving the real factor,
+        # not a stale `(1.0, 1.0, 1.0)` default, was applied and still
+        # passed (SIGHT_NARROW_OPTIC's own reach is generous enough at
+        # this close a range either way; the defect this guards is a
+        # missing wire-up, not a tight numeric edge).
+        assert sight_can_still_improve(target, sun_elevation_deg=-3.5)
+        # At full dark, the 9K113 sees nothing at all (plan E4).
+        assert not sight_can_still_improve(
+            target, sun_elevation_deg=SIGHT_FULL_DARK_SUN_ELEV_DEG
+        )

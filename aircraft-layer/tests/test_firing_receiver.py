@@ -10,8 +10,10 @@ import time
 
 from collector.firing_receiver import (
     EMITTER_KIND_FIRING,
+    EMITTER_KIND_LAUNCH_FLASH,
     FIRING_MIN_VISIBLE_S,
     FIRING_WATCHDOG_S,
+    LAUNCH_FLASH_DURATION_S,
     EmitterTracker,
     FiringEventsReceiver,
 )
@@ -227,25 +229,81 @@ def test_harmless_jitter_within_tolerance_does_not_clear_state() -> None:
     assert "Unit_1" in active
 
 
-def test_shot_event_does_not_create_an_entry() -> None:
-    """`[[BL-B74]]`'s seam, deliberately not acted on this stage."""
+def _shot(initiator: str, t_sim: float) -> FiringRawEvent:
+    return FiringRawEvent(
+        kind="S_EVENT_SHOT",
+        t_sim=t_sim,
+        initiator=initiator,
+        targets_ownship=False,
+        x=1.0,
+        z=2.0,
+    )
+
+
+def test_shot_event_creates_a_launch_flash_entry() -> None:
+    """`[[BL-B124]]` Stage 5 -- `S_EVENT_SHOT` (missile/rocket launch,
+    treated the same for both per the user's own words) now creates a
+    `LAUNCH_FLASH` entry at the launcher's own name, superseding the
+    `[[BL-B74]]`-seam no-op this test used to assert."""
     tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
+
+    active = tracker.snapshot()["active"]
+    assert active == {
+        "SAM-1": {
+            "kind": EMITTER_KIND_LAUNCH_FLASH,
+            "since_sim": 100.0,
+            "targets_ownship": False,
+        }
+    }
+
+
+def test_launch_flash_expires_after_its_own_fixed_window() -> None:
+    """Unlike `FIRING`, `LAUNCH_FLASH` is never watchdog-extended by
+    further events -- a fixed `LAUNCH_FLASH_DURATION_S` window from the
+    shot's own `t_sim`."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
+    assert "SAM-1" in tracker.snapshot()["active"]  # type: ignore[operator]
+
+    tracker.ingest(_batch(100.0 + LAUNCH_FLASH_DURATION_S + 0.1))
+    assert tracker.snapshot()["active"] == {}
+
+
+def test_shot_event_does_not_overwrite_an_existing_firing_entry() -> None:
+    """A unit already tracked as gun-firing (`S_EVENT_SHOOTING_START`)
+    that then launches a missile/rocket stays `FIRING` -- its own
+    watchdog is the longer-lived, more informative visibility state, and
+    overwriting it with a short `LAUNCH_FLASH` window would make a
+    sustained engagement go dark early."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _start("SAM-1", 100.0)))
+    tracker.ingest(_batch(100.1, _shot("SAM-1", 100.1)))
+
+    active = tracker.snapshot()["active"]
+    assert active["SAM-1"]["kind"] == EMITTER_KIND_FIRING  # type: ignore[index]
+
+
+def test_death_removes_a_launch_flash_entry_like_firing() -> None:
+    """`S_EVENT_DEAD`/`S_EVENT_CRASH` remove a `LAUNCH_FLASH` entry
+    outright too, independent of its own watchdog -- same reasoning as
+    the existing `FIRING` removal."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
     tracker.ingest(
         _batch(
-            100.0,
+            100.1,
             FiringRawEvent(
-                kind="S_EVENT_SHOT",
-                t_sim=100.0,
+                kind="S_EVENT_DEAD",
+                t_sim=100.1,
                 initiator="SAM-1",
                 targets_ownship=False,
-                x=1.0,
-                z=2.0,
+                x=None,
+                z=None,
             ),
         )
     )
-
-    active = tracker.snapshot()["active"]
-    assert active == {}
+    assert tracker.snapshot()["active"] == {}
 
 
 def test_empty_batch_before_anything_ingested_has_no_model_time() -> None:
@@ -253,6 +311,49 @@ def test_empty_batch_before_anything_ingested_has_no_model_time() -> None:
     snapshot = tracker.snapshot()
     assert snapshot["dcs_model_time_s"] is None
     assert snapshot["active"] == {}
+    assert snapshot["mission_clock"] is None
+
+
+def test_snapshot_carries_the_most_recent_batchs_mission_clock() -> None:
+    tracker = EmitterTracker()
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|100.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="18300.5|2020|6|1",
+        )
+    )
+
+    mission_clock = tracker.snapshot()["mission_clock"]
+    assert mission_clock == {"abs_time_s": 18300.5, "year": 2020, "month": 6, "day": 1}
+
+
+def test_snapshot_mission_clock_goes_back_to_none_when_a_later_batch_cannot_read_it() -> (
+    None
+):
+    """The tracker reports exactly what the most recent batch said --
+    it does not hold onto a stale "last known good" reading (module
+    docstring's `_last_mission_clock` note)."""
+    tracker = EmitterTracker()
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|100.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="18300.5|2020|6|1",
+        )
+    )
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|101.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="unavailable",
+        )
+    )
+
+    assert tracker.snapshot()["mission_clock"] is None
 
 
 def _send(port: int, payload: object) -> None:
@@ -301,6 +402,50 @@ def test_malformed_payload_is_dropped_not_ingested() -> None:
     _run_receiver_briefly(receiver)
 
     assert tracker.snapshot()["active"] == {}
+
+
+def test_mission_clock_envelope_key_reaches_the_snapshot() -> None:
+    tracker = EmitterTracker()
+    receiver = FiringEventsReceiver(tracker, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "0|60.0|",
+            "bridge_call_ms": 0.5,
+            "mission_clock": "18300.5|2020|6|1",
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    mission_clock = tracker.snapshot()["mission_clock"]
+    assert mission_clock == {"abs_time_s": 18300.5, "year": 2020, "month": 6, "day": 1}
+
+
+def test_mission_clock_envelope_key_absent_is_fine() -> None:
+    """Pre-amendment envelope shape (no `mission_clock` key at all) --
+    the firing events themselves still ingest normally."""
+    tracker = EmitterTracker()
+    receiver = FiringEventsReceiver(tracker, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|60.0|S_EVENT_SHOOTING_START:60.0:Unit_1:1:nil:nil",
+            "bridge_call_ms": 0.5,
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = tracker.snapshot()
+    assert snapshot["mission_clock"] is None
+    active = snapshot["active"]
+    assert isinstance(active, dict)
+    assert "Unit_1" in active
 
 
 def test_non_json_datagram_is_dropped() -> None:

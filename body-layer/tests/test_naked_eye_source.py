@@ -35,6 +35,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
     PROVENANCE_EMITTER_FIRING_VISIBLE,
+    PROVENANCE_EMITTER_LAUNCH_FLASH,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
@@ -2162,6 +2163,112 @@ def test_firing_wins_over_burning_for_the_same_unit() -> None:
     assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
 
 
+def _launch_flash_active_map(unit_name: str) -> dict[str, Any]:
+    return {
+        "dcs_model_time_s": 0.0,
+        "received_wall_clock_s": 0.0,
+        "active": {
+            unit_name: {
+                "kind": "launch_flash",
+                "since_sim": 0.0,
+                "targets_ownship": False,
+            }
+        },
+    }
+
+
+def test_a_launch_flash_unit_beyond_naked_eye_range_becomes_visible() -> None:
+    """`BL-B124` Stage 5's own end-to-end sibling of `test_a_burning_
+    unit_beyond_naked_eye_range_becomes_visible` -- a missile/rocket
+    launch's own light source bypasses the ordinary range gate the same
+    way, presence only (`classification_raw` stays the default, never
+    raised by the light source itself)."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects, firing=_launch_flash_active_map("unit_1"))
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == object_model.DEFAULT_OP_CLASS
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
+
+
+def test_firing_wins_over_launch_flash_for_the_same_unit() -> None:
+    """The "Co-moving Fields" precedence extended to the third kind,
+    exercised end to end: a unit both firing and (somehow) still carrying
+    a launch-flash entry resolves to the `FIRING` provenance -- though
+    the collector's own `EmitterTracker._apply` never actually produces
+    this combination for one unit (it refuses to overwrite an existing
+    `FIRING` entry with a later `S_EVENT_SHOT`), this is the merge order
+    itself, exercised through the real `poll()` path, not just `resolve_
+    emitters`' own unit tests."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    firing = _firing_active_map("unit_1")
+    source, _client = _source(world_objects, firing=firing)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+def test_launch_flash_wins_over_burning_for_the_same_unit() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(
+        world_objects,
+        unit_velocity=unit_velocity,
+        firing=_launch_flash_active_map("unit_1"),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
+
+
+def test_at_full_dark_only_the_light_source_is_visible() -> None:
+    """`BL-B124`'s own central claim (plan's "two independent mechanisms"
+    diagram): the ambient light factor and the emitter bypass are
+    structurally separate, so at full dark (`light_factor` forced to
+    `(0.0, 0.0, 0.0)`, same as `body._resolve_sun_elevation_deg` would
+    hand `NakedEyePerceptionSource` once a mission's clock is unreadable
+    or the sun is below `SIGHT_FULL_DARK_SUN_ELEV_DEG`) an ordinary T-72B
+    at 500 m -- comfortably inside its own 2333.33 m clear-day `lowres`
+    presence threshold (`test_visibility.py`'s own derivation) -- is
+    invisible, while a second T-72B at 9 km with a `LAUNCH_FLASH` entry
+    still comes through, presence only, exactly as it would in daylight."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects, firing=_launch_flash_active_map("unit_2"))
+    source.light_factor = (0.0, 0.0, 0.0)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
+
+
 # -- Cluster-level fold, genuine multi-member clusters (`plans/
 # taking-fire-visible-shooter/debug.md` review: every fold test above --
 # `member_emitter_kinds` and `member_targets_ownship` alike -- used a
@@ -2341,6 +2448,7 @@ _PER_POLL_OVERWRITTEN_FIELDS: frozenset[str] = frozenset(
         "gaze_centre_elevation_deg",
         "suppressed_until_sim",
         "peripheral_stimulus_ids",
+        "light_factor",
     }
 )
 _RESET_FIELDS: frozenset[str] = frozenset(

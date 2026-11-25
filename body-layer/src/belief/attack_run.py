@@ -872,6 +872,7 @@ def decide(
     resolving_optic: Optic | None = None,
     vertical: bool = True,
     guidance_floor: Optic = UNAIDED_OPTIC,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[AttackRunState, OutgoingSpeech | None]:
     """One tick of attack-run guidance: `(new_state, speech)`.
 
@@ -1018,7 +1019,15 @@ def decide(
     docstring), so gating the floor more narrowly than `vertical` would
     let the ladder request below sight tier during Preparing, then jump
     on the very poll `SIGHTING` is reached -- a visible floor change
-    mid-run for no behavioural reason, not a correctness bug either way."""
+    mid-run for no behavioural reason, not a correctness bug either way.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, `plans/bl-b124-light-level/
+    plan.md`) defaults to `None` -- a true no-op (no dimming) for every
+    pre-existing caller -- and is threaded straight through to the
+    `guidance_request_for` call below, which resolves the real per-optic
+    factor itself (one shared tuple cannot serve the ladder's several
+    different optics at once, `optic_policy.py`'s own module-level `_light_
+    factor` docstring). `body.py`'s poll loop supplies the real value."""
     if state.last_contact_id != contact.id:
         state = AttackRunState(last_contact_id=contact.id)
 
@@ -1080,6 +1089,7 @@ def decide(
             state.requested_optic,
             floor=guidance_floor,
             ceiling=SIGHT_NARROW_OPTIC,
+            sun_elevation_deg=sun_elevation_deg,
         ),
     )
 

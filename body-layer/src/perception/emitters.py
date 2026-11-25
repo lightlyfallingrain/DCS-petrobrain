@@ -7,14 +7,17 @@ for the user's own words and `perception.visibility.check_visibility`'s
 own docstring for where the `emitter` parameter this module feeds actually
 bypasses gates.
 
-**One mechanism, three emitter kinds (two built, one a seam).** The plan's
+**One mechanism, four emitter kinds named, three built.** The plan's
 "The one mechanism, three emitters" section is explicit that body-layer
 must see *"this object is emitting, and has been since t"* and nothing
-about how that was learned. `EmitterKind.BURNING` (Stage A, `BL-B72`) and
-`EmitterKind.FIRING` (Stage B, `BL-B73`) are both resolved here;
-`LAUNCH_SMOKE` (`BL-B74`) is not built this stage -- `resolve_emitters`
-below only ever folds `BURNING`/`FIRING` into the one `dict[int, Emitter]`
-`visibility.py` consults, never a parallel map it has to check twice.
+about how that was learned. `EmitterKind.BURNING` (Stage A, `BL-B72`),
+`EmitterKind.FIRING` (Stage B, `BL-B73`) and `EmitterKind.LAUNCH_FLASH`
+(`BL-B124` Stage 5 -- a missile/rocket launch's own few-second light
+source) are all resolved here; `LAUNCH_SMOKE` (`BL-B74`, the decaying
+smoke tail, a different and longer-lived light source) is still not
+built -- `resolve_emitters` below only ever folds the three built kinds
+into the one `dict[int, Emitter]` `visibility.py` consults, never a
+parallel map it has to check twice.
 
 **Burning is a polled state, not an event, and that is why it is pure.**
 `burning_emitters` is a stateless function of this poll's own
@@ -37,13 +40,21 @@ break replay determinism). By the time a `FIRING` entry reaches this
 module, "is this unit currently firing" is already a plain yes/no this
 poll can answer the same way it answers "is this unit burning."
 
-**`resolve_emitters` is the single merge point for both maps, per the
+**`LAUNCH_FLASH` is the same shape as `FIRING`** (`BL-B124` Stage 5) --
+`launch_flash_emitters` below reads the same `GET /firing/latest`
+`"active"` map, the collector's `EmitterTracker` having already resolved
+the few-second launch window before this poll ever fetched it. It carries
+no `targets_ownship` distinction (a launch is not "aimed at" anyone the
+way a gun burst's target field is) -- presence only, no class or type,
+same as `BURNING`.
+
+**`resolve_emitters` is the single merge point for all three maps, per the
 plan's own instruction** (`Co-moving Fields` table, last row): a unit
-could in principle both fire and burn, and `FIRING` wins over `BURNING`
-for wording priority -- resolved once, here, never twice (naked_eye_
-source.py calls this one function, not the two kind-specific ones
-separately, so there is exactly one place this precedence can be got
-wrong)."""
+could in principle fire, launch and burn all at once, and `FIRING` wins
+over `LAUNCH_FLASH` wins over `BURNING` for wording priority -- resolved
+once, here, never twice (naked_eye_source.py calls this one function, not
+the three kind-specific ones separately, so there is exactly one place
+this precedence can be got wrong)."""
 
 from __future__ import annotations
 
@@ -56,17 +67,28 @@ import tuning
 
 
 class EmitterKind(str, Enum):
-    """Which of the three emitter sources made a candidate self-reveal.
-    `LAUNCH_SMOKE` (`BL-B74`) is named here, per the plan's own docstring
-    convention of naming every kind in this enum even before it is
-    produced, but `resolve_emitters` below never returns it this stage. A
+    """Which emitter source made a candidate self-reveal. `LAUNCH_SMOKE`
+    (`BL-B74`) is named here, per the plan's own docstring convention of
+    naming every kind in this enum even before it is produced, but
+    `resolve_emitters` below never returns it -- a different, longer-lived
+    light source (the decaying smoke tail) this stage does not build. A
     plain `str` subclass, same convention as `perception.detection_trace.
     GateOutcome`, so `.value` serialises directly to JSON and onto
-    `DetectionTrace.emitter_kind` without a custom encoder."""
+    `DetectionTrace.emitter_kind` without a custom encoder.
+
+    `LAUNCH_FLASH` (`BL-B124` Stage 5) is a missile/rocket launch's own
+    few-second light source, deliberately a *different* name from
+    `LAUNCH_SMOKE` -- the user's own distinction (`explore-notes.md`:
+    "the plume is there for a few seconds. And smoke trail, though that
+    we do not see in the dark"). `collector.firing_receiver.
+    EMITTER_KIND_LAUNCH_FLASH` agrees on this string by the same
+    cross-subproject convention `EMITTER_KIND_FIRING`'s own docstring
+    states."""
 
     BURNING = "burning"
     FIRING = "firing"
     LAUNCH_SMOKE = "launch_smoke"
+    LAUNCH_FLASH = "launch_flash"
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,21 +247,72 @@ def firing_emitters(
     return result
 
 
+def launch_flash_emitters(
+    raw_objects: list[dict[str, Any]],
+    firing_active: dict[str, Any] | None,
+) -> dict[int, Emitter]:
+    """`BL-B124` Stage 5's sibling of `firing_emitters` above -- same
+    `GET /firing/latest` `"active"` map, same `unit_name` join, same
+    non-unique-`unit_name`-drops-to-unresolved rule, same "no latch, no
+    watchdog, no sim-time skew check here" reasoning (the collector's
+    `EmitterTracker` already resolved the few-second window before this
+    poll's `GET /firing/latest` was ever fetched).
+
+    Returns only entries whose `"kind"` is `EmitterKind.LAUNCH_FLASH.value`
+    (`collector.firing_receiver.EMITTER_KIND_LAUNCH_FLASH`) -- a missile/
+    rocket launch's own launcher, a light source with no notion of a
+    target (`targets_ownship` is always `False`, same as `BURNING`, never
+    read by `naked_eye_source.py` for this kind -- only `FIRING`'s own
+    "taking fire" distinction needs it)."""
+    if not firing_active:
+        return {}
+
+    name_counts: Counter[str] = Counter(
+        name for obj in raw_objects if isinstance(name := obj.get("unit_name"), str)
+    )
+
+    result: dict[int, Emitter] = {}
+    for obj in raw_objects:
+        name = obj.get("unit_name")
+        object_id = obj.get("object_id")
+        if not isinstance(name, str) or not isinstance(object_id, int):
+            continue
+        if name_counts[name] > 1:
+            continue
+        entry = firing_active.get(name)
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("kind") != EmitterKind.LAUNCH_FLASH.value:
+            continue
+        result[object_id] = Emitter(kind=EmitterKind.LAUNCH_FLASH)
+    return result
+
+
 def resolve_emitters(
     raw_objects: list[dict[str, Any]],
     unit_velocity_samples: dict[str, Any] | None,
     firing_active: dict[str, Any] | None,
 ) -> dict[int, Emitter]:
     """The single merge point `naked_eye_source.py` calls instead of
-    `burning_emitters`/`firing_emitters` separately -- the plan's "Co-moving
-    Fields" table requires precedence between the two be resolved **once**,
-    here, "never in two places." `FIRING` wins over `BURNING` for wording
-    priority when a unit happens to be both (a burning vehicle whose crew
-    is still fighting it): `visibility.check_visibility`'s tier clamp is
-    identical either way (both kinds clamp to `lowres`/presence), so the
-    only thing this precedence actually decides is which `PROVENANCE_
-    EMITTER_*` value -- and therefore which callout wording and priority --
-    `naked_eye_source.py` picks for the object."""
+    `burning_emitters`/`firing_emitters`/`launch_flash_emitters` separately
+    -- the plan's "Co-moving Fields" table requires precedence between
+    `BURNING`/`FIRING` be resolved **once**, here, "never in two places."
+    `FIRING` wins over `BURNING` for wording priority when a unit happens
+    to be both (a burning vehicle whose crew is still fighting it):
+    `visibility.check_visibility`'s tier clamp is identical either way
+    (both kinds clamp to `lowres`/presence), so the only thing this
+    precedence actually decides is which `PROVENANCE_EMITTER_*` value --
+    and therefore which callout wording and priority -- `naked_eye_
+    source.py` picks for the object.
+
+    `LAUNCH_FLASH` (`BL-B124` Stage 5) merges in between the two, winning
+    over `BURNING` (a launching unit's flash is the more immediately
+    salient fact) but losing to `FIRING` if a unit is somehow both at
+    once (the collector's own `EmitterTracker._apply` already keeps an
+    existing `FIRING` entry from being overwritten by a later `S_EVENT_
+    SHOT` for the same reason, so this ordering is belt-and-suspenders,
+    not the only thing preventing the two from fighting over one unit)."""
     merged = burning_emitters(raw_objects, unit_velocity_samples)
+    merged.update(launch_flash_emitters(raw_objects, firing_active))
     merged.update(firing_emitters(raw_objects, firing_active))
     return merged

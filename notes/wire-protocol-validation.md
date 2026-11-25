@@ -32,3 +32,19 @@
   case does not retroactively close the ceiling case — say so explicitly rather than let a reader
   assume one fix covers both (BL-16 mode 1, M1+M2 perf/security change-request round,
   `plans/flight-control/implementation.md`, `security-m1-m2.md` Finding A, `review-cr-m1-m2.md`).
+
+- **A clamp written to hold a value "clean" on NaN input does not reliably do so once it feeds a
+  downstream formula -- `min`/`max` in Python keep their first argument whenever the comparison
+  that would replace it is a NaN comparison, so a chained `max(lo, min(hi, nan))` resolves to a
+  concrete, in-range, plausible-looking number, not to NaN.** `BL-B124`'s `sun_elevation_deg`
+  propagated a NaN `abs_time_s` (from an unguarded `float("nan")` wire parse) all the way to its
+  final `sin_altitude = max(-1.0, min(1.0, sin_altitude))` clamp, which silently resolved to `1.0`
+  -- `asin(1.0)` is exactly `90.0`, directly overhead, which then took the feature's own
+  full-daylight branch. This is the same Python NaN-comparison mechanism as the "incidental guard"
+  pattern already on file (`.claude/agent-memory/security/project_nan_comparison_incidental_
+  guards.md`), but the opposite outcome: there, the incidental behaviour happened to be safe; here,
+  it silently produced the one answer the feature's own design explicitly forbids. **Never trust
+  "the clamp will hold it safe" without tracing what a NaN input actually resolves to through the
+  specific clamp expression** -- a `min`/`max` chain is not a NaN filter, and the direction it
+  resolves to is a coincidence of argument order, not a guarantee (`plans/bl-b124-light-level/
+  security.md` Finding 1, `[[BL-B137]]`).

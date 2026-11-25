@@ -13,6 +13,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
     PROVENANCE_EMITTER_FIRING_VISIBLE,
+    PROVENANCE_EMITTER_LAUNCH_FLASH,
 )
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -115,6 +116,16 @@ def test_percept_of_maps_emitter_provenance_to_emitter_kind() -> None:
     percept = percept_of(observation)
 
     assert percept.emitter_kind == EmitterKind.BURNING.value
+    assert not hasattr(percept, "provenance")
+
+
+def test_percept_of_maps_launch_flash_provenance_to_emitter_kind() -> None:
+    """`BL-B124` Stage 5's own entry in the same closed mapping."""
+    observation = _observation(provenance=PROVENANCE_EMITTER_LAUNCH_FLASH)
+
+    percept = percept_of(observation)
+
+    assert percept.emitter_kind == EmitterKind.LAUNCH_FLASH.value
     assert not hasattr(percept, "provenance")
 
 

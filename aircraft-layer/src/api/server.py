@@ -116,13 +116,18 @@ the body/brain process, on either Windows or Mac (compute topology note in
 - `GET /firing/latest` -> `collector.firing_receiver.EmitterTracker.
   snapshot()` as JSON (`plans/emitter-visibility/plan.md` Stage B,
   `AC-B8`) -- `{"dcs_model_time_s", "received_wall_clock_s", "active":
-  {unit_name: {"kind", "since_sim", "targets_ownship"}}}`. Unlike every
+  {unit_name: {"kind", "since_sim", "targets_ownship"}}, "mission_clock":
+  {"abs_time_s", "year", "month", "day"} | null}`. Unlike every
   `/latest` endpoint above, this is never JSON `null`: an `EmitterTracker`
   with nothing currently firing answers `{"dcs_model_time_s": null,
-  "received_wall_clock_s": <float>, "active": {}}` -- there is no
-  "cache empty" state distinct from "nothing is firing right now", so the
-  response is always a well-formed object. Joined client-side by
-  `unit_name`, same convention as `/unit_velocity/latest`/
+  "received_wall_clock_s": <float>, "active": {}, "mission_clock": null}`
+  -- there is no "cache empty" state distinct from "nothing is firing
+  right now", so the response is always a well-formed object.
+  `mission_clock` (`BL-B124`, amendment 2026-11-25) is the mission's own
+  date + wall clock, read inside the same firing-event poll -- `null`
+  whenever the most recent poll's own `timer.getAbsTime()`/`env.mission.
+  date` read was unavailable, same "not an error" posture. Joined
+  client-side by `unit_name`, same convention as `/unit_velocity/latest`/
   `/line_of_sight/latest`.
 - `POST /command/look_direction` -> the aircraft layer's fourth
   inbound/write path (`plans/dcs-driven-los/plan.md` SS9). Body

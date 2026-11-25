@@ -601,6 +601,7 @@ def tier_ranges(
     optic: Optic = UNAIDED_OPTIC,
     distinctiveness: float = 1.0,
     group_salient: bool = False,
+    light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[float, float, float]:
     """The three tier thresholds in metres -- `(presence, class, type)` --
     for one object seen through one instrument.
@@ -626,27 +627,43 @@ def tier_ranges(
     rather than read as a bare module constant so the two sight optics'
     20 km figure flows through this one formula rather than needing a
     second copy of the clamp.
-    """
+
+    **`light_factor` (`BL-B124` Stage 3, `plans/bl-b124-light-level/
+    plan.md`) is `(presence, class, type)`, multiplying each threshold the
+    same way `optic.presence_range_mult`/`class_range_mult`/
+    `type_range_mult` already do** -- the single choke point every
+    "is it worth raising this instrument" decision in `belief.optic_policy`
+    reads (this module's "Composes six independent plausibility gates"
+    framing, and the architect-memory note on why a new condition
+    multiplier belongs here, never as a bespoke per-decision branch). The
+    default `(1.0, 1.0, 1.0)` is a true no-op -- nothing calls this with a
+    real value yet (`perception.light_level.light_factor` computes one,
+    but nothing in `body.py`'s poll loop calls *that* until a later stage)."""
     range_cap_m = (
         optic.range_cap_m if optic.range_cap_m is not None else NAKED_EYE_RANGE_CAP_M
     )
+    presence_light, class_light, type_light = light_factor
     presence_threshold_m = min(
         range_cap_m,
         (
             presence_size_m
             / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
         )
-        * optic.presence_range_mult,
+        * optic.presence_range_mult
+        * presence_light,
     )
     class_threshold_m = min(
         presence_threshold_m,
         (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD)
         * optic.class_range_mult
-        * distinctiveness,
+        * distinctiveness
+        * class_light,
     )
     type_threshold_m = min(
         class_threshold_m,
-        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * optic.type_range_mult,
+        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD)
+        * optic.type_range_mult
+        * type_light,
     )
     return presence_threshold_m, class_threshold_m, type_threshold_m
 
@@ -658,6 +675,7 @@ def _achieved_tier(
     optic: Optic = UNAIDED_OPTIC,
     distinctiveness: float = 1.0,
     group_salient: bool = False,
+    light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[str, float]:
     """The tightest recognition tier `range_m` still satisfies, and that
     tier's confidence (Stage 6's worked table: presence low / class medium
@@ -737,6 +755,7 @@ def _achieved_tier(
         optic=optic,
         distinctiveness=distinctiveness,
         group_salient=group_salient,
+        light_factor=light_factor,
     )
     if range_m <= type_threshold_m:
         return "hires", NAKED_EYE_TYPE_CONFIDENCE
@@ -767,6 +786,7 @@ def check_visibility(
     live_los_coverage: LiveLosCoverage | None = None,
     forest: ForestOcclusion | None = None,
     emitter: Emitter | None = None,
+    light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> VisibilityResult | None:
     """Run `candidate` through all six gates: gaze, cockpit mask, per-optic
     field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
@@ -863,6 +883,21 @@ def check_visibility(
     (3 and 5, only when they would otherwise reject) and the tier clamp
     that keeps the bypass detection-only.
 
+    `light_factor` (`BL-B124` Stage 3, `plans/bl-b124-light-level/
+    plan.md`) defaults to `(1.0, 1.0, 1.0)` -- a true no-op, threaded
+    straight through to `_achieved_tier`'s own `tier_ranges()` call below
+    **and** applied to this function's own `size_curve_threshold_m`
+    (gate 3's range-admission bound) by its `presence` component. Both
+    must move together: `size_curve_threshold_m` and `tier_ranges()`'s
+    own presence threshold are the same quantity computed twice
+    (`_achieved_tier`'s own docstring explains why they must stay equal),
+    so a light factor that shrank one without the other would admit a
+    candidate past gate 3 at today's unlit range and then let it fall
+    through `_achieved_tier`'s "beyond even lowres" fallback to a
+    detection it should not have gotten -- the one correctness trap this
+    threading has to close now, even though nothing computes a real
+    `light_factor` yet (Stage 4, not built here).
+
     **Gate 4 (terrain LOS), fail-closed as of `plans/
     bl11-stage4-fail-closed/plan.md` (`BL-11` Stage 4 steps 3-4), superseding
     the fallback `plans/dcs-driven-los/plan.md` (X-B29) originally shipped:**
@@ -914,8 +949,10 @@ def check_visibility(
         NAKED_EYE_GATING_ANGULAR_RADIUS_RAD, group_salient
     )
     size_curve_threshold_m = (
-        profile.size_m / effective_gating_angular_radius_rad
-    ) * optic.presence_range_mult
+        (profile.size_m / effective_gating_angular_radius_rad)
+        * optic.presence_range_mult
+        * light_factor[0]
+    )
     # `optic.range_cap_m`, defaulting to `NAKED_EYE_RANGE_CAP_M` -- the
     # same resolution `tier_ranges` performs, kept in sync by construction
     # (`BL-B64` Stage 2, plan §12a): a 9K113-narrow candidate past 10 km
@@ -1067,6 +1104,7 @@ def check_visibility(
             optic,
             object_model.distinctiveness_of(profile),
             group_salient,
+            light_factor,
         )
     _record(
         GateOutcome.ADMITTED, achieved_tier=achieved_tier, emitter_kind=emitter_kind

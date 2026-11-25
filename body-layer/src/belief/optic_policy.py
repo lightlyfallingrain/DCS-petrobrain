@@ -46,6 +46,7 @@ from belief.position_belief import PositionEstimate
 from perception.estimation import look_sigma_m
 from perception.gaze import SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition, body_relative_direction, range_m
+from perception.light_level import light_factor as _optic_light_factor
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 
 #: How many sigma of a contact's own `PositionEstimate.bearing_uncertainty_
@@ -74,6 +75,36 @@ from perception.optics import (
     within_field_of_regard,
 )
 from perception.visibility import tier_ranges
+
+
+def _light_factor_for(
+    optic: Optic, sun_elevation_deg: float | None
+) -> tuple[float, float, float]:
+    """`BL-B124` Stage 4 -- resolves `tier_ranges()`'s own `light_factor`
+    tuple for one specific `optic`. `None` (every pre-Stage-4 caller and
+    every existing test) is a true no-op, `(1.0, 1.0, 1.0)`.
+
+    **Why every `tier_ranges()` call site below calls this itself, with
+    its own explicit `optic`, instead of receiving one shared tuple from
+    its caller** (the shape Stage 3 threaded, and this stage's own
+    correctness fix over it): `perception.light_level.light_factor`'s own
+    curve is genuinely per-optic -- the user's measured dawn anchors give
+    binoculars a shallower fall-off than the naked eye, and the 9K113's
+    orange filter a shallower one still (Q5, `plans/bl-b124-light-level/
+    explore-notes.md`: *"use binoculars as long as they can viably see,
+    then 9K113 only while there is enough light..."*). `improvement_
+    window_m` below compares `UNAIDED_OPTIC` against `BINOCULAR_OPTIC` in
+    one call; a single shared factor would apply the *eye's* dimming to
+    the binocular side of that comparison too, collapsing exactly the
+    cross-optic difference this feature exists to model. So every
+    function below threads `sun_elevation_deg` (the one real quantity,
+    optic-independent) rather than a precomputed tuple, and resolves the
+    tuple itself at each `tier_ranges()` call, against whichever optic
+    that call already names."""
+    if sun_elevation_deg is None:
+        return (1.0, 1.0, 1.0)
+    return _optic_light_factor(optic, sun_elevation_deg)
+
 
 #: The longest one look can last. The user's number, and a ceiling rather
 #: than a duration: `look_is_finished` normally ends a look sooner, when
@@ -1294,7 +1325,10 @@ def is_steady(
 
 
 def improvement_window_m(
-    object_type: str, *, current_level: str
+    object_type: str,
+    *,
+    current_level: str,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[float, float]:
     """The range band in which binoculars would move this contact up a
     tier: `(unaided_range, binocular_range)` for whichever tier is next.
@@ -1325,6 +1359,11 @@ def improvement_window_m(
 
     A contact already at `type` has no next tier: `(0.0, 0.0)`, a window
     nothing falls inside.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to each optic's own factor by `_light_factor_for` below,
+    separately for `UNAIDED_OPTIC` and `BINOCULAR_OPTIC` -- see that
+    helper's own docstring for why one shared factor cannot serve both.
     """
     profile = profile_for(object_type)
     # Aspect is unknown for a belief (the contact may have turned since it
@@ -1340,6 +1379,7 @@ def improvement_window_m(
             recognition_extent_m=extent,
             optic=optic,
             distinctiveness=distinctiveness,
+            light_factor=_light_factor_for(optic, sun_elevation_deg),
         )
 
     _, unaided_class_m, unaided_type_m = ranges(UNAIDED_OPTIC)
@@ -1355,7 +1395,11 @@ def improvement_window_m(
 
 
 def location_gain_for(
-    position: PositionEstimate | None, observer: GeoPosition, object_type: str
+    position: PositionEstimate | None,
+    observer: GeoPosition,
+    object_type: str,
+    *,
+    sun_elevation_deg: float | None = None,
 ) -> float:
     """How much a binocular look is expected to tighten `position`'s own
     down-range uncertainty, metres -- `plans/expected-area-check/plan.md`
@@ -1368,7 +1412,11 @@ def location_gain_for(
     look_sigma_m(range_m, BINOCULAR_OPTIC).sigma_down`, floored at `0.0`
     (never negative: a look is never modelled as making a belief *worse*
     for position, which is Stage 0a's own guarantee for the fold this
-    gain is measuring against)."""
+    gain is measuring against).
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to `BINOCULAR_OPTIC`'s own factor by `_light_factor_for`
+    below before it reaches `tier_ranges()`."""
     if position is None:
         return 0.0
     profile = profile_for(object_type)
@@ -1379,6 +1427,7 @@ def location_gain_for(
         recognition_extent_m=extent,
         optic=BINOCULAR_OPTIC,
         distinctiveness=distinctiveness,
+        light_factor=_light_factor_for(BINOCULAR_OPTIC, sun_elevation_deg),
     )
     target = GeoPosition(x=position.x, z=position.z, alt_m=observer.alt_m)
     slant_m = range_m(observer, target)
@@ -1388,7 +1437,11 @@ def location_gain_for(
     return max(0.0, position.range_uncertainty_m(observer) - sigma_down_m)
 
 
-def sight_look_optic(target: LookTarget) -> Optic:
+def sight_look_optic(
+    target: LookTarget,
+    *,
+    sun_elevation_deg: float | None = None,
+) -> Optic:
     """Which of the sight's two settings a look at `target` should use --
     `plans/9k113-narrow-search/plan.md` Stage 4 Part A, direction §8
     (*"wide<->narrow should use similar logic to naked eye and binocular
@@ -1405,7 +1458,10 @@ def sight_look_optic(target: LookTarget) -> Optic:
 
     Stops at wide/narrow by design -- a caller needing the full
     eye->binocular->wide->narrow ladder still wants `least_capable_
-    sufficient_optic`, not this."""
+    sufficient_optic`, not this.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to each `optic`'s own factor by `_light_factor_for` below."""
     profile = profile_for(target.object_type)
     extent = apparent_extent_m(profile, None)
     distinctiveness = distinctiveness_of(profile)
@@ -1416,6 +1472,7 @@ def sight_look_optic(target: LookTarget) -> Optic:
             recognition_extent_m=extent,
             optic=optic,
             distinctiveness=distinctiveness,
+            light_factor=_light_factor_for(optic, sun_elevation_deg),
         )
         return type_m if target.current_level == "class" else class_m
 
@@ -1424,7 +1481,11 @@ def sight_look_optic(target: LookTarget) -> Optic:
     return SIGHT_NARROW_OPTIC
 
 
-def sight_can_still_improve(target: LookTarget) -> bool:
+def sight_can_still_improve(
+    target: LookTarget,
+    *,
+    sun_elevation_deg: float | None = None,
+) -> bool:
     """Whether the sight -- wide or narrow, whichever `sight_look_optic`
     would pick -- could still raise `target`'s tier. The `SIGHTING`
     counterpart of `can_still_improve`, which asks the same question of
@@ -1442,7 +1503,17 @@ def sight_can_still_improve(target: LookTarget) -> bool:
     exclusion here. Using `SIGHT_WIDE_OPTIC`'s own threshold as a lower
     bound would incorrectly exclude close targets that `sight_look_optic`
     itself still resolves with wide.
-    """
+
+    `sun_elevation_deg` (`BL-B124` Stage 4) defaults to `None`, a true
+    no-op -- this function is used as a bare `can_improve` callback
+    (`Callable[[LookTarget], bool]`, `is_worth_a_look`/`look_is_finished`)
+    at two call sites in `_decide_sighting`, so it keeps a keyword-only
+    default-only parameter rather than widening that callback's own
+    contract; those two call sites wrap this function in a closure that
+    captures the poll's real `sun_elevation_deg` instead (`_decide_
+    sighting`'s own docstring). Resolved to `SIGHT_NARROW_OPTIC`'s own
+    factor by `_light_factor_for` before it reaches `tier_ranges()`
+    below."""
     if target.current_level == "type":
         return False
     profile = profile_for(target.object_type)
@@ -1453,6 +1524,7 @@ def sight_can_still_improve(target: LookTarget) -> bool:
         recognition_extent_m=extent,
         optic=SIGHT_NARROW_OPTIC,
         distinctiveness=distinctiveness,
+        light_factor=_light_factor_for(SIGHT_NARROW_OPTIC, sun_elevation_deg),
     )
     threshold_m = type_m if target.current_level == "class" else class_m
     return target.range_m <= threshold_m
@@ -1474,7 +1546,12 @@ _LADDER: Final[tuple[Optic, ...]] = (
 
 
 def least_capable_sufficient_optic(
-    range_m: float, object_type: str, *, floor: Optic, ceiling: Optic
+    range_m: float,
+    object_type: str,
+    *,
+    floor: Optic,
+    ceiling: Optic,
+    sun_elevation_deg: float | None = None,
 ) -> Optic:
     """The least capable optic, between `floor` and `ceiling` inclusive on
     `_LADDER`, whose own presence threshold still reaches `range_m` --
@@ -1496,7 +1573,12 @@ def least_capable_sufficient_optic(
     instead. Returns `ceiling` (the most capable optic allowed) if even
     that cannot resolve the target, rather than raising -- the caller's
     own `TOO_FAR`/remembered-sighting fallback is what speaks in that
-    case, not this function."""
+    case, not this function.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to each rung's own factor by `_light_factor_for` below --
+    `optic` is the loop variable here, so each rung of `_LADDER` gets its
+    own curve, not one shared across the whole ladder."""
     profile = profile_for(object_type)
     # Aspect is unknown for a belief the same way `improvement_window_m`
     # treats it -- the profile's own extent, not a guess from a stale
@@ -1511,6 +1593,7 @@ def least_capable_sufficient_optic(
             recognition_extent_m=extent,
             optic=optic,
             distinctiveness=distinctiveness,
+            light_factor=_light_factor_for(optic, sun_elevation_deg),
         )
         if presence_threshold_m >= range_m:
             return optic
@@ -1524,6 +1607,7 @@ def guidance_request_for(
     *,
     floor: Optic,
     ceiling: Optic,
+    sun_elevation_deg: float | None = None,
 ) -> Optic:
     """`BL-B71` Stage 3's hysteresis wrapper around `least_capable_
     sufficient_optic` above -- escalation is immediate (the plan's own
@@ -1545,7 +1629,12 @@ def guidance_request_for(
     policy` chose to grant it. `None` (no previous request -- a fresh run,
     or a re-point onto a different contact) means "start from `floor`,
     nothing to de-escalate from yet."
-    """
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to each rung's own factor by `_light_factor_for` below
+    (same per-rung reasoning as `least_capable_sufficient_optic` above),
+    and forwarded unresolved to the `least_capable_sufficient_optic` call
+    this function makes, which resolves it the same way."""
     profile = profile_for(object_type)
     extent = apparent_extent_m(profile, None)
     distinctiveness = distinctiveness_of(profile)
@@ -1556,6 +1645,7 @@ def guidance_request_for(
             recognition_extent_m=extent,
             optic=optic,
             distinctiveness=distinctiveness,
+            light_factor=_light_factor_for(optic, sun_elevation_deg),
         )
         return value
 
@@ -1573,7 +1663,11 @@ def guidance_request_for(
         # Guard 2 does not gate escalation (the plan's own wording) --
         # walk straight up to whichever rung resolves the target.
         return least_capable_sufficient_optic(
-            range_m, object_type, floor=baseline, ceiling=ceiling
+            range_m,
+            object_type,
+            floor=baseline,
+            ceiling=ceiling,
+            sun_elevation_deg=sun_elevation_deg,
         )
 
     if baseline_rank <= floor_rank:
@@ -1586,7 +1680,11 @@ def guidance_request_for(
     return baseline
 
 
-def can_still_improve(target: LookTarget) -> bool:
+def can_still_improve(
+    target: LookTarget,
+    *,
+    sun_elevation_deg: float | None = None,
+) -> bool:
     """Whether a look at this contact could raise its tier at all, ignoring
     whether one has been tried before.
 
@@ -1597,16 +1695,28 @@ def can_still_improve(target: LookTarget) -> bool:
     end on the poll after it began, because the contact it was aimed at had
     just been marked. The retry rule governs *starting* a look; this governs
     *continuing* one. A test caught the conflation.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4) defaults to `None`, a true
+    no-op -- forwarded unresolved to `improvement_window_m` below, which
+    resolves it per-optic -- see `sight_can_still_improve`'s own docstring
+    for why this stays keyword-only-with-default rather than widening the
+    `can_improve` callback contract this function is also used through.
     """
     if target.current_level == "type":
         return False
     lower_m, upper_m = improvement_window_m(
-        target.object_type, current_level=target.current_level
+        target.object_type,
+        current_level=target.current_level,
+        sun_elevation_deg=sun_elevation_deg,
     )
     return lower_m < target.range_m <= upper_m
 
 
-def _glass_can_improve(target: LookTarget) -> bool:
+def _glass_can_improve(
+    target: LookTarget,
+    *,
+    sun_elevation_deg: float | None = None,
+) -> bool:
     """`GLASSING`'s own `can_improve` -- `plans/expected-area-check/
     plan.md` Stage 1, Decision 8 REVERSED: the ordinary classification
     window, **or** a watched contact whose exact-location gain still
@@ -1615,13 +1725,20 @@ def _glass_can_improve(target: LookTarget) -> bool:
     finished`, so a location-only look neither fails to start nor ends
     on its first poll (the 9K113 narrow-search trap, `look_is_finished`'s
     own docstring) -- the identical reasoning that made `sight_can_still_
-    improve` a parameter rather than a second copy of either function."""
-    return can_still_improve(target) or (
+    improve` a parameter rather than a second copy of either function.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4) defaults to `None`, a true
+    no-op, same callback-contract reasoning as `can_still_improve`."""
+    return can_still_improve(target, sun_elevation_deg=sun_elevation_deg) or (
         target.watched and target.location_gain_m >= EXACT_LOCATION_MIN_GAIN_M
     )
 
 
-def _area_or_glass_can_improve(target: LookTarget) -> bool:
+def _area_or_glass_can_improve(
+    target: LookTarget,
+    *,
+    sun_elevation_deg: float | None = None,
+) -> bool:
     """`_glass_can_improve`, extended for an area-check look
     (`plans/expected-area-look/plan.md` Stage 3a's own ending list: "A is
     observed" is resolved upstream, by `belief.expected_area.resolve_
@@ -1639,8 +1756,13 @@ def _area_or_glass_can_improve(target: LookTarget) -> bool:
     decides whether the *current* look should keep running or whether a
     *fresh* one is worth starting, so an area-check target is admitted
     and kept running on its own terms rather than one built for a
-    different question."""
-    return target.area_check or _glass_can_improve(target)
+    different question.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4) defaults to `None`, a true
+    no-op, same callback-contract reasoning as `can_still_improve`."""
+    return target.area_check or _glass_can_improve(
+        target, sun_elevation_deg=sun_elevation_deg
+    )
 
 
 def is_worth_a_look(
@@ -2618,6 +2740,7 @@ def _decide_sighting_locked(
     contact_id: str,
     *,
     sight_lock_seen: bool = False,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """`sight_lock_contact_id`'s own branch of `_decide_sighting`
     (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md` Stage 1, "Keeping the
@@ -2655,7 +2778,11 @@ def _decide_sighting_locked(
     started_sim`. Only ever reached from `_decide_sighting` after its own
     `sight_steady` check, so `_force_observ_off` still wins over a lock
     on a violent manoeuvre -- the lock is a tracking preference, not a
-    gyro-safety override."""
+    gyro-safety override.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is forwarded unresolved to the `sight_look_optic` call below, which
+    resolves it itself."""
     found = next(
         (target for target in targets if target.contact_id == contact_id), None
     )
@@ -2666,7 +2793,7 @@ def _decide_sighting_locked(
             look_elevation_deg=state.look_elevation_deg,
         )
 
-    look_optic = sight_look_optic(found)
+    look_optic = sight_look_optic(found, sun_elevation_deg=sun_elevation_deg)
     look_started_sim = (
         state.look_started_sim
         if state.look_contact_id == contact_id and state.look_started_sim is not None
@@ -2729,6 +2856,7 @@ def _decide_sighting(
     sight_point_search: Sequence[tuple[float, float]] = (),
     sight_lock_contact_id: str | None = None,
     sight_lock_seen: bool = False,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """`SIGHTING`'s own body -- `BL-B64` Stage 2, plan §13, direction
     §8/§9. Only ever called from `decide` while `state.phase is OpticPhase.
@@ -2779,7 +2907,15 @@ def _decide_sighting(
     caller's unchanged behaviour. `sight_lock_seen` (`plans/
     atgm-run-sight-tracking/plan.md`) is `_decide_sighting_locked`'s own
     parameter of the same name, passed straight through -- read only
-    there, and only while `sight_lock_contact_id` is not `None`."""
+    there, and only while `sight_lock_contact_id` is not `None`.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is forwarded unresolved to `_decide_sighting_locked` and to the
+    `sight_look_optic` call below, both of which resolve it themselves;
+    the two `can_improve=lambda t: sight_can_still_improve(...)` call sites
+    below are what actually give `sight_can_still_improve` a real value
+    (its own keyword-only default stays `None` -- see that function's
+    docstring)."""
     if not sight_steady:
         return _force_observ_off(state, now_sim)
 
@@ -2790,6 +2926,7 @@ def _decide_sighting(
             targets,
             sight_lock_contact_id,
             sight_lock_seen=sight_lock_seen,
+            sun_elevation_deg=sun_elevation_deg,
         )
 
     dwell_started_sim = (
@@ -2804,7 +2941,9 @@ def _decide_sighting(
         targets,
         started_sim=state.look_started_sim,
         max_dwell_s=SIGHT_MAX_DWELL_S,
-        can_improve=sight_can_still_improve,
+        can_improve=lambda t: sight_can_still_improve(
+            t, sun_elevation_deg=sun_elevation_deg
+        ),
     ):
         # The current look's own natural end (recognition succeeded,
         # nothing left to learn in its envelope) -- commit its pending
@@ -2888,7 +3027,9 @@ def _decide_sighting(
             target,
             state,
             now_sim,
-            can_improve=sight_can_still_improve,
+            can_improve=lambda t: sight_can_still_improve(
+                t, sun_elevation_deg=sun_elevation_deg
+            ),
             stall_cooldown_s=_EFFECTIVE_SIGHT_STALL_COOLDOWN_S,
         )
         and within_field_of_regard(
@@ -2955,7 +3096,7 @@ def _decide_sighting(
     # read for the same reason the candidate filter above reads it: one
     # optic has to be named and the two sight optics' `regard_*` fields are
     # identical.
-    look_optic = sight_look_optic(chosen)
+    look_optic = sight_look_optic(chosen, sun_elevation_deg=sun_elevation_deg)
     fov_full_width_deg = (look_optic.fov_half_angle_deg or 0.0) * 2.0
     sweep = look_sweep(
         centre_azimuth_deg=chosen.azimuth_deg,
@@ -3214,6 +3355,7 @@ def _decide_without_guidance(
     sight_point_search: Sequence[tuple[float, float]] = (),
     sight_lock_contact_id: str | None = None,
     sight_lock_seen: bool = False,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """The ordinary phase-cycle dispatch -- `decide`'s whole body before
     `BL-B71`, renamed and kept otherwise unchanged so that the public
@@ -3285,7 +3427,15 @@ def _decide_without_guidance(
     glance-away sub-state of `SCANNING`) is reached only when `state.
     home_phase is OpticPhase.SIGHTING` or `state.hands_busy_until_sim` is
     set -- neither of which any pre-existing caller, or the dataclass
-    default, ever produces."""
+    default, ever produces.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is forwarded unresolved to `_decide_sighting` below -- see that
+    function's own docstring. The three `can_improve=lambda t:
+    _area_or_glass_can_improve(...)` call sites below give `_area_or_
+    glass_can_improve` a real value explicitly; its own keyword-only
+    default stays `None` (same callback-contract reasoning that
+    function's own docstring gives)."""
     if state.phase_started_sim is None:
         # First poll: start the cycle from this mission's own clock rather
         # than from zero, and scan before deciding anything. Home-aware
@@ -3396,7 +3546,12 @@ def _decide_without_guidance(
                         ),
                     )
         if look_is_finished(
-            glassing_state, now_sim, targets, can_improve=_area_or_glass_can_improve
+            glassing_state,
+            now_sim,
+            targets,
+            can_improve=lambda t: _area_or_glass_can_improve(
+                t, sun_elevation_deg=sun_elevation_deg
+            ),
         ):
             # Natural end (recognition succeeded, nothing left to learn, or
             # MAX_LOOK_S expired): the look ran and delivered its benefit,
@@ -3455,7 +3610,9 @@ def _decide_without_guidance(
                     target,
                     committed_state,
                     now_sim,
-                    can_improve=_area_or_glass_can_improve,
+                    can_improve=lambda t: _area_or_glass_can_improve(
+                        t, sun_elevation_deg=sun_elevation_deg
+                    ),
                     stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
                 )
             ]
@@ -3538,6 +3695,7 @@ def _decide_without_guidance(
             sight_point_search=sight_point_search,
             sight_lock_contact_id=sight_lock_contact_id,
             sight_lock_seen=sight_lock_seen,
+            sun_elevation_deg=sun_elevation_deg,
         )
 
     # state.phase must be SCANNING here (the only phase not already
@@ -3584,7 +3742,9 @@ def _decide_without_guidance(
             target,
             state,
             now_sim,
-            can_improve=_area_or_glass_can_improve,
+            can_improve=lambda t: _area_or_glass_can_improve(
+                t, sun_elevation_deg=sun_elevation_deg
+            ),
             stall_cooldown_s=_EFFECTIVE_GLASS_STALL_COOLDOWN_S,
         )
     ]
@@ -3806,6 +3966,7 @@ def decide(
     guidance_request: Optic | None = None,
     sight_lock_contact_id: str | None = None,
     sight_lock_seen: bool = False,
+    sun_elevation_deg: float | None = None,
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through --
     `_decide_without_guidance`'s ordinary phase dispatch, then `BL-B71`'s
@@ -3845,7 +4006,14 @@ def decide(
     (`plans/expected-area-check/plan.md` Stage 1) are `_decide_without_
     guidance`'s own parameters of the same name, passed straight
     through; see that function's docstring for why `scan_cycle_period_s`
-    keeps its pre-Stage-1 name and shape."""
+    keeps its pre-Stage-1 name and shape.
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, `plans/bl-b124-light-level/
+    plan.md`) defaults to `None` -- a true no-op for every pre-existing
+    caller, exactly like `guidance_request`/`sight_steady` above.
+    `body.py`'s poll loop supplies the real value; `_decide_without_
+    guidance`'s own
+    parameter of the same name is where it is actually read."""
     new_state, decision = _decide_without_guidance(
         state,
         now_sim=now_sim,
@@ -3864,6 +4032,7 @@ def decide(
         sight_point_search=sight_point_search,
         sight_lock_contact_id=sight_lock_contact_id,
         sight_lock_seen=sight_lock_seen,
+        sun_elevation_deg=sun_elevation_deg,
     )
     if decision.suppressed:
         return new_state, decision
@@ -3883,6 +4052,7 @@ def look_target_for(
     pitch_deg: float = 0.0,
     bank_deg: float = 0.0,
     area_check: bool = False,
+    sun_elevation_deg: float | None = None,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
@@ -3926,7 +4096,10 @@ def look_target_for(
     to `False`, a true no-op for every pre-`BL-B111` caller -- `body.
     _look_targets` is the one caller that passes `True`, for A's own
     target while an `ExpectedAreaCheck` naming it as `a_id` is open.
-    """
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is forwarded unresolved to the `location_gain_for` call below, which
+    resolves it to `BINOCULAR_OPTIC`'s own factor itself."""
     slant_m = range_m(observer, target_position)
     body_direction = body_relative_direction(
         observer,
@@ -3950,7 +4123,9 @@ def look_target_for(
         object_type=object_type,
         current_level=current_level,
         watched=watched,
-        location_gain_m=location_gain_for(position, observer, object_type),
+        location_gain_m=location_gain_for(
+            position, observer, object_type, sun_elevation_deg=sun_elevation_deg
+        ),
         area_check=area_check,
         **kwargs,
     )

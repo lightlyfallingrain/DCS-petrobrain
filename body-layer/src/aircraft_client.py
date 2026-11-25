@@ -78,7 +78,12 @@ still raises `AircraftLayerError` on a genuine transport/parse failure
 (an aircraft-layer instance predating `AC-B8` has no such route at all,
 same as every other `get_*` on an unreachable endpoint). `naked_eye_
 source.py` resolves the per-`unit_name` join itself, same split of
-responsibility as the velocity and LOS feeds.
+responsibility as the velocity and LOS feeds. The response dict also
+carries a `"mission_clock"` key (`BL-B124`, amendment 2026-11-25) --
+`{"abs_time_s", "year", "month", "day"}` or `null` -- this client makes
+no attempt to parse it; a future caller reads it straight out of the
+returned dict, same shallow pass-through posture as every other field
+here.
 
 `write_cockpit_switch` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1)
 is this seam's write side for the generic cockpit-switch channel. It
@@ -312,8 +317,9 @@ class AircraftLayerClient:
     def get_firing_latest(self) -> dict[str, Any]:
         """`GET /firing/latest` -> the most recent `EmitterTracker.
         snapshot()` as a dict (`{"dcs_model_time_s", "received_wall_
-        clock_s", "active"}`, see `aircraft-layer/src/collector/
-        firing_receiver.py`). Never `None` -- see the module docstring."""
+        clock_s", "active", "mission_clock"}`, see `aircraft-layer/src/
+        collector/firing_receiver.py`). Never `None` -- see the module
+        docstring."""
         result = self._get_json("/firing/latest")
         if not isinstance(result, dict):
             raise AircraftLayerError(
