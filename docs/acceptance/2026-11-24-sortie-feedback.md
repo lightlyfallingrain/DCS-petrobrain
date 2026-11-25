@@ -426,3 +426,35 @@ So rows 8–9 (bank take), 4 (climb/descend) and 1 (level take) pass. Row 3 (150
 pitch reaches further than last flight but not far enough, and the dominant complaint is the time
 to reach the pitch. Not reported this flight: the RPM calibration readings (U9) — the trace carries
 args 40/41/42/838/839/845 regardless.
+
+Main loop's read of the trace (`refly5_flight_trace.log`, speed command at t=271.4, 160 → 250 km/h;
+decel command at t=339.3, 255 → ~150):
+
+| t (s) | V km/h | wanted accel `a_f_d` | actual `a_f` | wanted pitch `theta_d` | pitch |
+|---|---|---|---|---|---|
+| 271 | 160 | 0.5 | −0.1 | −4.5 | −3.5 |
+| 277 | 166 | 0.9 | 0.5 | −6.2 | −5.0 |
+| 281 | 177 | 1.4 | 0.9 | −8.8 | −7.5 |
+| 286 | 191 | **1.60 (peak)** | 1.09 | **−9.6 (peak)** | −8.9 |
+| 296 | 226 | 1.2 | 0.7 | −8.2 | −8.3 |
+| 306 | 241 | 0.9 | 0.26 | −7.0 | −7.3 |
+| 320 | 250 | 0.64 | 0.07 | −5.6 | −5.8 |
+
+1. **The pitch loop follows its target within ~1–2 s; the target itself is the problem.** The
+   slowness is upstream, in the speed shaper (`flight_control.lua` step 1 speed): a critically
+   damped second-order reference with `omega_speed = 0.15` rad/s. Its acceleration *rises* over
+   ~1/ω ≈ 7 s and peaks at about err·ω/e ≈ 1.4 m/s² for a 25 m/s step — so the 1.9 cap is never
+   reached, the peak comes ~15 s after the command, and the approach is an exponential tail
+   (230 → 250 took ~22 s). 160 → 250 took ~50 s, 255 → 150 ~40+ s, against the user's ~20 s.
+2. **Pitch per wanted acceleration is too small.** At wanted 1.6 m/s² the nose went to −9°, and
+   the aircraft delivered only ~1.1 m/s² (drag grows with speed; `c_theta = 0.85` and a slow trim
+   loop, `k_theta_trim = 0.02`, never close the gap during a 20 s manoeuvre). The user's own
+   figure — −15° for 1.6–1.9 m/s² — is the full kinematic tilt (atan(1.9/9.81) ≈ 11°) plus the
+   ~−3.5° level-flight trim.
+3. **The user's specified shape (fourth re-fly) is not what the shaper produces:** *"pitch down
+   ~15 deg … in 1-2 s. Keep flying -15 pitch until speed about 230, then start settling for 250"*;
+   deceleration the mirror. That is: jump to full acceleration at once, hold it, then a ~5 s
+   settle near the target — not a slow rise and an exponential tail.
+
+No re-explore: the user's fourth-re-fly description already specifies the shape; this flight
+confirms the earlier amendment changed the caps but not the shaper that sits under them.
