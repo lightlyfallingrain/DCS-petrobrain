@@ -173,6 +173,8 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B133]] — Petrovich does not start talking while the player keys ICS or RADIO
 - [[BL-B134]] — One readback rule for every command: "stand by", then confirm on execution
 - [[BL-B135]] — Guard non-finite floats at aircraft-layer wire boundaries (telemetry `received_wall_clock_s` and siblings)
+- [[BL-B136]] — Explosions as a night light source (split out of `BL-B124`)
+- [[BL-B137]] — `mission_clock` NaN/Infinity silently forces full daylight, not an error (third instance of `BL-B135`'s gap, found in `BL-B124`'s security deep analysis)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
