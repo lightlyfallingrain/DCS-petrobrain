@@ -138,3 +138,40 @@ real value yet.
   check. `grep`-ing the test suite for modules this stage touches found the field-coverage test
   above (not named in the plan) as the one test requiring an edit — everything else is new tests
   added by this implementation.
+
+### Review fix round (`plans/bl-b124-light-level/review-stages-1-3.md`, APPROVED WITH MINOR FIXES)
+
+- **Required Fix 1 — dangerous-direction warning dropped from the rendered `defaults.toml`.**
+  Both new tunables' `#:` comment blocks had the warning as the *second* sentence;
+  `generate_defaults.py` only ever renders the first. Rewrote each block, folding the warning into
+  one long first sentence — the same convention `LOWRES_ANGULAR_RADIUS_RAD`/
+  `MEDRES_ANGULAR_RADIUS_RAD` already use in `visibility.py` — then regenerated
+  `config/defaults.toml` (`tools/generate_defaults.py --write`) and read the **rendered** lines, not
+  the diff, to confirm the warning survives:
+  `EYE_FULL_DAYLIGHT_SUN_ELEV_DEG`'s rendered comment now ends "...which is the dangerous direction
+  since it under-dims a still-dim morning, while a *larger* value only keeps dimming performance
+  later into the morning than measured."; `SIGHT_FULL_DARK_SUN_ELEV_DEG`'s now ends "...which is the
+  dangerous direction for the no-omniscience goal this feature exists for -- an over-generous floor
+  leaves Petrovich reporting a unit no real crewman could see." Neither sentence names the sibling
+  tuning key, so `test_tuning_comment_renders.py`'s cross-key check (correctly) stays silent on
+  this change. Removed the trailing period inside the `"In real darkness, cannot see anything."`
+  quoted fragment (now `"In real darkness, cannot see anything"`) while merging, since a period
+  inside a quoted span the generator's `_SENTENCE_SPLIT` regex treats specially was no longer needed
+  once the sentence boundary moved past it.
+- **Required Fix 2 — `light_factor` had no test proving gate 3 and `tier_ranges()` stay in sync.**
+  Added three tests to `test_visibility.py`, right after the existing
+  `test_tier_ranges_presence_threshold_uses_the_optic_s_own_cap`: a T-72B (presence threshold
+  2333.33 m at `light_factor=(1.0, 1.0, 1.0)`, 233.33 m at `(0.1, 1.0, 1.0)`) placed at 300 m is
+  rejected at gate 3 under the shrunk factor (proving gate 3 itself reads the parameter, not just
+  `_achieved_tier`'s internal `tier_ranges()` call); the same candidate at 200 m clears gate 3 and
+  resolves to a real tier (never the "beyond even lowres" fallback the desync would otherwise force
+  it into). Added the review's suggested optional direct `tier_ranges()` test too — it isolates the
+  pure-function scaling (presence scaled by its own factor; class/type pulled down to match via the
+  existing `min()` chain whenever their own unscaled values would have exceeded it) from gate
+  ordering, cheaper to localise if this regresses later.
+
+**Checks re-run after both fixes**: `ruff format --check`/`ruff check` clean on `src`/`tests`;
+`cd body-layer && .venv/bin/mypy src` clean (94 source files); targeted run
+(`test_visibility.py`, `test_light_level.py`, `test_tuning_comment_renders.py`,
+`test_tuning_defaults_toml.py`) 77 passed, 1 xfailed; `.claude/scripts/fast-tests.sh body-layer`
+(smoke + 58 targeted files, parallel) 2381 passed, 4 xfailed — no regressions from either fix.

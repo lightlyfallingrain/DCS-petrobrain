@@ -609,12 +609,12 @@ SCAN_PLAN = [12, 11, 10, 9, 12, 1, 2, 3]
 SIGHT_AHEAD_WINDOW_DWELL_S = 30.0
 
 [perception.light_level]
-# Above this sun elevation, the naked eye (and every other optic) is at its full clear-day range -- today's unmodified behaviour.
+# Above this sun elevation, the naked eye (and every other optic) is at its full clear-day range -- today's unmodified behaviour -- and a *smaller* value here declares full daylight performance earlier than measured, which is the dangerous direction since it under-dims a still-dim morning, while a *larger* value only keeps dimming performance later into the morning than measured.
 # status: judgement | range: 1.0 .. 15.0
 # source: perception/light_level.py:EYE_FULL_DAYLIGHT_SUN_ELEV_DEG
 EYE_FULL_DAYLIGHT_SUN_ELEV_DEG = 6.0
 
-# Below this sun elevation, every optic -- including the 9K113's orange filter -- sees nothing but light sources (plan E4: "In real darkness, cannot see anything.").
+# Below this sun elevation, every optic -- including the 9K113's orange filter -- sees nothing but light sources (plan E4: "In real darkness, cannot see anything"); a *smaller* (more negative) value here keeps the 9K113 usable deeper into the night than measured, while a *larger* (less negative) value goes fully blind earlier than measured, which is the dangerous direction for the no-omniscience goal this feature exists for -- an over-generous floor leaves Petrovich reporting a unit no real crewman could see.
 # status: judgement | range: -30.0 .. -6.0
 # source: perception/light_level.py:SIGHT_FULL_DARK_SUN_ELEV_DEG
 SIGHT_FULL_DARK_SUN_ELEV_DEG = -12.0

@@ -76,8 +76,8 @@ from perception.optics import Optic
 
 #: Below this sun elevation, every optic -- including the 9K113's orange
 #: filter -- sees nothing but light sources (plan E4: "In real darkness,
-#: cannot see anything."). A *smaller* (more negative) value here keeps
-#: the 9K113 usable deeper into the night than measured; a *larger*
+#: cannot see anything"); a *smaller* (more negative) value here keeps
+#: the 9K113 usable deeper into the night than measured, while a *larger*
 #: (less negative) value goes fully blind earlier than measured, which is
 #: the dangerous direction for the no-omniscience goal this feature
 #: exists for -- an over-generous floor leaves Petrovich reporting a unit
@@ -97,13 +97,14 @@ SIGHT_FULL_DARK_SUN_ELEV_DEG: float = tuning.real(
 )
 
 #: Above this sun elevation, the naked eye (and every other optic) is at
-#: its full clear-day range -- today's unmodified behaviour. A *smaller*
-#: value here declares full daylight performance earlier than measured
-#: (the dangerous direction: it under-dims a still-dim morning); a
-#: *larger* value keeps dimming performance later into the morning than
-#: measured. Default +6.0 deg (~31 min after the test mission's sunrise)
-#: is a first-cut estimate per the explore-notes, not a measurement -- the
-#: test card's dawn pass narrows it. `lo=1.0` keeps this value
+#: its full clear-day range -- today's unmodified behaviour -- and a
+#: *smaller* value here declares full daylight performance earlier than
+#: measured, which is the dangerous direction since it under-dims a
+#: still-dim morning, while a *larger* value only keeps dimming
+#: performance later into the morning than measured. Default +6.0 deg
+#: (~31 min after the test mission's sunrise) is a first-cut estimate per
+#: the explore-notes, not a measurement -- the test card's dawn pass
+#: narrows it. `lo=1.0` keeps this value
 #: structurally above the nearest measured anchor (+0.3 deg) by at least
 #: a few tenths of a degree, so the piecewise-linear curve below never
 #: has to reconcile an override that crosses a fixed anchor.
