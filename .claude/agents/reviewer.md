@@ -54,6 +54,8 @@ definition, including this one.
   slew and field-of-regard limits), no omniscience leak, callouts and cockpit actions fire when the
   pilot would expect, co-moving state fields stay consistent across every transition. Several of
   these were previously caught only at the security pass; that net is gone.
+- Every new float parsed from outside the process checked with `math.isfinite()` at the parse,
+  with a `nan`/`inf` test (standing rule 2026-11-25, implementer.md "Code Rules")?
 - Type hints complete throughout; `mypy --strict` clean?
 - Provenance and confidence fields recorded for any feature derived from mixing DCS + external GIS data (never collapsed into one undocumented value)?
 - No claim about DCS internals encoded as fact without a corresponding entry in `world-model/research/`?
