@@ -245,8 +245,10 @@ per root `CLAUDE.md`'s "batch of stages actually executed together" rule.
 
 ### Risks & Unknowns
 
-- `LoGetMissionStartTime()`'s return units are unconfirmed (Stage 1's probe resolves this before
-  anything downstream trusts it).
+- ~~`LoGetMissionStartTime()`'s return units are unconfirmed~~ — superseded by the 2026-11-25
+  amendment: the open live check is now that `timer.getAbsTime()`/`env.mission.date` are readable
+  from the firing Hook's scripting-state poll and that the clock matches the cockpit clock (rides
+  the dawn-pass sortie).
 - The two end-point elevations (`SIGHT_FULL_DARK_SUN_ELEV_DEG`, `EYE_FULL_DAYLIGHT_SUN_ELEV_DEG`)
   and `LAUNCH_FLASH_DURATION_S` are first-cut estimates, not measurements — the test card narrows
   them, consistent with how `FIRE_LIFE_FRACTION_MAX` was handled.
