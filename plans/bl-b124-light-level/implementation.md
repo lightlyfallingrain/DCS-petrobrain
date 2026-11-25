@@ -338,3 +338,74 @@ code already reads any kind present in the dict generically. `belief.percept`'s 
 - **Not flown.** Both stages are code-complete and fully unit/integration-tested against
   fakes; the plan's test card (dawn pass, night light-source row, pilot-seat cockpit mask
   measurement) is the user's own live acceptance step, not run here.
+
+### Review fix round (`plans/bl-b124-light-level/review-stages-4-5.md`, APPROVED WITH MINOR FIXES)
+
+**Required Fix 1 — a frozen `mission_clock` feed read as fresh forever.** `_resolve_sun_
+elevation_deg` (`body.py`) treated any poll where `GET /firing/latest`'s `mission_clock`
+sub-dict *parsed* as "fresh," resetting `light_level_unavailable_since_wall` to `None` and
+`light_level_error_logged` to `False` every time — but aircraft-layer's `EmitterTracker.
+snapshot()` keeps serving its last-ingested `MissionClockSample` verbatim once the Hook/
+collector feed dies, with no mechanism to distinguish "a new sample just arrived" from "this
+is the same cached sample as five minutes ago." The fix is one line: a sample now counts as
+fresh only when it **differs** from `runner.light_level_last_clock`
+(`if fresh is not None and fresh != runner.light_level_last_clock:`). A repeated or absent
+sample now falls into the existing "unavailable" branch identically, so the pre-existing
+grace-window/one-shot-error machinery (unchanged) now actually reaches the dead-feed case it
+was built for; extrapolation also keeps advancing correctly through a run of repeats, because
+`light_level_last_clock_model_time_s` no longer gets wrongly re-anchored to the current
+`t_sim` on every repeat (it previously froze the resolved elevation at the frozen sample's own
+value for as long as the repeats continued, rather than extrapolating forward from the last
+genuinely new sample).
+
+Both the function's own docstring and the `light_level_unavailable_since_wall` field comment
+were updated in place to state the new "differs from the stored sample" condition — the old
+wording ("a fresh `mission_clock` sample this poll... clears the unavailable-since timer")
+was the exact premise the defect lived under, so it had to change, not just the code beside it.
+
+**Grace window stays wall-clock, not sim-time (the review's Optional Refinement 2).**
+Considered switching `MISSION_CLOCK_MAX_AGE_S`'s timer to sim-time (`ownship.t_sim` deltas)
+instead of `time.monotonic()`, which would also silence the "paused mission" false-positive
+the review names — but the review's own stated reasoning for keeping it wall-clock is sound
+independently of that: the Hook polls `GET /firing/latest` on its own 1 Hz *wall-clock*
+cadence regardless of DCS pause state, so wall time is the correct unit to bound *its*
+responsiveness against, not the mission's sim clock. Switching to sim-time would also have
+required reworking the four pre-existing tests that set `light_level_unavailable_since_wall`
+directly via `time.monotonic() - (MISSION_CLOCK_MAX_AGE_S + 1.0)` (`test_unreadable_past_the_
+grace_window_is_a_logged_error` and its three neighbours) — modifying existing tests without
+explicit permission, for a change the review itself flagged only as a live-test-card item
+("the test card's dawn pass includes a deliberate pause"), not a required fix. Left as
+wall-clock; the paused-mission scenario remains a known, accepted gap to be checked live, per
+the review's own recommendation, not guarded in the unit suite.
+
+**Tests added** (`body-layer/tests/test_body.py`, `TestResolveSunElevationDeg`):
+- `test_a_frozen_feed_serving_the_same_dict_forces_dark_and_logs` — feeds the identical
+  `mission_clock` dict across ownship samples spanning ~57 minutes of advancing `t_sim`
+  (mirroring the review's own reproduction), then pushes the wall-clock unavailable-since
+  timestamp past `MISSION_CLOCK_MAX_AGE_S` and confirms forced full dark + the one-shot
+  `ERROR` log fires — the exact scenario the review reproduced directly against the live
+  function.
+- `test_repeated_identical_sample_does_not_reset_the_unavailable_timer` — the narrower,
+  mutation-sensitive claim: a second repeat of the same dict must not re-clear
+  `light_level_unavailable_since_wall` back to `None`.
+- `test_extrapolation_keeps_advancing_through_a_run_of_repeated_samples` — one repeat
+  followed by an absent sample must still extrapolate from the *original* genuinely-new
+  sample's capture time, not from the repeat's (wrongly re-anchored) one.
+
+**Verified by mutation, not by reading.** Reverted the guard from `fresh is not None and
+fresh != runner.light_level_last_clock` back to the pre-fix `fresh is not None`
+(`shasum` before: `1f9670f3936415f6fa7d0eb9c01bc3f0f74535a8`); all three new tests failed
+immediately (the extrapolation one with a direct numeric mismatch, `75.940... != 75.933...`,
+the two guard tests on the `is None`/equality assertions), while all seven pre-existing
+`TestResolveSunElevationDeg` tests kept passing under the mutation — confirming the new tests
+are the ones actually exercising the fix, not duplicating existing coverage. Restored the
+fix; `shasum` after matched the pre-mutation value exactly, confirming the restore was exact.
+
+**Checks (this round):** `cd body-layer && ruff format --check src tests` clean;
+`ruff check src tests` clean; `.venv/bin/mypy src` clean (94 source files, run via the real
+`body-layer/.venv` since this worktree carries no `.venv` of its own); smoke
+(`pytest tests --collect-only`) 3803 tests collected; `pytest tests/test_body.py -m "not
+slow"` 251 passed; full body-layer suite (`pytest -m "not slow" -n auto`) 3772 passed,
+4 xfailed (up from the review's own 3769 passed, 4 xfailed — the 3 new tests). No tunable
+changed, so `config/defaults.toml` was not regenerated (confirmed via `git diff --stat
+config/defaults.toml src/tuning.py`, empty).

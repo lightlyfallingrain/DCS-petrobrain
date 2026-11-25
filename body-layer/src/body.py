@@ -879,16 +879,20 @@ class ConsolePerceptionRunner:
     #: together.
     light_level_last_clock_model_time_s: float | None = None
     #: `time.monotonic()` the mission clock first became unreadable this
-    #: mission (either no sample has ever arrived, or the most recent
-    #: poll's own read failed/was absent), or `None` while the most recent
-    #: poll read a fresh sample. Cleared the instant a fresh sample
-    #: arrives; **not** cleared merely because a cached sample still
-    #: exists to extrapolate from -- `run_once` reads the elapsed time
-    #: against this to decide whether extrapolation is still trustworthy
-    #: (`MISSION_CLOCK_MAX_AGE_S`) or whether to fail loud instead (user
-    #: Q6: "mission should always have both readable. Error if not" --
-    #: `docs/acceptance/`-equivalent answer, `plans/bl-b124-light-level/
-    #: explore-notes.md`).
+    #: mission (no sample has ever arrived, the most recent poll's read
+    #: failed/was absent, **or** the most recent poll's read parsed fine
+    #: but was byte-for-byte identical to `light_level_last_clock` -- a
+    #: dead feed that keeps serving its last-ingested sample is not
+    #: evidence of a new one; review fix, `plans/bl-b124-light-level/
+    #: review-stages-4-5.md` Required Fix 1), or `None` while the most
+    #: recent poll read a genuinely new sample. Cleared the instant a
+    #: genuinely new sample arrives; **not** cleared merely because a
+    #: cached sample still exists to extrapolate from -- `run_once` reads
+    #: the elapsed time against this to decide whether extrapolation is
+    #: still trustworthy (`MISSION_CLOCK_MAX_AGE_S`) or whether to fail
+    #: loud instead (user Q6: "mission should always have both readable.
+    #: Error if not" -- `docs/acceptance/`-equivalent answer, `plans/
+    #: bl-b124-light-level/explore-notes.md`).
     light_level_unavailable_since_wall: float | None = None
     #: One-shot latch so the "mission clock unreadable" `logger.error`
     #: fires once per mission, not every poll -- same pattern as
@@ -2523,33 +2527,51 @@ def _resolve_sun_elevation_deg(
     through `belief.optic_policy._light_factor_for`/`perception.light_
     level.light_factor`, i.e. full daylight, which is exactly the
     fallback user Q6 forbids (`explore-notes.md`: *"mission should always
-    have both readable. Error if not."*). A fresh `mission_clock` sample
-    this poll updates `runner.light_level_last_clock`/`_model_time_s` and
-    clears the unavailable-since timer; its absence starts that timer
-    (if not already running) and the cached sample -- if any -- is
-    extrapolated forward via the ownship model-time delta (sun elevation
-    moves ~0.004 deg/s, so this is accurate well past one poll). Once the
-    clock has been unreadable for longer than `MISSION_CLOCK_MAX_AGE_S`
-    (covers both "never read one yet, right after mission load" and "the
-    feed died mid-mission" -- the same timer, the same bound, so "the
-    first second after load" is simply this bound's ordinary grace
-    window, not a separate case), or the ownship position cannot be
-    projected to lat/lon for this theatre (`dcs_to_wgs84` raising
-    `ValueError` -- should not happen for an already-validated theatre,
-    but treated the same way rather than silently defaulting), this logs
-    one `ERROR` for the mission (`runner.light_level_error_logged`) and
-    returns `SIGHT_FULL_DARK_SUN_ELEV_DEG` -- forcing every optic's light
-    factor to `(0.0, 0.0, 0.0)` via the existing flat-floor clamp in
-    `light_factor()`, the safe direction for the no-omniscience goal this
-    whole feature exists for (better Petrovich sees too little than
-    something no real crewman could)."""
+    have both readable. Error if not."*). A sample counts as fresh only
+    when it **differs** from `runner.light_level_last_clock`, not merely
+    when `GET /firing/latest` parses -- `EmitterTracker.snapshot()`
+    (aircraft-layer) keeps serving its last-ingested `MissionClockSample`
+    verbatim once the Hook/collector feed dies, so a well-formed dict is
+    not on its own evidence of a new one. Review fix, `plans/
+    bl-b124-light-level/review-stages-4-5.md` Required Fix 1: before this,
+    an identical repeated dict reset the unavailable-since timer and the
+    error latch every poll, so a feed that died at noon left Petrovich
+    reasoning as if it were permanently noon -- the grace/error path below
+    was never reached. A genuinely new sample updates `runner.light_
+    level_last_clock`/`_model_time_s` and clears the unavailable-since
+    timer; a repeated or absent sample starts that timer (if not already
+    running) and the cached sample -- if any -- is extrapolated forward
+    via the ownship model-time delta from the *last genuinely new*
+    sample's capture time (sun elevation moves ~0.004 deg/s, so this stays
+    accurate well past one poll, and keeps advancing correctly through a
+    run of repeated/dead polls rather than freezing). Once the clock has
+    been unreadable for longer than `MISSION_CLOCK_MAX_AGE_S` (covers both
+    "never read one yet, right after mission load" and "the feed died or
+    froze mid-mission" -- the same timer, the same bound, so "the first
+    second after load" is simply this bound's ordinary grace window, not a
+    separate case), or the ownship position cannot be projected to lat/lon
+    for this theatre (`dcs_to_wgs84` raising `ValueError` -- should not
+    happen for an already-validated theatre, but treated the same way
+    rather than silently defaulting), this logs one `ERROR` for the
+    mission (`runner.light_level_error_logged`) and returns `SIGHT_FULL_
+    DARK_SUN_ELEV_DEG` -- forcing every optic's light factor to `(0.0,
+    0.0, 0.0)` via the existing flat-floor clamp in `light_factor()`, the
+    safe direction for the no-omniscience goal this whole feature exists
+    for (better Petrovich sees too little than something no real crewman
+    could). **The grace window stays wall-clock** (`time.monotonic()`),
+    not sim-time: the Hook polls `GET /firing/latest` on its own 1 Hz
+    wall-clock cadence regardless of DCS pause state, so wall time is the
+    correct unit to bound *its* responsiveness against -- a paused mission
+    legitimately reporting the same sample is a known, accepted gap (same
+    review, Optional Refinement 2), to be checked live rather than guarded
+    in the unit suite."""
     if runner.theatre is None:
         return None
     now_wall = time.monotonic()
     fresh = _parse_mission_clock_dict(
         firing.get("mission_clock") if firing is not None else None
     )
-    if fresh is not None:
+    if fresh is not None and fresh != runner.light_level_last_clock:
         runner.light_level_last_clock = fresh
         runner.light_level_last_clock_model_time_s = ownship.t_sim
         runner.light_level_unavailable_since_wall = None
