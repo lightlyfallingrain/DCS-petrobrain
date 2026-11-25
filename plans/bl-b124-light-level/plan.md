@@ -6,6 +6,27 @@ source" detections at night for things that give off light (firing, burning, exp
 exposed, missile/rocket launches), so a low-light sortie plays differently from a noon one and the
 pilot can trust what Petrovich does and does not report.
 
+### Amendment 2026-11-25 (main loop) — user answers to U1/U2
+
+- **U1 (explosions):** *"as recommended"* — deferred to its own item, `[[BL-B136]]`. Stage 6 below
+  is no longer part of BL-B124; its text stays as the outline BL-B136 points at.
+- **U2 (start time):** *"ok, but easier still would be mission wall clock time from DCS, if it is
+  available."* It is: in the mission scripting state, `timer.getAbsTime()` returns seconds since
+  00:00 of the mission's start day (it keeps counting past 86 400 across midnight), and
+  `env.mission.date` carries `{Year, Month, Day}`. The firing-events Hook already runs a 1 Hz
+  `net.dostring_in("scripting", …)` poll whose return string ends in `timer.getTime()`
+  (`petrobrain-firing-events-hook.lua`, `EVENT_POLL_CODE`). **So Stage 1 is replaced**: that poll
+  also returns `timer.getAbsTime()` and the mission date, the collector exposes them, and
+  body-layer takes date + clock time straight from DCS. This **drops** the `.miz` date threading
+  through MI-3/MI-6 and the `LoGetMissionStartTime()` Export read and its units probe. What still
+  needs one live check: that `env.mission.date` and `timer.getAbsTime()` are readable from that
+  state (expected — both are standard mission-scripting API) and that `getAbsTime()` matches the
+  cockpit clock; it rides the dawn-pass sortie. Between 1 Hz samples body-layer advances the clock
+  with `LoGetModelTime()` (sun moves ~0.004°/s, so even raw 1 Hz is ample). Missing either value
+  once the mission runs = error (Q6), never a daylight fallback. Where this amendment and older
+  text below disagree, **this amendment wins** (the "Affected modules" MI-3/MI-6 and `Export.lua`
+  bullets, the first diagram's inputs, Stage 1, U2).
+
 ### Inputs read in full
 
 `plans/bl-b124-light-level/explore-notes.md`, `plans/bl-b124-light-level/alignment.md` (verdict
@@ -174,7 +195,8 @@ the test card, same posture `FIRE_LIFE_FRACTION_MAX` itself carries):
 
 ### Implementation Plan
 
-1. **Stage 1 — mission date/time reaches body-layer.** Thread `RawMission.date` through MI-3/MI-6
+1. **Stage 1 — SUPERSEDED by the 2026-11-25 amendment above (date and wall clock from the firing
+   Hook's scripting-state poll).** Original text kept for the record: **mission date/time reaches body-layer.** Thread `RawMission.date` through MI-3/MI-6
    to `MissionUnderstandingData`. Add `LoGetMissionStartTime()` to `Export.lua`'s poll and one probe
    card to confirm its units on the Windows box before body-layer trusts it. No behaviour change
    yet — this stage only makes the data available. **Needs a flight** (the probe).
@@ -194,7 +216,7 @@ the test card, same posture `FIRE_LIFE_FRACTION_MAX` itself carries):
 5. **Stage 5 — `EmitterKind.LAUNCH_FLASH`.** `EmitterTracker._apply()`'s `S_EVENT_SHOT` branch,
    `resolve_emitters()` folds it in alongside `BURNING`/`FIRING`. Needs a flight: a missile or
    rocket launch at night, to check the flash duration and the "presence only, no class/type" rule.
-6. **Stage 6, gated on U1 — `EmitterKind.EXPLOSION`.** Hook-script diff for `S_EVENT_HIT` position
+6. **Stage 6 — moved to `[[BL-B136]]` (U1, deferred).** Outline: **`EmitterKind.EXPLOSION`.** Hook-script diff for `S_EVENT_HIT` position
    resolution, collector branch, `resolve_emitters()` fold. Only if the user takes U1's "build it
    now" option; otherwise becomes its own backlog entry.
 
