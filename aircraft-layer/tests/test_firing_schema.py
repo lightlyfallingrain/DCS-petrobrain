@@ -189,6 +189,32 @@ class TestMissionClockSample:
         with pytest.raises(FiringParseError):
             MissionClockSample.from_wire("notanumber|2024|1|1")
 
+    @pytest.mark.parametrize("abs_str", ["nan", "inf", "-inf", "Infinity"])
+    def test_non_finite_abs_time_s_raises(self, abs_str: str) -> None:
+        """`[[BL-B137]]` -- `float()` parses these strings without
+        raising (unlike `int()` on `year`/`month`/`day`), and an
+        unguarded NaN/Infinity here silently resolves, on the body-layer
+        side, to a forced full-daylight light factor. Confirms the fix:
+        `from_wire` now rejects them the same way it rejects any other
+        malformed sub-wire."""
+        with pytest.raises(FiringParseError):
+            MissionClockSample.from_wire(f"{abs_str}|2024|1|1")
+
+    def test_non_finite_abs_time_s_is_dropped_not_raised_at_batch_level(self) -> None:
+        """Mirrors `test_mission_clock_malformed_sub_wire_is_dropped_not_
+        raised` -- a non-finite `abs_time_s` drops the whole
+        `mission_clock` sub-wire to `None` without failing the batch's
+        other events, the same posture every other malformed sub-wire
+        gets."""
+        batch = FiringEventBatch.from_wire(
+            "1|60.3|S_EVENT_SHOOTING_START:60.3:Unit_013:1:nil:nil",
+            bridge_call_ms=0.5,
+            received_wall_clock_s=1.0,
+            mission_clock_raw="nan|2024|1|1",
+        )
+        assert batch.mission_clock is None
+        assert len(batch.events) == 1
+
     def test_to_dict(self) -> None:
         sample = MissionClockSample(abs_time_s=1.0, year=2024, month=1, day=1)
         assert sample.to_dict() == {

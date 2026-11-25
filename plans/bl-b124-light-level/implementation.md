@@ -409,3 +409,103 @@ slow"` 251 passed; full body-layer suite (`pytest -m "not slow" -n auto`) 3772 p
 4 xfailed (up from the review's own 3769 passed, 4 xfailed — the 3 new tests). No tunable
 changed, so `config/defaults.toml` was not regenerated (confirmed via `git diff --stat
 config/defaults.toml src/tuning.py`, empty).
+
+## `[[BL-B137]]` fix — `mission_clock` NaN/Infinity no longer silently forces full daylight
+(2026-11-25)
+
+The security deep analysis's one non-blocking finding (`security.md` Finding 1), closed the
+same day on `feature/bl-b124-light-level` rather than left for later: `MissionClockSample.
+from_wire`'s `float(abs_str)` parsed `"nan"`/`"inf"`/`"-inf"` without raising, and the value
+propagated through `sun_elevation_deg`'s formula to a clean `90.0` deg (full daylight) at the
+`max(-1.0, min(1.0, nan))` clamp — the one outcome this feature's own design (user Q6: "error
+if not readable") forbids, and silently: `_resolve_sun_elevation_deg`'s "fresh only if it
+differs" guard (this plan's own earlier Required Fix) is defeated by `nan != nan` being `True`
+in Python, so the malformed sample read as "fresh" on every poll and never reached the
+staleness/error path that would log it.
+
+**Fix, both ends named in the finding:**
+
+1. **`aircraft-layer/src/schema/firing.py`, `MissionClockSample.from_wire`** — added
+   `math.isfinite(abs_time_s)` to the success condition, raising `FiringParseError` otherwise
+   (same posture as the existing `ValueError` path for a non-numeric field).
+   `FiringEventBatch.from_wire`'s existing `except FiringParseError: mission_clock = None`
+   already drops this to "unavailable" without failing the rest of the batch — no change
+   needed there.
+2. **Body-layer, two independent layers** (the finding's own "treat a non-finite input or
+   result as unavailable" framing, not just the wire fix) — `abs_time_s` is also reachable via
+   a value `_resolve_sun_elevation_deg` extrapolates fresh every poll
+   (`abs_time_s0 + (ownship.t_sim - model_time_at_capture)`), which never passes back through
+   the wire parser above:
+   - `body._parse_mission_clock_dict` now checks `math.isfinite(abs_time_s)` alongside its
+     existing `isinstance` checks, rejecting a non-finite value to `None` the same way a
+     wrong-typed one already is.
+   - `perception.light_level.sun_elevation_deg` itself now raises `ValueError` on a non-finite
+     `abs_time_s` at entry, and again on a non-finite `sin_altitude` intermediate — checked
+     *before* the clamp that was silently resolving it, not after. `_resolve_sun_elevation_deg`
+     wraps its call to `_compute_sun_elevation_deg` in `try`/`except ValueError`, falling
+     through to the same beyond-grace path the pre-existing `dcs_to_wgs84` `ValueError` catch
+     already used — forced full dark, one-shot logged `ERROR`, never a silent daylight value.
+
+**Tests added:**
+- `aircraft-layer/tests/test_firing_schema.py` — `TestMissionClockSample.
+  test_non_finite_abs_time_s_raises` (parametrized over `"nan"`/`"inf"`/`"-inf"`/`"Infinity"`)
+  and `test_non_finite_abs_time_s_is_dropped_not_raised_at_batch_level` (the
+  `FiringEventBatch`-level drop-without-failing-the-batch posture).
+- `body-layer/tests/test_light_level.py` — `TestSunElevationDeg.
+  test_non_finite_abs_time_s_raises` (parametrized over NaN/±Infinity) and
+  `test_without_the_guard_nan_silently_resolves_to_full_daylight`, which runs the bare
+  `max(-1.0, min(1.0, nan))` clamp directly (not this module's code) to demonstrate the exact
+  failure mode the guard pre-empts is real, not a defensive-programming reflex.
+- `body-layer/tests/test_body.py` — `TestResolveSunElevationDeg.
+  test_non_finite_mission_clock_never_resolves_to_daylight` (end to end, via `GET
+  /firing/latest`'s dict shape) and `test_a_corrupted_stored_clock_falls_back_to_dark_not_
+  daylight` (constructs a non-finite `runner.light_level_last_clock` directly, bypassing
+  `_parse_mission_clock_dict`'s own guard, to isolate and prove the second-layer `try`/`except`
+  around `_compute_sun_elevation_deg` is itself load-bearing); `TestParseMissionClockDict.
+  test_non_finite_abs_time_s_is_rejected` (parametrized).
+
+**Checks:** `aircraft-layer` — `ruff format --check src tests` clean (one file reformatted
+by `ruff format` after the edit, re-verified clean), `ruff check src tests` clean,
+`.venv/bin/mypy src` clean (28 source files), `pytest tests -q` 1070 passed.
+`body-layer` — `ruff format --check src tests` clean (two test files reformatted after the
+edit, re-verified clean), `ruff check src tests` clean, `.venv/bin/mypy src` clean (94 source
+files), `pytest tests/test_light_level.py tests/test_body.py -q` 274 passed,
+`pytest tests -q` (full suite, deselecting the one known-at-baseline-broken test) 3803
+passed / 4 xfailed / 1 deselected — the 5 `test_bl_b104_scenario_mock_flights.py` failures
+(`look_direction` → `HTTP Error 501: Unsupported method ('POST')`, `tests/support/
+mock_aircraft_layer.MockAircraftLayerServer` has no `do_POST`) reproduce identically against
+the unmodified `4525ebcd` baseline, checked in a disposable worktree — pre-existing, unrelated
+to this change.
+
+**Mutation proof, actually run** (not asserted from reading) — each guard removed with
+`Edit`, tests re-run, red confirmed for the stated reason, guard restored, `shasum`
+before/after matched exactly:
+- `MissionClockSample.from_wire`'s `math.isfinite` check removed →
+  `test_non_finite_abs_time_s_raises` (all four parametrizations) and
+  `test_non_finite_abs_time_s_is_dropped_not_raised_at_batch_level` fail (NaN/Infinity parse
+  through to a real `MissionClockSample` instead of raising `FiringParseError`). Restored;
+  `firing.py`'s `shasum` matched.
+- `sun_elevation_deg`'s two guards (the entry-point `abs_time_s` check and the pre-clamp
+  `sin_altitude` check) removed together → `test_non_finite_abs_time_s_raises[nan]` fails
+  (`DID_NOT_RAISE`), but **the `inf`/`-inf` parametrizations still pass** — not because any
+  guard caught them, but because `math.sin`/`math.cos` on an infinite argument already raises
+  Python's own `ValueError: math domain error` before either guard would fire. **NaN is the
+  one value neither Python's own arithmetic nor the pre-existing code ever caught** — matching
+  the security finding's own emphasis on `nan != nan` as the specific defeat mechanism, not
+  Infinity. Restoring only the entry-point check (leaving the `sin_altitude` check removed)
+  made all three parametrizations pass again, confirming the entry-point check alone is what
+  is load-bearing for this test; the `sin_altitude` check is a second, deliberately redundant
+  layer for an intermediate going non-finite by some other path than a non-finite `abs_time_s`
+  (none identified, but cheap to keep). Restored both; `light_level.py`'s `shasum` matched.
+- `_resolve_sun_elevation_deg`'s `try`/`except ValueError` around `_compute_sun_elevation_deg`
+  removed → `test_a_corrupted_stored_clock_falls_back_to_dark_not_daylight` fails by raising
+  `ValueError` out of `_resolve_sun_elevation_deg` instead of returning
+  `SIGHT_FULL_DARK_SUN_ELEV_DEG` (`test_non_finite_mission_clock_never_resolves_to_daylight`
+  stays green under this same mutation — it never reaches `_compute_sun_elevation_deg` at all,
+  because `_parse_mission_clock_dict` already rejected the NaN upstream, which is itself a
+  useful confirmation that the two body-layer guards are independent, not duplicate coverage
+  of the same path). Restored; `body.py`'s `shasum` matched.
+
+`body-layer/ROADMAP/BL-B137.md` marked `[x]`/`#status/closed`; `body-layer/ROADMAP/
+body-layer-backlog.md`'s index line annotated done. `[[BL-B135]]`'s own entry already
+cross-links `BL-B137` by id and needed no change.

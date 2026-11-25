@@ -98,6 +98,44 @@ class TestSunElevationDeg:
         assert noon > 60.0
         assert midnight < -30.0
 
+    @pytest.mark.parametrize("abs_time_s", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_abs_time_s_raises(self, abs_time_s: float) -> None:
+        """`[[BL-B137]]` -- defence in depth alongside `schema.firing.
+        MissionClockSample.from_wire`'s own wire-boundary guard, since
+        this function is also reachable with a locally-extrapolated
+        `abs_time_s` that never passes back through that parser
+        (`body._resolve_sun_elevation_deg`). Mutation proof this guard
+        is load-bearing: removing it lets a NaN `abs_time_s` reach the
+        final clamp and silently resolve to 90.0 deg (full daylight) --
+        see `test_without_the_guard_nan_silently_resolves_to_full_
+        daylight` below, which demonstrates that exact failure mode
+        directly against the clamp the guard exists to pre-empt."""
+        with pytest.raises(ValueError):
+            sun_elevation_deg(
+                year=_YEAR,
+                month=_MONTH,
+                day=_DAY,
+                abs_time_s=abs_time_s,
+                lat_deg=_LAT_DEG,
+                lon_deg=_LON_DEG,
+            )
+
+    def test_without_the_guard_nan_silently_resolves_to_full_daylight(self) -> None:
+        """Not a test of this module's own code -- a demonstration, run
+        directly against the bare clamp `sun_elevation_deg` guards
+        ahead of, that the finding this guard exists for is real: a NaN
+        `sin_altitude` is **not** held clean by `max(-1.0, min(1.0,
+        nan))` the way an ordinary out-of-range value would be. `min`/
+        `max` keep their first argument whenever a NaN comparison makes
+        it `False`, so this is exactly `90.0`, not merely "wrong" --
+        the one outcome `[[BL-B137]]`'s finding, and this feature's own
+        design (user Q6), both call out as the forbidden fallback."""
+        import math
+
+        sin_altitude = float("nan")
+        clamped = max(-1.0, min(1.0, sin_altitude))
+        assert math.degrees(math.asin(clamped)) == 90.0
+
 
 class TestLightFactor:
     def test_flat_at_one_above_full_daylight(self) -> None:

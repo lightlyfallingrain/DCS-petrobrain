@@ -60,6 +60,7 @@ to `FiringEventBatch.mission_clock is None` -- see
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Final
 
@@ -153,6 +154,17 @@ class MissionClockSample:
                 "expected '<abs_time_s>|<year>|<month>|<day>' or "
                 f"'unavailable', got {raw!r}"
             ) from exc
+        if not math.isfinite(abs_time_s):
+            # `float()` parses "nan"/"inf"/"-inf" without raising, unlike
+            # `int()` on `year`/`month`/`day` above -- `[[BL-B137]]`, found
+            # by the `BL-B124` security deep analysis: an unguarded NaN/
+            # Infinity here silently resolves, on the body-layer side, to
+            # a concrete 90.0 deg sun elevation (full daylight), the one
+            # outcome this feature's own design forbids (user Q6: "error
+            # if not readable"). Rejected the same way as any other
+            # malformed sub-wire -- the caller drops it to
+            # `mission_clock=None`, never raises past this module.
+            raise FiringParseError(f"abs_time_s must be finite, got {abs_str!r}")
         return MissionClockSample(
             abs_time_s=abs_time_s, year=year, month=month, day=day
         )

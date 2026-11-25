@@ -287,7 +287,26 @@ def sun_elevation_deg(
     across midnight, handled below as ordinary day rollover through the
     Julian day, not a modulo) and ownship `lat_deg`/`lon_deg`
     (`world-model`'s `coordinates.dcs_to_wgs84`). See module docstring
-    for the formula's source, accuracy and timezone convention."""
+    for the formula's source, accuracy and timezone convention.
+
+    Raises `ValueError` if `abs_time_s` is non-finite (NaN/Infinity), or
+    if the computation itself produces a non-finite intermediate --
+    defence in depth alongside `schema.firing.MissionClockSample.
+    from_wire`'s own wire-boundary guard (`[[BL-B137]]`). This function
+    is also reachable with a *locally extrapolated* `abs_time_s`
+    (`body._resolve_sun_elevation_deg`'s `abs_time_s0 + (ownship.t_sim -
+    model_time_at_capture)`) that never passes back through that parser,
+    so the guard belongs here too. The final clamp below,
+    `max(-1.0, min(1.0, sin_altitude))`, does **not** hold a NaN
+    `sin_altitude` clean -- `min`/`max` keep their first argument
+    whenever the comparison that would replace it is NaN, so an
+    unguarded NaN input would silently resolve to a concrete 90.0 deg
+    (full daylight), the one outcome this feature's own design forbids
+    (user Q6: "error if not readable"). Checking before that clamp, not
+    after, is what stops the silent resolution rather than merely
+    reporting it after the fact."""
+    if not math.isfinite(abs_time_s):
+        raise ValueError(f"abs_time_s must be finite, got {abs_time_s!r}")
     utc_offset_hours = round(lon_deg / 15.0)
     total_hours_utc = abs_time_s / 3600.0 - utc_offset_hours
     jd = _julian_day(year, month, day, 0.0) + total_hours_utc / 24.0
@@ -314,6 +333,11 @@ def sun_elevation_deg(
     sin_altitude = math.sin(lat) * math.sin(declination) + math.cos(lat) * math.cos(
         declination
     ) * math.cos(local_hour_angle)
+    if not math.isfinite(sin_altitude):
+        raise ValueError(
+            "sun elevation computation produced a non-finite intermediate "
+            f"(sin_altitude={sin_altitude!r})"
+        )
     sin_altitude = max(-1.0, min(1.0, sin_altitude))
     return math.degrees(math.asin(sin_altitude))
 

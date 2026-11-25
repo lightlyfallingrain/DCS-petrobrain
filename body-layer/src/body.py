@@ -120,6 +120,7 @@ import argparse
 import hashlib
 import itertools
 import logging
+import math
 import shutil
 import sqlite3
 import sys
@@ -2488,9 +2489,14 @@ def _parse_mission_clock_dict(raw: object) -> tuple[float, int, int, int] | None
     time_s", "year", "month", "day"}`, `aircraft_client.get_firing_
     latest`'s own docstring) into `(abs_time_s, year, month, day)`, or
     `None` for anything else -- absent, not a dict, or a field missing/
-    wrong-typed. `bool` is explicitly excluded from the numeric checks
-    (`isinstance(x, bool)` is also `isinstance(x, int)` in Python) the
-    same way every other wire-parsing function in this codebase does."""
+    wrong-typed, **or `abs_time_s` non-finite (NaN/Infinity)** --
+    defence in depth alongside `schema.firing.MissionClockSample.
+    from_wire`'s own wire-boundary guard (`[[BL-B137]]`): this dict comes
+    from `GET /firing/latest`'s JSON body, a second boundary a stale or
+    unpatched aircraft-layer collector could still cross. `bool` is
+    explicitly excluded from the numeric checks (`isinstance(x, bool)` is
+    also `isinstance(x, int)` in Python) the same way every other
+    wire-parsing function in this codebase does."""
     if not isinstance(raw, dict):
         return None
     abs_time_s = raw.get("abs_time_s")
@@ -2500,6 +2506,7 @@ def _parse_mission_clock_dict(raw: object) -> tuple[float, int, int, int] | None
     if (
         isinstance(abs_time_s, (int, float))
         and not isinstance(abs_time_s, bool)
+        and math.isfinite(abs_time_s)
         and isinstance(year, int)
         and not isinstance(year, bool)
         and isinstance(month, int)
@@ -2550,9 +2557,15 @@ def _resolve_sun_elevation_deg(
     froze mid-mission" -- the same timer, the same bound, so "the first
     second after load" is simply this bound's ordinary grace window, not a
     separate case), or the ownship position cannot be projected to lat/lon
-    for this theatre (`dcs_to_wgs84` raising `ValueError` -- should not
-    happen for an already-validated theatre, but treated the same way
-    rather than silently defaulting), this logs one `ERROR` for the
+    for this theatre (`dcs_to_wgs84` raising `ValueError`), or the sun-
+    elevation computation itself raises `ValueError` on a non-finite
+    `abs_time_s`/intermediate (`[[BL-B137]]` -- should not happen once
+    `_parse_mission_clock_dict` has already rejected a non-finite stored
+    sample, but the `abs_time_s` passed below is extrapolated fresh every
+    poll and never passes back through that guard) -- none of these
+    three should happen for an already-validated theatre/sample, but all
+    are treated the same way rather than silently defaulting: this logs
+    one `ERROR` for the
     mission (`runner.light_level_error_logged`) and returns `SIGHT_FULL_
     DARK_SUN_ELEV_DEG` -- forcing every optic's light factor to `(0.0,
     0.0, 0.0)` via the existing flat-floor clamp in `light_factor()`, the
@@ -2596,16 +2609,27 @@ def _resolve_sun_elevation_deg(
         except ValueError:
             lat_deg, lon_deg = None, None
         if lat_deg is not None and lon_deg is not None:
-            return _compute_sun_elevation_deg(
-                year=year,
-                month=month,
-                day=day,
-                abs_time_s=abs_time_s0 + (ownship.t_sim - model_time_at_capture),
-                lat_deg=lat_deg,
-                lon_deg=lon_deg,
-            )
-        # Coordinate projection failed for an already-validated theatre --
-        # should not happen, but treated as beyond-grace (always surfaced)
+            try:
+                return _compute_sun_elevation_deg(
+                    year=year,
+                    month=month,
+                    day=day,
+                    abs_time_s=abs_time_s0 + (ownship.t_sim - model_time_at_capture),
+                    lat_deg=lat_deg,
+                    lon_deg=lon_deg,
+                )
+            except ValueError:
+                # Non-finite `abs_time_s`/intermediate (`[[BL-B137]]`) --
+                # `_parse_mission_clock_dict` already guards the stored
+                # sample itself, but the extrapolated `abs_time_s` above
+                # is computed fresh every poll and never passes back
+                # through that guard, so it is checked here too. Treated
+                # the same as the coordinate-projection failure below:
+                # beyond-grace, never a silent daylight fallback.
+                pass
+        # Coordinate projection failed for an already-validated theatre, or
+        # the sun-elevation computation itself produced a non-finite value
+        # -- should not happen, but treated as beyond-grace (always surfaced)
         # rather than silently falling back to the quiet "still within
         # grace" path below, which exists for the ordinary "no sample yet"
         # case, not a genuine anomaly.

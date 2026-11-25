@@ -9368,6 +9368,51 @@ class TestResolveSunElevationDeg:
         )
         assert resolved == pytest.approx(expected, abs=1e-9)
 
+    def test_non_finite_mission_clock_never_resolves_to_daylight(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`[[BL-B137]]` end to end: a NaN/Infinity `abs_time_s` on the
+        wire must never force full daylight (the user Q6-forbidden
+        fallback) -- `_parse_mission_clock_dict` rejects it, so this
+        reads exactly like "never had a sample", not like a fresh
+        reading of noon."""
+        runner = _light_level_runner("Syria")
+        bad_clock: dict[str, Any] = dict(_MISSION_CLOCK_NOON, abs_time_s=float("nan"))
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(
+                runner, _ownship_at(0.0), {"mission_clock": bad_clock}
+            )
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert resolved != 90.0
+        assert runner.light_level_last_clock is None
+        assert "BL-B124" not in caplog.text  # still within grace, not yet an error
+
+    def test_a_corrupted_stored_clock_falls_back_to_dark_not_daylight(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Defence in depth one level deeper: even if a non-finite
+        `abs_time_s` somehow reached `runner.light_level_last_clock`
+        (bypassing `_parse_mission_clock_dict`'s own guard --
+        constructed directly here to isolate this exact layer), the
+        `try`/`except ValueError` this fix added around
+        `_compute_sun_elevation_deg`'s call must catch
+        `sun_elevation_deg`'s own `ValueError` and fall through to the
+        beyond-grace path (surfaced as the usual one-shot `ERROR`, same
+        as the pre-existing coordinate-projection-failure case), never
+        returning the raised exception's value or a silently-resolved
+        daylight figure. Mutation-sensitive: deleting that
+        `try`/`except` makes this raise `ValueError` instead of
+        returning a forced-dark/error result."""
+        runner = _light_level_runner("Syria")
+        runner.light_level_last_clock = (float("nan"), 2020, 6, 1)
+        runner.light_level_last_clock_model_time_s = 0.0
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(runner, _ownship_at(0.0), None)
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert resolved != 90.0
+        assert runner.light_level_error_logged is True
+        assert "BL-B124" in caplog.text
+
 
 class TestParseMissionClockDict:
     def test_absent_key_is_none(self) -> None:
@@ -9389,4 +9434,16 @@ class TestParseMissionClockDict:
     def test_bool_is_rejected_even_though_it_is_an_int_subclass(self) -> None:
         bad = dict(_MISSION_CLOCK_NOON)
         bad["day"] = True
+        assert _parse_mission_clock_dict(bad) is None
+
+    @pytest.mark.parametrize("abs_time_s", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_abs_time_s_is_rejected(self, abs_time_s: float) -> None:
+        """`[[BL-B137]]` -- a second, independent guard against the same
+        gap `schema.firing.MissionClockSample.from_wire` now closes at
+        the wire: this dict comes from `GET /firing/latest`'s JSON body,
+        a boundary a stale/unpatched aircraft-layer collector could
+        still cross. Passes the `isinstance(x, (int, float))` check
+        either way -- the point of this test is that it must not stop
+        there."""
+        bad = dict(_MISSION_CLOCK_NOON, abs_time_s=abs_time_s)
         assert _parse_mission_clock_dict(bad) is None
