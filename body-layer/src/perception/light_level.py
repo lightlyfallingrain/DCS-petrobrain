@@ -12,12 +12,14 @@ user's own dawn measurements established
 between three measured anchor points and flat at the two end-point
 tunables outside them.
 
-**Nothing in this module is wired into `body.py`'s poll loop yet** --
-Stage 3 threads a `light_factor` parameter through `visibility.
+**Wired into `body.py`'s poll loop as of Stage 4.** Stage 3 threaded a
+`light_factor`/`sun_elevation_deg` parameter through `visibility.
 tier_ranges()`/`check_visibility()`/`belief.optic_policy.py` with a true
-no-op default `(1.0, 1.0, 1.0)`; Stage 4 (computing a real value every
-poll and treating a missing mission date/clock as an error) is a later
-stage, not built here.
+no-op default; Stage 4 (`body._resolve_sun_elevation_deg`) computes a
+real value every poll from the firing-events Hook's `mission_clock` and
+ownship lat/lon, extrapolating between 1 Hz samples via model time and
+forcing full dark (never a daylight fallback) once the clock has been
+unreadable for longer than `MISSION_CLOCK_MAX_AGE_S`.
 
 ## `sun_elevation_deg`
 
@@ -113,6 +115,29 @@ EYE_FULL_DAYLIGHT_SUN_ELEV_DEG: float = tuning.real(
     6.0,
     lo=1.0,
     hi=15.0,
+    status="judgement",
+)
+
+#: **Stage 4 -- how long `body.py` keeps extrapolating sun elevation from
+#: the last mission-clock sample the firing-events Hook actually
+#: reported before giving up and forcing full dark instead; a *smaller*
+#: value here turns an ordinary single dropped poll into spurious
+#: blindness (the sun moves ~0.004 deg/s, so extrapolating a few seconds
+#: past the last sample is still accurate to well under the curve's own
+#: measurement error), while a *larger* value risks hiding a genuinely
+#: dead Hook/collector feed for longer before the user ever hears about
+#: it** (user Q6: "mission should always have both readable. Error if
+#: not."). Default 5.0 s is a few times the Hook's own 1 Hz poll cadence
+#: -- generous enough to absorb one or two missed polls, tight enough
+#: that a real failure surfaces within a handful of seconds rather than
+#: minutes. `lo=2.0` keeps at least one full poll cycle of slack; `hi
+#: =30.0` is the outer bound before "still extrapolating" stops being a
+#: defensible reading of "the feed is fine, just slow this poll."
+MISSION_CLOCK_MAX_AGE_S: float = tuning.real(
+    "perception.light_level.MISSION_CLOCK_MAX_AGE_S",
+    5.0,
+    lo=2.0,
+    hi=30.0,
     status="judgement",
 )
 

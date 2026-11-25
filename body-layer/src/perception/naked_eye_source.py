@@ -558,13 +558,14 @@ class NakedEyePerceptionSource:
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
     #: `(presence, class, type)` multiplier for ambient light level
-    #: (`BL-B124` Stage 3, `plans/bl-b124-light-level/plan.md`,
+    #: (`BL-B124` Stage 4, `plans/bl-b124-light-level/plan.md`,
     #: `perception.light_level.light_factor`). Assigned per poll by
-    #: `body._apply_active_gaze` alongside `optic`, same reason as every
-    #: other field in that group: the computation belongs to the poll
-    #: loop, not to this class. **Default `(1.0, 1.0, 1.0)` is a true
-    #: no-op** -- nothing assigns a real value yet (Stage 4, not built
-    #: here).
+    #: `body._apply_active_gaze` alongside `optic`, from `light_factor(
+    #: optic, sun_elevation_deg)` -- computed against *this poll's own
+    #: decided optic*, since the curve is per-optic (binoculars/the
+    #: 9K113 dim differently from the naked eye at the same sun
+    #: elevation). Default `(1.0, 1.0, 1.0)` is a true no-op, still the
+    #: value every test that does not care about light level gets.
     light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0)
     #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
     #: §7) -- assigned per poll by `body._apply_active_gaze` alongside
