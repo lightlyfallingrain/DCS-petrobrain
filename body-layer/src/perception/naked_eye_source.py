@@ -557,6 +557,15 @@ class NakedEyePerceptionSource:
     #: regression gate 2B used and it is worth repeating here: the
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
+    #: `(presence, class, type)` multiplier for ambient light level
+    #: (`BL-B124` Stage 3, `plans/bl-b124-light-level/plan.md`,
+    #: `perception.light_level.light_factor`). Assigned per poll by
+    #: `body._apply_active_gaze` alongside `optic`, same reason as every
+    #: other field in that group: the computation belongs to the poll
+    #: loop, not to this class. **Default `(1.0, 1.0, 1.0)` is a true
+    #: no-op** -- nothing assigns a real value yet (Stage 4, not built
+    #: here).
+    light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0)
     #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
     #: §7) -- assigned per poll by `body._apply_active_gaze` alongside
     #: `optic`, from the same resolution: the sight's own *actual* pointing
@@ -636,7 +645,9 @@ class NakedEyePerceptionSource:
         **not** touch `scan_plan`/`optic`/`sight_cone`/`suppressed_until_sim`
         -- those are per-poll fields the poll loop overwrites every tick
         (`body._apply_active_gaze`), not mission-scoped state that would
-        otherwise leak across a restart. `peripheral_stimulus_ids` is the
+        otherwise leak across a restart. `light_factor` (`BL-B124`) is the
+        same shape -- a per-poll field the poll loop overwrites every
+        tick, not mission-scoped state. `peripheral_stimulus_ids` is the
         same shape (the attention-capture channel that would ever write it
         does not exist yet -- it stays its construction-time default
         forever today), so it is likewise left untouched.
@@ -849,6 +860,7 @@ class NakedEyePerceptionSource:
                 live_los_coverage=self.live_los_coverage,
                 forest=self.forest,
                 emitter=emitter_by_object_id.get(candidate.object_id),
+                light_factor=self.light_factor,
             )
             if self.trace_sink is not None:
                 resolved_los = los_by_object_id.get(candidate.object_id)

@@ -2341,6 +2341,7 @@ _PER_POLL_OVERWRITTEN_FIELDS: frozenset[str] = frozenset(
         "gaze_centre_elevation_deg",
         "suppressed_until_sim",
         "peripheral_stimulus_ids",
+        "light_factor",
     }
 )
 _RESET_FIELDS: frozenset[str] = frozenset(
