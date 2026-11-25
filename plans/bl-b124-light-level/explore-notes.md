@@ -81,7 +81,27 @@ is the same few-second light source as a missile launch.
   `docs/concept/detection-in-non-perfect-conditions.md` and every branch — the doc has only the
   three dawn points (−28, −18, +2 min around a 05:18 sunrise, Syria, N31°35′ E40°17′) and the
   qualitative "In real darkness, cannot see anything"; no end points, no mission date. Raised with
-  the user (pending).
+  the user, who gave the date: *"Syria test mission date: 2020-06-01 08:00"*.
+
+  **Measured points as sun elevation** (main loop, 2026-11-25; low-precision solar formula at
+  N31°34′55″ E40°17′01″, 2020-06-01, local = UTC+3; it puts sunrise at 05:14:40 against DCS's
+  05:18:29 — 4 min apart, likely refraction/model difference — and the sunrise azimuth at 63.2°,
+  matching the doc exactly; minutes taken relative to DCS's own 05:18:29):
+
+  | doc point | sun elevation |
+  |---|---|
+  | −28 min | −5.3° |
+  | −18 min | −3.5° |
+  | +2 min | +0.3° |
+
+  **End points — first-cut estimates, tunable, to be measured on the test card** (user did not
+  object to estimating; the date was their answer): **9K113 (orange filter) fully blind at sun
+  −12°** (~65 min before sunrise that day; at −5.3° the narrow channel still saw 7 km and the fall is
+  steep); **naked eye back to full daylight range at sun +6°** (~31 min after sunrise; at +0.3° the
+  eye saw 1.8 km against ~9 km by day). The card gets one dawn pass over a BTR from about −65 to
+  +35 min calling out when the 9K113, binoculars, and eye each first see it and when the eye reaches
+  its daylight range — that turns the estimates into measurements. Elevation is computed from the
+  mission's own date, time and position, so other dates and theatres follow.
 - **Q4 aircraft:** same factor as ground units for now; the twilight-sky silhouette (more visible)
   is noted and ignored.
 - **Q5 optic policy as light falls:** binoculars while they can still viably see; then the 9K113
