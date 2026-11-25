@@ -115,7 +115,16 @@ M.PROFILES["Mi-24P"] = {
     -- `a_f,d = dV_ref_dot + k_v*(V_ref-V)`, section C). Owed by M0-E.
     k_vs_error = 0.3,
     k_alt_error = 0.05,
-    k_speed_error = 0.2,
+    -- LV-1 amendment (2026-11-25, second iteration on the fifth re-fly,
+    -- `plans/flight-lift-vector/debug-2026-11-25.md`): raised 0.2 ->
+    -- 0.3 alongside `c_theta` below -- `omega_speed` alone (first
+    -- iteration) got the realistic-gain toy plant to ~28-30 s, still
+    -- short of the user's own ~20 s ("much too long," said twice). This
+    -- term is what pushes `a_f_d`/pitch past the pure kinematic tilt
+    -- while the real aircraft lags `v_ref` (the drag-compensation
+    -- mechanism, not a separate fix) -- raising it directly shortens
+    -- the time-to-target as well as closing the delivered-accel gap.
+    k_speed_error = 0.3,
 
     -- ---- LV-1 (`plans/flight-lift-vector/plan.md`, "The law, in
     -- words" B): the gain schedule `G(V)` -- "about 0.3 at hover, 1.0
@@ -149,7 +158,15 @@ M.PROFILES["Mi-24P"] = {
     -- unknown, above), rather than reintroducing a model of it -- what
     -- changes is the onset (fast), not the several-second trim time
     -- constant below (unchanged, decision 5/"feedback, not a model").
-    c_theta = 0.85,
+    -- Raised again 0.85 -> 0.9 (2026-11-25, second iteration on the
+    -- fifth re-fly): toy-plant sweep against the corrected plant model
+    -- (acceleration proportional to pitch *past the level-flight trim*,
+    -- not past zero pitch -- the first iteration's plant implicitly
+    -- assumed zero pitch gives zero accel, which is wrong) found
+    -- 0.9 + `k_speed_error` 0.3 lands 150<->250 km/h at ~20-22 s on
+    -- both of the user's own plant-gain figures (0.17/deg hand-flown,
+    -- 0.20/deg Petrovich's own delivery), reaching -14 deg within ~1 s.
+    c_theta = 0.90,
     k_phi_trim = 0.02,
     k_theta_trim = 0.02,
     -- Anti-windup bound (section H): while the measured attitude is
