@@ -405,3 +405,24 @@ Main loop's read:
   not reached. LV-3 scope, but the same slow pedal is the cause.
 
 Logs kept locally (gitignored): `docs/acceptance/logs-2026-11-24/` in the `DCS-petrobrain-epochfix` worktree.
+
+## Fifth re-fly (LV-1 amendment, caec92f1) — 2026-11-25 — logs `logs-2026-11-25/refly5_*`
+
+User, verbatim:
+
+> *"BL-16 refly*
+>
+> *Bank take - OK*
+> *Climb and descend - OK*
+> *Level take, no wobble - OK*
+> *Speed change - Still very slow*
+>
+> *Speed change:*
+>
+> *\* pitch changes more now, but not enough and above all it takes much too long to reach the
+> pitch"*
+
+So rows 8–9 (bank take), 4 (climb/descend) and 1 (level take) pass. Row 3 (150 → 250 → 150) fails:
+pitch reaches further than last flight but not far enough, and the dominant complaint is the time
+to reach the pitch. Not reported this flight: the RPM calibration readings (U9) — the trace carries
+args 40/41/42/838/839/845 regardless.
