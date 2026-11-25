@@ -56,6 +56,15 @@ definition, including this one.
 - Never write to the DCS installation directory.
 - **A new constant that affects behaviour goes through the tuning mechanism, not in as a bare module
   literal.** Standard practice as of 2026-10-15 (user direction); see immediately below.
+- **Every float that crosses a boundary is checked for being finite where it enters** — wire
+  parses, `GET .../latest` JSON, Lua/Hook payloads, `tuning.toml`, anything `float()` or
+  `json.loads` produced from outside the process. `isinstance(x, (int, float))` is not enough:
+  `NaN`/`Infinity` pass it, `float("nan")` never raises, and `min`/`max` clamps can turn `NaN` into
+  a confident wrong value (BL-B124: NaN clock → 90° sun → full daylight). Reject with
+  `math.isfinite()` at the parse and route it to the same "unavailable" path a missing value takes;
+  add a test with `nan`/`inf`/`-inf`. Standing rule, user direction 2026-11-25, after seven
+  instances across five sessions were each caught only at review, security or DoD (`[[BL-B135]]`,
+  `[[BL-B137]]`).
 - **When you change code, read the comment attached to it** — and prune what is no longer
   load-bearing. User direction, 2026-10-18; see "Prune the comment you are standing next to" below.
 

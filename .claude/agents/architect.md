@@ -214,6 +214,11 @@ design document.
 - **Do not introduce new abstractions** unless you can name a clear duplication they remove
 - **Do not expand scope silently** — if the request implies additional work, surface it explicitly
 - **Do not start tasks marked `[?]` in `todo/todo/`** (indexed by `todo/todo/todo-tasks.md`; `todo/todo.md` is a pointer) — flag them and ask for clarification
+- **Name the non-finite case for every new boundary float.** When a plan adds a value parsed from
+  outside the process (wire, HTTP JSON, Hook payload, config), say where it is checked with
+  `math.isfinite()` and which path a `NaN`/`Infinity` takes — the same as "missing", never a
+  default that reads as plausible. Standing rule, user direction 2026-11-25 (`[[BL-B135]]`,
+  `[[BL-B137]]`; implementer.md "Code Rules" has the account).
 - **Consult `notes/`** (index: `notes/notes-index.md`, one file per topic) when reasoning about areas where prior issues have been recorded (framework quirks, performance pitfalls, known workarounds)
 
 ---
