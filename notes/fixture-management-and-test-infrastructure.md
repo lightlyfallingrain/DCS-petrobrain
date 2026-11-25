@@ -65,3 +65,24 @@
 - **A Lua integration test driving a per-frame deadline check with a computed float literal (e.g. `run_ai_pilot_wheel(0.95)` for a `0.5 + 0.15*3` deadline) can miss by one ULP, because `0.8 + 0.15` does not reliably equal the literal `0.95` in double-precision arithmetic.** This is not a production bug — DCS's own frame clock never lands exactly on a computed deadline anyway — only a test-authoring trap when a test tries to hit an exact boundary tick. Fix: drive the test one tick past the nominal deadline (e.g. `0.96`, not `0.95`) rather than exactly on it; this is more realistic than the exact-boundary call it replaces, not just a workaround (BL-16 takeover-revision implementation, `aircraft-layer/tests/test_ai_pilot_wheel_lua.py`, 2026-11-16).
 
 - **A committed "shipped fixture" directory can be a frozen snapshot that predates a later change to the real config it mirrors — check the freeze date before assuming a fixture-driven test exercises current content.** `tests/fixtures/effector_config/mi-24p/*.md` is a deliberate 2026-10-30 freeze of `config/sequences/mi-24p/` (so editing the real shipped sequence files can never break a pinned test). The pilot's own commit adding `petrovich-says` text to the real files landed after that freeze, so the frozen copy carries none of it — a test built against the fixture (`test_observ_and_weapons_safety_write_through_the_real_poll_loop`) could only assert `== []`, not a real spoken-line check; the actual end-to-end speaking test needed a hand-built custom sequence, the same way the mission-start trigger tests already did. Any future change to the real `config/sequences/mi-24p/*.md` files should not assume an existing fixture-driven test reflects their current content (`BL-B119`, `plans/effector-says/implementation.md`, "Notable Discoveries").
+
+- **A mock server that 404s an endpoint entirely (never serves it) can look identical in test
+  output to "a legitimate empty-cache state," while silently feeding a new consumer the wrong
+  degrade path for its whole batch.** `body-layer/tests/support/mock_aircraft_layer.py` had no
+  `GET /firing/latest` route at all before `BL-B124` Stage 4 started polling it every poll for a
+  `mission_clock` reading; the 404 degraded to `None` exactly the way a genuinely absent firing
+  feed should, but `BL-B124`'s own policy treats an unreadable `mission_clock` as **forced full
+  dark** past a grace window, not a daylight no-op -- so every `test_bl_b104_scenario_mock_flights.py`
+  scenario silently started flying at night from Stage 4 onward, shifting gaze/scan timing enough
+  to newly reach an unimplemented `POST /command/look_direction` (501) three stages and two review
+  passes later. The fix was adding the missing route with a synthesised default that preserves the
+  scenarios' original (daylight) behaviour, not stubbing the newly-reached POST -- stubbing it
+  would have let every scenario keep silently running in the dark. **When a feature starts reading
+  an existing mock-server endpoint for the first time, check whether that mock actually implements
+  the endpoint, not just whether the client call succeeds or degrades gracefully** -- a graceful
+  degrade on a mock can be the wrong value for a new consumer's design even when it was the right
+  value for every existing one (`plans/bl-b124-light-level/debug-mock-flights.md`,
+  `review-bl-b137.md` Required Fix 1). This is the mirror case of the existing "a wiring-defect fix
+  can reach a full-pipeline fixture test through a path no file-level impact list predicts" entry
+  above -- there the change was in production code and the fixture caught it; here the fixture
+  itself was the gap, silently masking what the new consumer actually needed.
