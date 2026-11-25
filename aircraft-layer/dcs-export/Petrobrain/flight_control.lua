@@ -958,12 +958,30 @@ local function law_update(state, dt, measured, limits, profile)
     end
     next_state.h_ref = state.h_ref + next_state.w_ref * dt
 
-    -- Step 1 (speed, section B, kept).
+    -- Step 1 (speed, section B, kept; braking-distance ceiling added
+    -- 2026-11-25, fifth re-fly, `plans/flight-lift-vector/debug-2026-
+    -- 11-25.md`). The critically-damped formula is unchanged -- what's
+    -- new is `dv_ref_ceiling` below, which is why raising `omega_speed`
+    -- (fourth/fifth re-fly: "way too slow", the shaper itself the
+    -- bottleneck, not the pitch/collective channels under it) is now
+    -- safe to do: without this ceiling, `a_ref_v` saturating at
+    -- `speed_accel_cap` for several seconds lets `dv_ref` wind up past
+    -- what the critically-damped feedback (sized for the *unsaturated*
+    -- case) can brake back to zero in time, producing exactly the
+    -- overshoot/hunting a faster `omega_speed` would otherwise cause
+    -- (toy-plant measurement in the debug report: sign changes jump
+    -- from 1 to 7 past `omega_speed` ~0.6-0.7 without this ceiling).
+    -- `dv_ref` is never allowed to exceed the speed-reference rate that
+    -- could still be braked to zero, braking at `speed_accel_cap`, by
+    -- the time `err_v` reaches zero -- continuous, no mode switch, so
+    -- no discontinuity to chatter across.
     local err_v = state.speed_goal_mps - state.v_ref
     local a_ref_v = profile.omega_speed * profile.omega_speed * err_v
         - 2.0 * profile.law_zeta * profile.omega_speed * state.dv_ref
     a_ref_v = law_clamp(a_ref_v, -speed_accel_cap, speed_accel_cap)
-    next_state.dv_ref = law_clamp(state.dv_ref + a_ref_v * dt, -limits.max_accel_mps2, limits.max_accel_mps2)
+    local dv_ref_ceiling = math.sqrt(2.0 * math.max(speed_accel_cap, 1e-6) * math.abs(err_v))
+    local dv_cap = math.min(limits.max_accel_mps2, dv_ref_ceiling)
+    next_state.dv_ref = law_clamp(state.dv_ref + a_ref_v * dt, -dv_cap, dv_cap)
     next_state.v_ref = state.v_ref + next_state.dv_ref * dt
 
     -- Section C: desired acceleration, in the heading frame. LV-1 flies
@@ -1154,7 +1172,16 @@ local function law_update(state, dt, measured, limits, profile)
             state.theta_i + d_theta_i * dt, profile.theta_min_deg, profile.theta_max_deg)
     end
     next_state.phi_d = phi_ff + next_state.phi_i
-    next_state.theta_d = next_state.theta_i + delta_theta_ff
+    -- `theta_i` alone is bounded to [theta_min_deg, theta_max_deg]
+    -- above; `delta_theta_ff` is not (it is a feed-forward from `a_f_d`,
+    -- which `k_speed_error`'s own tracking-error term can push well
+    -- past the kinematic tilt for the capped acceleration -- the exact
+    -- mechanism that now closes the real aircraft's drag deficit, fifth
+    -- re-fly). The user's own ceiling ("-15 is about the max") is
+    -- therefore enforced on the *sum*, here, once -- never assumed to
+    -- fall out of the two bounded parts on their own.
+    next_state.theta_d = law_clamp(
+        next_state.theta_i + delta_theta_ff, profile.theta_min_deg, profile.theta_max_deg)
 
     -- Step 4: inner tilt-loop integrators (kept, section D) -- same
     -- anti-windup shape, freezing at the output's own +-1 ceiling.

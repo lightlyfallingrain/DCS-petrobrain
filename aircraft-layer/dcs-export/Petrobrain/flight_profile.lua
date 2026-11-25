@@ -66,7 +66,23 @@ M.PROFILES["Mi-24P"] = {
     -- probe, never flown).
     omega_heading = 0.3,
     omega_alt = 0.5,
-    omega_speed = 0.15,
+    -- LV-1 amendment (2026-11-25, fifth re-fly, `plans/flight-lift-
+    -- vector/debug-2026-11-25.md`): raised 0.15 -> 0.5. The fourth
+    -- re-fly's own raised caps/gains (B/C/D above) never ran into their
+    -- own ceilings because the SPEED SHAPER itself was the bottleneck:
+    -- at 0.15 rad/s this critically-damped filter's own acceleration
+    -- demand never approached `speed_accel_cap_mps2`, so `a_f_d` only
+    -- ever reached ~0.6-1.6 m/s^2 against a 1.9 cap, and settled over
+    -- ~22-50 s against the user's own ~20 s figure. 0.5 rad/s lets the
+    -- demand saturate the cap within ~1-2 s and hold it through the
+    -- cruise, matching the user's own description ("pitch down... in
+    -- 1-2s. Keep flying... until speed about 230, then start settling
+    -- for 250"). Toy-plant measurement (debug report): settle time
+    -- 150->250 drops from ~32-40 s to ~18-28 s depending on the plant's
+    -- own pitch-to-accel gain, with no added hunting -- made safe by
+    -- `law_update`'s new `dv_ref` braking-distance ceiling (step 1,
+    -- speed), without which this same raise causes overshoot/chatter.
+    omega_speed = 0.5,
 
     -- Heading/turn channel's own accel limit is derived from this
     -- roll-in time (`r_max / T_ROLL`) rather than declared directly, so
