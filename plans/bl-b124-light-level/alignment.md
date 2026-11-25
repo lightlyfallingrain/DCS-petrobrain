@@ -206,3 +206,43 @@ column at 3 km identified as BMPs at sunset.
    the way the missing-world-model case does?
 7. Pilot-seat mask: only a measurement row on this test card, or should a per-seat mask be built in
    this work?
+
+## Plan check — 2026-11-25
+
+**Verdict:** CONCERNS
+
+| expectation | stage | status |
+|---|---|---|
+| E1 | 4 | met — `light_factor` flat at 1.0 above `EYE_FULL_DAYLIGHT_SUN_ELEV_DEG`, no-op default elsewhere |
+| E2 | 2 | met — anchored per-optic/per-tier curve from the three measured points (−5.3°/−3.5°/+0.3°, per the amendment's date-corrected conversion) |
+| E3 | 2, 4 | met — same anchored curve carries the 9K113 narrow-field anchors |
+| E4 | 2, 4 | met, with a concern — see Finding 1 (naked-eye/optic channel only; the hybrid/list_indication channel is untouched and unverified) |
+| E5 | 5; deferred → `[[BL-B136]]` | met (firing/burning: no change needed; launch flash: Stage 5, new `LAUNCH_FLASH`, not `LAUNCH_SMOKE`) / explosions deferred to `[[BL-B136]]`, which names the expectation itself |
+| E6 | 2 | met — piecewise-linear interpolation between anchors, no fixed-time steps |
+| E7 | 2 | met — sun elevation computed from mission date + wall clock + lat/lon, not clock-time thresholds |
+| E8 | — (untouched) | met — no stage adds light-level speech or touches decay/identity invariants |
+| E9 | 2 | met, with a note — see Finding 2 (signature is keyed on `sun_elevation_deg` directly, the shape the open assumption flagged as "would not") |
+| E10 | — (untouched) | met — correctly left alone, consistent with "needs no new rule" |
+
+### Findings
+
+1. **The plan fixes the channel it names and is silent about the one it doesn't — and production runs both every poll.** Lens: World truth.
+   - Assumption: threading `light_factor` into `naked_eye_source.py`/`optic_policy.py` makes Petrovich's detections light-correct.
+   - In the sim: `body-layer/CLAUDE.md` ("What this is") and `body.py`'s poll loop run **two** concrete `PerceptionSource`s every poll into the same `ContactStore` — `HybridPerceptionSource` (gated on HelperAI's `list_indication`, itself a read of ED's own engine-native `wDetector`/`Detection.lua` detector, per `BL-B22.md`'s "engine detection first, module reporting filter on top") and `NakedEyePerceptionSource` (the geometric model this plan touches). The plan's "Affected modules" list and both Design Overview diagrams only thread `light_factor` through the naked-eye/optic-policy path; `hybrid_source.py` does not appear anywhere in the plan.
+   - The pilot would see: if ED's own engine detector does not itself degrade with darkness (unconfirmed either way — no investigator note checked this), the hybrid channel keeps reporting ground units at night exactly as it does at noon, and Petrovich still calls them out — the hawk-eyed failure the goal check opens with, surviving in the other half of the hybrid design this plan doesn't close.
+   - Grounded in: `body-layer/CLAUDE.md` "What this is" and "Structure" module map (`hybrid_source.py`, `body.py`'s "Both perception sources are built... every poll"); `body-layer/ROADMAP/BL-B22.md` lines ~227-231 (engine detector is the hybrid channel's actual gate); plan.md's "Affected modules" (no `hybrid_source.py` entry) and both mermaid diagrams.
+   - Suggests: before Stage 4 ships, either confirm (with the investigator, or a probe) that `list_indication`/ED's engine detector already models illumination adequately on its own, or add a light gate to the hybrid channel too — at minimum, suppress hybrid detections below `SIGHT_FULL_DARK_SUN_ELEV_DEG` the same way the emitter bypass is the sanctioned exception for light sources. This is a question for the user, not something I can settle by reading code further.
+
+2. **`light_factor`'s own signature is the exact shape the open assumption called "would not."** Lens: Purpose.
+   - Assumption: `light_factor(optic: Optic, sun_elevation_deg: float)` keeps E9's "moonlight can be added later without reworking per-optic behaviour" open, because only the *input* computation changes.
+   - In the sim: the alignment doc's open assumption on "the light-level input" explicitly names "per-optic tables keyed directly on raw sun elevation" as the thing that "leaves nowhere for the moon to go," and recommends "one named 'light level' quantity." The plan's Stage 2 signature takes `sun_elevation_deg` directly as the per-optic table's key, not a generic `light_level` scalar.
+   - The pilot would see: nothing today — this is forward-compatibility, not a behaviour gap now, and functionally a caller could still compute a combined sun+moon "effective elevation" and pass it through the same parameter without touching the per-optic curve.
+   - Grounded in: this alignment doc's own "The light-level input" open assumption; plan.md's `light_level.py` bullet under "Affected modules."
+   - Suggests: non-blocking. Worth a one-line rename (`sun_elevation_deg` → a value documented as "effective light-level elevation, sun-derived today") when moonlight is actually built, so the "one named quantity" framing holds literally and not just by coincidence. Not worth holding up this plan for.
+
+3. **Bookkeeping: the Risks & Unknowns section was not updated for the 2026-11-25 amendment.** Lens: none.
+   - "`LoGetMissionStartTime()`'s return units are unconfirmed (Stage 1's probe resolves this...)" is stale — the amendment replaced that whole approach with the firing-events Hook's existing scripting-state poll, which needs a different live check (`getAbsTime()` matching the cockpit clock). Doesn't block anything per the amendment's own "this amendment wins" rule, but a reader of Risks alone would chase the wrong probe.
+
+### Questions for the user
+
+1. Does ED's own engine detector (the gate behind `list_indication`, i.e. the `HybridPerceptionSource` channel) already degrade with darkness on its own, or does this work need to add a light gate to that channel too? Nothing in this plan or its investigator notes checked this, and it is load-bearing for E4 ("Petrovich reports nothing that is not giving off light") — production runs both perception channels every poll into one `ContactStore`.
