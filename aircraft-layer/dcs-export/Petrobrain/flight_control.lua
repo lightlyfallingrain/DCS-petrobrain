@@ -343,14 +343,16 @@ local GRAVITY_MPS2 = 9.81
 -- else in the law changes. Ships with `"dummy"` -- the swap to
 -- `"arg_proxy"` is a one-line flip once a flight confirms arg 42
 -- tracks rotor RPM and resolves its calibration.
-local ROTOR_RPM_SOURCE = "dummy" -- "dummy" | "arg_proxy"
+-- Calibrated 2026-11-25 (fifth re-fly, RPM calibration flight,
+-- `docs/acceptance/2026-11-24-sortie-feedback.md`): "gauge % = arg x
+-- 110" fit all six of the user's three reference-state readings
+-- (engine and rotor) within 1.1%, confirming the dial's top mark is
+-- 110%, not 100% -- the 2026-11-19 guess corrected. Flips the source
+-- to live.
+local ROTOR_RPM_SOURCE = "arg_proxy" -- "dummy" | "arg_proxy"
 local ROTOR_RPM_ARG_PILOT = 42
 local ROTOR_RPM_DUMMY_PCT = 90.0
--- Raw-arg-to-%RPM scale (main-loop amendment 2026-11-19): user, "very
--- likely that is value * 100 = rotor rpm per cent. Unless the dial
--- goes to over 100%, that has to be checked in cockpit." Correct this
--- one constant once the cockpit dial's top mark is confirmed.
-local ROTOR_RPM_ARG_SCALE_MAX_PCT = 100.0
+local ROTOR_RPM_ARG_SCALE_MAX_PCT = 110.0
 
 local function read_rotor_rpm_pct()
     if ROTOR_RPM_SOURCE == "dummy" then
@@ -374,7 +376,11 @@ end
 -- user's three reference states). Pilot args 40/41 (left/right engine);
 -- operator cross-reference 838/839 is read only for the flight trace
 -- (format_trace_line below), not by this function, until calibrated.
-local ENGINE_RPM_SOURCE = "dummy" -- "dummy" | "arg_proxy"
+-- Calibrated 2026-11-25 (same RPM calibration flight as rotor's own
+-- comment above): the engine-RPM-gated collective-rate schedule
+-- (section C of the plan) goes live with this flip -- U9 is now
+-- resolved, so the schedule stops always resolving to "spooled up."
+local ENGINE_RPM_SOURCE = "arg_proxy" -- "dummy" | "arg_proxy"
 local ENGINE_RPM_ARG_PILOT_L = 40
 local ENGINE_RPM_ARG_PILOT_R = 41
 -- The dummy value is chosen at/above `flight_profile.lua`'s own
@@ -382,7 +388,7 @@ local ENGINE_RPM_ARG_PILOT_R = 41
 -- while on "dummy", always resolves to "engines already spooled up" --
 -- never narrower than today's behaviour.
 local ENGINE_RPM_DUMMY_PCT = 100.0
-local ENGINE_RPM_ARG_SCALE_MAX_PCT = 100.0 -- same scale assumption as rotor's; unconfirmed
+local ENGINE_RPM_ARG_SCALE_MAX_PCT = 110.0 -- calibrated, same scale as rotor's
 
 local function read_engine_rpm_pct()
     if ENGINE_RPM_SOURCE == "dummy" then
