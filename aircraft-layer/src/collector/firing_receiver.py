@@ -32,13 +32,19 @@ poll-shaped snapshot (`GET /firing/latest`, `api.server`).
   `FIRING_MIN_VISIBLE_S` has already elapsed), the `max` resolves to `now`,
   and the entry is gone on the very next `snapshot()` -- exactly the
   plan's "gone on the next poll at the latest."
-- `S_EVENT_DEAD`/`S_EVENT_CRASH` naming a unit with an open `FIRING` entry
-  removes that entry outright, independent of its watchdog -- a dead unit
-  is not firing, and does not wait for a timer to say so.
+- `S_EVENT_DEAD`/`S_EVENT_CRASH` naming a unit with an open `FIRING` or
+  `LAUNCH_FLASH` entry removes that entry outright, independent of its
+  watchdog -- a dead unit is not firing, and does not wait for a timer to
+  say so.
 - Every ingest call prunes entries past their own `expires_at_sim` against
   the *batch's own* `dcs_model_time_s` -- this is what makes the watchdog
   real: an entry with no further events at all still disappears once its
   own expiry passes.
+- `S_EVENT_SHOT` (`[[BL-B124]]` Stage 5) opens/refreshes a `LAUNCH_FLASH`
+  entry for the initiator: `since_sim` = the event's own time,
+  `expires_at_sim = now + LAUNCH_FLASH_DURATION_S` -- a fixed, few-second
+  window, never watchdog-extended by further events the way `FIRING` is.
+  Never overwrites an existing `FIRING` entry for the same unit.
 
 **Mission-restart reset.** `dcs_model_time_s` going backwards between two
 ingested batches (a new mission, or a bridge reconnect) clears every
@@ -78,15 +84,25 @@ DEFAULT_PORT = 7798
 
 _RECV_BUFFER_SIZE = 65536
 
-#: `EmitterTracker`'s only entry kind today -- `S_EVENT_SHOT`'s
-#: `LAUNCH_SMOKE` seam (`[[BL-B74]]`) is not built, so the tracker never
-#: produces anything else. A bare string, not an import of body-layer's
-#: `perception.emitters.EmitterKind` -- aircraft-layer does not depend on
-#: body-layer (root `CLAUDE.md`'s "Module independence"), so the two sides
-#: agree on this string by convention, the same way `source.py`'s
-#: `PROVENANCE_EMITTER_*` constants agree with `perception.emitters.
-#: EmitterKind.value` by convention rather than a shared import.
+#: `EmitterTracker`'s gun-fire entry kind. A bare string, not an import of
+#: body-layer's `perception.emitters.EmitterKind` -- aircraft-layer does
+#: not depend on body-layer (root `CLAUDE.md`'s "Module independence"), so
+#: the two sides agree on this string by convention, the same way
+#: `source.py`'s `PROVENANCE_EMITTER_*` constants agree with `perception.
+#: emitters.EmitterKind.value` by convention rather than a shared import.
+#: `EMITTER_KIND_LAUNCH_FLASH` below is this tracker's second entry kind
+#: (`[[BL-B124]]` Stage 5); `S_EVENT_SHOT`'s `LAUNCH_SMOKE` seam
+#: (`[[BL-B74]]`) is still not built, so those two remain the only two.
 EMITTER_KIND_FIRING: Final[str] = "firing"
+
+#: `[[BL-B124]]` Stage 5 -- a missile/rocket launch's few-second light
+#: source (`S_EVENT_SHOT`, treated the same for missiles and rockets per
+#: the user's own words, `explore-notes.md`: "Treat missile and rocket
+#: launch similarly"). Never `EmitterKind.LAUNCH_SMOKE`'s name
+#: (`[[BL-B74]]`'s own long decaying smoke tail, explicitly out of scope
+#: here -- the user's own distinction, "the plume is there for a few
+#: seconds. And smoke trail, though that we do not see in the dark").
+EMITTER_KIND_LAUNCH_FLASH: Final[str] = "launch_flash"
 
 #: **Behaviour-affecting -- how long a gun-fire sighting survives one body-
 #: layer poll past the `S_EVENT_SHOOTING_END` that closed it (or past the
@@ -132,6 +148,19 @@ FIRING_MIN_VISIBLE_S: Final[float] = 1.5
 #: than a measured bound. Same no-tuning-mechanism-yet note as
 #: `FIRING_MIN_VISIBLE_S` above.
 FIRING_WATCHDOG_S: Final[float] = 180.0
+
+#: **Behaviour-affecting -- how long a missile/rocket launch (`S_EVENT_
+#: SHOT`) stays a `LAUNCH_FLASH` light source after the event, "a few
+#: seconds" per the user** (`explore-notes.md`: "the plume is there for a
+#: few seconds"). A *smaller* value here risks the flash disappearing
+#: before even one body-layer poll samples it at the 1 Hz Hook cadence;
+#: a *larger* value keeps a launch visible as a light source longer than
+#: a real launch flash/plume actually burns. Default 4.0 s is the user's
+#: own rough figure; no measurement exists yet (plan's own "Risks &
+#: Unknowns"), so this stays a first-cut guess narrowed by the test
+#: card, same posture `FIRING_MIN_VISIBLE_S`/`FIRING_WATCHDOG_S` above
+#: already take. Same no-tuning-mechanism-yet note as those two.
+LAUNCH_FLASH_DURATION_S: Final[float] = 4.0
 
 #: Absorbs harmless non-monotonicity between two polls of the *same*
 #: running mission (see module docstring's "Mission-restart reset" note) --
@@ -252,13 +281,34 @@ class EmitterTracker:
             # since no `LAUNCH_SMOKE` entry is ever created, but the kind
             # check is left explicit rather than an unconditional `del` so
             # this method does not have to be revisited the day `[[BL-B74]]`
-            # starts creating them.
-            if existing is not None and existing.kind == EMITTER_KIND_FIRING:
+            # starts creating them. `LAUNCH_FLASH` is removed alongside
+            # `FIRING` -- a dead unit is not a light source any more than
+            # it is still firing.
+            if existing is not None and existing.kind in (
+                EMITTER_KIND_FIRING,
+                EMITTER_KIND_LAUNCH_FLASH,
+            ):
                 del self._active[event.initiator]
-        # `S_EVENT_SHOT` -- the `[[BL-B74]]` seam, deliberately a no-op here
-        # (module docstring, and `schema.firing`'s own "build the seam, not
-        # the feature" note). The raw event is still parsed and reaches
-        # this method; it is simply not acted on.
+        elif event.kind == "S_EVENT_SHOT":
+            # `[[BL-B124]]` Stage 5 -- a missile/rocket launch, a few-
+            # second `LAUNCH_FLASH` light source at the launcher's own
+            # name (the initiator of the shot, same join key `FIRING`
+            # uses). **Does not overwrite an existing `FIRING` entry** --
+            # a unit already tracked as gun-firing (its own watchdog is
+            # already the longer-lived, more informative state for
+            # visibility purposes) stays `FIRING`; only a unit with no
+            # active entry, or one already `LAUNCH_FLASH`, gets this
+            # entry (re)started. `[[BL-B74]]`'s `LAUNCH_SMOKE` seam is
+            # untouched -- a different, longer-lived kind this stage does
+            # not build.
+            existing = self._active.get(event.initiator)
+            if existing is None or existing.kind == EMITTER_KIND_LAUNCH_FLASH:
+                self._active[event.initiator] = ActiveEmitter(
+                    kind=EMITTER_KIND_LAUNCH_FLASH,
+                    since_sim=event.t_sim,
+                    expires_at_sim=now + LAUNCH_FLASH_DURATION_S,
+                    targets_ownship=False,
+                )
 
     def snapshot(self) -> dict[str, object]:
         """A plain, JSON-ready dict -- `GET /firing/latest`'s body

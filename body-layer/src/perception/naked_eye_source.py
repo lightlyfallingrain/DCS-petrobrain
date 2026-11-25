@@ -464,6 +464,13 @@ PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: Final[str] = (
 #: kind for that candidate (bypass fired) or not.
 PROVENANCE_EMITTER_FIRING_VISIBLE: Final[str] = "world_objects/emitter_firing_visible"
 
+#: `plans/bl-b124-light-level/plan.md` Stage 5 -- a missile/rocket
+#: launch's own light source. Presence only, no class/type, no
+#: `targets_ownship` distinction (same as `PROVENANCE_EMITTER_BURNING`) --
+#: a launch is not "aimed at" anyone the way a gun burst's target field
+#: is, so one value, not two, suffices.
+PROVENANCE_EMITTER_LAUNCH_FLASH: Final[str] = "world_objects/emitter_launch_flash"
+
 #: `visibility.VisibilityResult.emitter_kind` (an `EmitterKind.value`
 #: string) -> the `PROVENANCE_EMITTER_*` constant it should produce, for
 #: `_build_observation`'s cluster-level fold below. A `dict`, not a
@@ -474,6 +481,7 @@ PROVENANCE_EMITTER_FIRING_VISIBLE: Final[str] = "world_objects/emitter_firing_vi
 #: method's own docstring).
 _PROVENANCE_BY_EMITTER_KIND: Final[dict[str, str]] = {
     EmitterKind.BURNING.value: PROVENANCE_EMITTER_BURNING,
+    EmitterKind.LAUNCH_FLASH.value: PROVENANCE_EMITTER_LAUNCH_FLASH,
 }
 
 #: `derived_world_position.method` for every emitted naked-eye `Observation`

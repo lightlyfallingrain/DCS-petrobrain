@@ -35,6 +35,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
     PROVENANCE_EMITTER_FIRING_VISIBLE,
+    PROVENANCE_EMITTER_LAUNCH_FLASH,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
 )
@@ -2160,6 +2161,86 @@ def test_firing_wins_over_burning_for_the_same_unit() -> None:
 
     assert len(observations) == 1
     assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+def _launch_flash_active_map(unit_name: str) -> dict[str, Any]:
+    return {
+        "dcs_model_time_s": 0.0,
+        "received_wall_clock_s": 0.0,
+        "active": {
+            unit_name: {
+                "kind": "launch_flash",
+                "since_sim": 0.0,
+                "targets_ownship": False,
+            }
+        },
+    }
+
+
+def test_a_launch_flash_unit_beyond_naked_eye_range_becomes_visible() -> None:
+    """`BL-B124` Stage 5's own end-to-end sibling of `test_a_burning_
+    unit_beyond_naked_eye_range_becomes_visible` -- a missile/rocket
+    launch's own light source bypasses the ordinary range gate the same
+    way, presence only (`classification_raw` stays the default, never
+    raised by the light source itself)."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    source, _client = _source(world_objects, firing=_launch_flash_active_map("unit_1"))
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == object_model.DEFAULT_OP_CLASS
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
+
+
+def test_firing_wins_over_launch_flash_for_the_same_unit() -> None:
+    """The "Co-moving Fields" precedence extended to the third kind,
+    exercised end to end: a unit both firing and (somehow) still carrying
+    a launch-flash entry resolves to the `FIRING` provenance -- though
+    the collector's own `EmitterTracker._apply` never actually produces
+    this combination for one unit (it refuses to overwrite an existing
+    `FIRING` entry with a later `S_EVENT_SHOT`), this is the merge order
+    itself, exercised through the real `poll()` path, not just `resolve_
+    emitters`' own unit tests."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    firing = _firing_active_map("unit_1")
+    source, _client = _source(world_objects, firing=firing)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_FIRING
+
+
+def test_launch_flash_wins_over_burning_for_the_same_unit() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=9000.0, lon_deg=0.0),
+        ]
+    }
+    unit_velocity = {
+        "samples": {
+            "unit_1": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "life": 0.5, "life0": 1.0},
+        }
+    }
+    source, _client = _source(
+        world_objects,
+        unit_velocity=unit_velocity,
+        firing=_launch_flash_active_map("unit_1"),
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].provenance == PROVENANCE_EMITTER_LAUNCH_FLASH
 
 
 # -- Cluster-level fold, genuine multi-member clusters (`plans/

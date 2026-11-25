@@ -10,8 +10,10 @@ import time
 
 from collector.firing_receiver import (
     EMITTER_KIND_FIRING,
+    EMITTER_KIND_LAUNCH_FLASH,
     FIRING_MIN_VISIBLE_S,
     FIRING_WATCHDOG_S,
+    LAUNCH_FLASH_DURATION_S,
     EmitterTracker,
     FiringEventsReceiver,
 )
@@ -227,25 +229,81 @@ def test_harmless_jitter_within_tolerance_does_not_clear_state() -> None:
     assert "Unit_1" in active
 
 
-def test_shot_event_does_not_create_an_entry() -> None:
-    """`[[BL-B74]]`'s seam, deliberately not acted on this stage."""
+def _shot(initiator: str, t_sim: float) -> FiringRawEvent:
+    return FiringRawEvent(
+        kind="S_EVENT_SHOT",
+        t_sim=t_sim,
+        initiator=initiator,
+        targets_ownship=False,
+        x=1.0,
+        z=2.0,
+    )
+
+
+def test_shot_event_creates_a_launch_flash_entry() -> None:
+    """`[[BL-B124]]` Stage 5 -- `S_EVENT_SHOT` (missile/rocket launch,
+    treated the same for both per the user's own words) now creates a
+    `LAUNCH_FLASH` entry at the launcher's own name, superseding the
+    `[[BL-B74]]`-seam no-op this test used to assert."""
     tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
+
+    active = tracker.snapshot()["active"]
+    assert active == {
+        "SAM-1": {
+            "kind": EMITTER_KIND_LAUNCH_FLASH,
+            "since_sim": 100.0,
+            "targets_ownship": False,
+        }
+    }
+
+
+def test_launch_flash_expires_after_its_own_fixed_window() -> None:
+    """Unlike `FIRING`, `LAUNCH_FLASH` is never watchdog-extended by
+    further events -- a fixed `LAUNCH_FLASH_DURATION_S` window from the
+    shot's own `t_sim`."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
+    assert "SAM-1" in tracker.snapshot()["active"]  # type: ignore[operator]
+
+    tracker.ingest(_batch(100.0 + LAUNCH_FLASH_DURATION_S + 0.1))
+    assert tracker.snapshot()["active"] == {}
+
+
+def test_shot_event_does_not_overwrite_an_existing_firing_entry() -> None:
+    """A unit already tracked as gun-firing (`S_EVENT_SHOOTING_START`)
+    that then launches a missile/rocket stays `FIRING` -- its own
+    watchdog is the longer-lived, more informative visibility state, and
+    overwriting it with a short `LAUNCH_FLASH` window would make a
+    sustained engagement go dark early."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _start("SAM-1", 100.0)))
+    tracker.ingest(_batch(100.1, _shot("SAM-1", 100.1)))
+
+    active = tracker.snapshot()["active"]
+    assert active["SAM-1"]["kind"] == EMITTER_KIND_FIRING  # type: ignore[index]
+
+
+def test_death_removes_a_launch_flash_entry_like_firing() -> None:
+    """`S_EVENT_DEAD`/`S_EVENT_CRASH` remove a `LAUNCH_FLASH` entry
+    outright too, independent of its own watchdog -- same reasoning as
+    the existing `FIRING` removal."""
+    tracker = EmitterTracker()
+    tracker.ingest(_batch(100.0, _shot("SAM-1", 100.0)))
     tracker.ingest(
         _batch(
-            100.0,
+            100.1,
             FiringRawEvent(
-                kind="S_EVENT_SHOT",
-                t_sim=100.0,
+                kind="S_EVENT_DEAD",
+                t_sim=100.1,
                 initiator="SAM-1",
                 targets_ownship=False,
-                x=1.0,
-                z=2.0,
+                x=None,
+                z=None,
             ),
         )
     )
-
-    active = tracker.snapshot()["active"]
-    assert active == {}
+    assert tracker.snapshot()["active"] == {}
 
 
 def test_empty_batch_before_anything_ingested_has_no_model_time() -> None:

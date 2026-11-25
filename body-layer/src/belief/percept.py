@@ -53,6 +53,7 @@ from perception.naked_eye_source import (
     PROVENANCE_EMITTER_FIRING,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP,
     PROVENANCE_EMITTER_FIRING_VISIBLE,
+    PROVENANCE_EMITTER_LAUNCH_FLASH,
 )
 from perception.source import (
     Observation,
@@ -73,9 +74,9 @@ from perception.source import (
 #: listed here (including every non-emitter value) maps to `None` via
 #: `dict.get`, so adding a new `PROVENANCE_*` constant elsewhere can never
 #: silently start producing a new `Percept.emitter_kind` value; it has to
-#: be added here first. Only `BURNING` exists today (`BL-B73`/`BL-B74` add
-#: `FIRING`/`LAUNCH_SMOKE`, per `perception.emitters.EmitterKind`'s own
-#: docstring).
+#: be added here first. `BURNING`/`FIRING`/`LAUNCH_FLASH` exist today
+#: (`BL-B72`/`BL-B73`/`BL-B124` Stage 5); `LAUNCH_SMOKE` (`BL-B74`) does
+#: not yet, per `perception.emitters.EmitterKind`'s own docstring.
 _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
     PROVENANCE_EMITTER_BURNING: EmitterKind.BURNING.value,
     # `plans/emitter-visibility/plan.md` Stage B (`BL-B73`), extended by
@@ -90,6 +91,8 @@ _EMITTER_KIND_BY_PROVENANCE: dict[str, str] = {
     PROVENANCE_EMITTER_FIRING: EmitterKind.FIRING.value,
     PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: EmitterKind.FIRING.value,
     PROVENANCE_EMITTER_FIRING_VISIBLE: EmitterKind.FIRING.value,
+    # `BL-B124` Stage 5 -- a missile/rocket launch's own light source.
+    PROVENANCE_EMITTER_LAUNCH_FLASH: EmitterKind.LAUNCH_FLASH.value,
 }
 
 #: `plans/emitter-visibility/plan.md` Stage B (`BL-B73`) -- the one
