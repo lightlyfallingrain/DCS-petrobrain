@@ -268,8 +268,8 @@ flight_profile = {
         write_bias_settle_band = 0.02,
         pedal_near_limit_margin = 0.1,
         collective_rate_cap_near_pedal_limit = 0.3,
-        rotor_rpm_near_floor_margin_pct = 5.0,
-        collective_rate_cap_near_rpm_floor = 0.0,
+        rotor_rpm_warning_pct = 88.0,
+        collective_ease_rate_near_rpm_warning = -0.3,
         retreating_blade_stall_margin_kmh = 20.0,
         collective_rate_cap_near_blade_stall = 0.0,
         turn_settle_deg_s = 0.3,
@@ -433,11 +433,13 @@ def _run(
     lines. Skips cleanly without a Lua interpreter on `PATH`.
 
     `rotor_rpm_source` (mode-1 batch) patches the module's own
-    `ROTOR_RPM_SOURCE` default (`"dummy"`) to `"arg_proxy"` for
-    `TestReadRotorRpmPct` below -- the one module-level constant no
-    test needs to flip otherwise, so a one-line source-text substitution
-    is simpler than threading a new mock global through every other
-    test in this file."""
+    `ROTOR_RPM_SOURCE` default -- calibrated and live (`"arg_proxy"`)
+    since 2026-11-25 -- to whichever value `TestReadRotorRpmPct` below
+    needs, including back to `"dummy"` for the one test that still
+    wants the dummy fallback -- the one module-level constant no test
+    needs to flip otherwise, so a one-line source-text substitution is
+    simpler than threading a new mock global through every other test
+    in this file."""
     exe = _lua_executable()
     if exe is None:
         pytest.skip(f"no Lua interpreter on PATH (tried: {', '.join(_EXEC_TOOLS)})")
@@ -447,7 +449,7 @@ def _run(
     )
     module_source = _FLIGHT_CONTROL_LUA.read_text(encoding="utf-8")
     if rotor_rpm_source is not None:
-        needle = 'local ROTOR_RPM_SOURCE = "dummy"'
+        needle = 'local ROTOR_RPM_SOURCE = "arg_proxy"'
         assert needle in module_source, "ROTOR_RPM_SOURCE default line moved/renamed"
         module_source = module_source.replace(
             needle, f'local ROTOR_RPM_SOURCE = "{rotor_rpm_source}"'
@@ -1441,11 +1443,13 @@ local pct, valid = flight_control.read_rotor_rpm_pct()
 print(string.format("%.6f", pct))
 print(tostring(valid))
 """
-        lines = _run(driver)
+        lines = _run(driver, rotor_rpm_source="dummy")
         assert float(lines[0]) == 90.0
         assert lines[1] == "true"
 
     def test_arg_proxy_scales_a_good_read(self) -> None:
+        """Calibrated 2026-11-25 (RPM calibration flight): gauge % =
+        arg x 110, not x100 -- the 2026-11-19 guess corrected."""
         driver = """
 function GetDevice(id)
     return { get_argument_value = function(self, arg)
@@ -1458,7 +1462,7 @@ print(string.format("%.6f", pct))
 print(tostring(valid))
 """
         lines = _run(driver, rotor_rpm_source="arg_proxy")
-        assert abs(float(lines[0]) - 73.0) < 1e-6
+        assert abs(float(lines[0]) - 80.3) < 1e-6
         assert lines[1] == "true"
 
     def test_arg_proxy_falls_back_to_the_dummy_on_a_bad_read(self) -> None:

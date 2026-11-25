@@ -1036,14 +1036,6 @@ local function law_update(state, dt, measured, limits, profile)
         c_dot_nominal = c_dot_nominal - profile.k_collective_speed_give * math.abs(a_f_d)
     end
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
-    -- Strictly below floor + margin (`plans/flight-lift-vector/debug-
-    -- 2026-11-24b.md`, question 3): with `<=`, the shipped dummy reading
-    -- (`ROTOR_RPM_DUMMY_PCT` = 90) sat exactly on 85 + 5 and tripped this
-    -- guard on every frame -- with `collective_rate_cap_near_rpm_floor`
-    -- = 0, collective could never rise in mode 1, and the 2026-11-24
-    -- re-fly sank at 6 m/s with collective frozen and `a_u_d` = +3.
-    local rotor_rpm_limited = measured.rotor_rpm_pct
-        < (limits.rotor_rpm_floor_pct + profile.rotor_rpm_near_floor_margin_pct)
     local blade_stall_limited = ias_kmh
         >= (limits.retreating_blade_stall_ias_kmh - profile.retreating_blade_stall_margin_kmh)
     -- The feed-forward (`u_c_ff`, recomputed fresh from the desired
@@ -1058,6 +1050,26 @@ local function law_update(state, dt, measured, limits, profile)
     local u_c_candidate = u_c_ff + state.u_c_i + c_dot_nominal * dt
     local u_c_rate_nominal = (u_c_candidate - state.u_c) / dt
     local u_c_rate = u_c_rate_nominal
+    -- Rotor-RPM warning (2026-11-25, user, verbatim: "The Mi-24 has an
+    -- audio warning when rotor RPM drops to near the limit... that is
+    -- a cue for the human pilot to ease on the collective. Petrovich
+    -- won't get that audio cue, so we'll use [the rotor RPM] reading
+    -- instead"): Petrovich's stand-in for that audio cue is the rotor
+    -- gauge itself, never engine RPM (the anticipatory schedule below
+    -- already owns engine RPM, Q1's own correction box). Below
+    -- `rotor_rpm_warning_pct` he does what the cue tells a human pilot
+    -- to do -- not merely hold, actively **ease** -- so rotor is meant
+    -- to never reach `limits.rotor_rpm_floor_pct` (85%, the generator
+    -- trip) at all. Applied unconditionally, before the increase-only
+    -- guards below, because easing is a decrease: gating it behind
+    -- `u_c_rate > 0.0` (as the superseded freeze-only guard was) would
+    -- never trigger it. Replaces the margin-based freeze-only guard
+    -- (`rotor_rpm_near_floor_margin_pct`/`collective_rate_cap_near_
+    -- rpm_floor`, debug-2026-11-24b) entirely -- this is the warning
+    -- the real aircraft gives, not an arbitrary margin band.
+    if measured.rotor_rpm_pct < profile.rotor_rpm_warning_pct then
+        u_c_rate = math.min(u_c_rate, profile.collective_ease_rate_near_rpm_warning)
+    end
     if u_c_rate > 0.0 then
         -- Debug-2026-11-24 fix round -- which pedal limit a collective
         -- increase actually pushes `t_y` toward is whatever sign
@@ -1076,28 +1088,28 @@ local function law_update(state, dt, measured, limits, profile)
         then
             u_c_rate = math.min(u_c_rate, profile.collective_rate_cap_near_pedal_limit)
         end
-        -- Only a further *increase* is ever capped by either guard --
-        -- neither forces collective down, so level flight with
-        -- collective already low is untouched.
-        if rotor_rpm_limited then
-            u_c_rate = math.min(u_c_rate, profile.collective_rate_cap_near_rpm_floor)
-        end
+        -- Only a further *increase* is ever capped by the pedal-limit
+        -- guard above -- it never forces collective down, so level
+        -- flight with collective already low is untouched (the
+        -- rotor-RPM warning above is the one guard that does force a
+        -- decrease, and it already ran, unconditionally).
         if blade_stall_limited then
             u_c_rate = math.min(u_c_rate, profile.collective_rate_cap_near_blade_stall)
         end
         -- LV-1 amendment, section C (Q1, correction box) -- the
-        -- anticipatory engine-RPM-gated schedule, above the reactive
-        -- rotor-RPM floor guard above (unchanged, stays the backstop it
-        -- was always meant to be). Read fresh every frame off current
-        -- engine RPM, never a manoeuvre-class special case: a level-
-        -- cruise acceleration finds the engines already near 100 % (no
-        -- taper), a deceleration's own roll-out collective-up finds
-        -- them drooped from several seconds of low demand (gentle) --
-        -- one formula produces both E14 and E15's outcomes. While
-        -- `ENGINE_RPM_SOURCE == "dummy"` (U9), `measured.engine_rpm_pct`
-        -- is always the dummy's at-or-above-`spooled_rpm_pct` value, so
-        -- this never narrows anything -- "the schedule stays off
-        -- (always fast, today's behaviour) until confirmed."
+        -- anticipatory engine-RPM-gated schedule, above the rotor-RPM
+        -- warning above (the two are independent: engine RPM here,
+        -- rotor RPM there, per the user's own 2026-11-25 instruction
+        -- "not engine RPM for this"). Read fresh every frame off
+        -- current engine RPM, never a manoeuvre-class special case: a
+        -- level-cruise acceleration finds the engines already near
+        -- 100 % (no taper), a deceleration's own roll-out collective-up
+        -- finds them drooped from several seconds of low demand
+        -- (gentle) -- one formula produces both E14 and E15's outcomes.
+        -- Calibrated and live since 2026-11-25 (`ENGINE_RPM_SOURCE =
+        -- "arg_proxy"`) -- `measured.engine_rpm_pct` now tracks the
+        -- real engines rather than always resolving to the dummy's
+        -- at-or-above-`spooled_rpm_pct` value.
         local engine_rpm = measured.engine_rpm_pct or profile.spooled_rpm_pct
         if engine_rpm < profile.spooled_rpm_pct then
             local span = profile.spooled_rpm_pct - profile.engine_rpm_gentle_floor_pct

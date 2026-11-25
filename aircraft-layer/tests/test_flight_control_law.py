@@ -149,8 +149,8 @@ local PROFILE = {
     pedal_limit_negative = -1.0,
     pedal_near_limit_margin = 0.1,
     collective_rate_cap_near_pedal_limit = 0.3,
-    rotor_rpm_near_floor_margin_pct = 5.0,
-    collective_rate_cap_near_rpm_floor = 0.0,
+    rotor_rpm_warning_pct = 88.0,
+    collective_ease_rate_near_rpm_warning = -0.3,
     retreating_blade_stall_margin_kmh = 20.0,
     collective_rate_cap_near_blade_stall = 0.0,
     turn_settle_deg_s = 0.3,
@@ -826,14 +826,17 @@ print(string.format("%.6f", state.h_ref))
 
 
 class TestRotorEnvelopeGuards:
-    """Mode-1 batch, Decision 30 -- the rotor-RPM floor and the
-    retreating-blade-stall margin both widen the existing "collective
-    is limited" flag reactively: only a further *increase* in
-    collective is ever capped, a decrease is untouched."""
+    """Mode-1 batch, Decision 30, superseded 2026-11-25 for the rotor
+    channel (`plans/flight-lift-vector/debug-2026-11-25.md`): the
+    retreating-blade-stall margin still only caps a further *increase*
+    in collective, untouched on a decrease. The rotor-RPM floor is now
+    the warning-based active ease below (Petrovich's stand-in for the
+    real aircraft's own low-RPM audio cue to a human pilot) -- it forces
+    a *decrease*, unconditionally, not merely a freeze on increase."""
 
-    def test_low_rotor_rpm_caps_a_rising_collective(self) -> None:
+    def test_low_rotor_rpm_eases_a_rising_collective(self) -> None:
         driver = f"""
-local measured = {_measured(h_m=100.0, w_mps=-5.0, rotor_rpm_pct=88.0)}
+local measured = {_measured(h_m=100.0, w_mps=-5.0, rotor_rpm_pct=87.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 -- A big positive altitude error asks for a large rising c_dot.
 state.alt_goal_m = 1000.0
@@ -841,23 +844,35 @@ local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROF
 print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
-        # COLLECTIVE_RATE_CAP_NEAR_RPM_FLOOR = 0.0 -- a rising c_dot is
-        # capped to zero (no further increase) once within 5 pct of
-        # ROTOR_RPM_FLOOR_PCT (85.0), i.e. strictly below 90.0.
-        assert float(lines[0]) <= 1e-9
+        # Strictly below `rotor_rpm_warning_pct` (88.0): the nominal
+        # rising c_dot is overridden by `collective_ease_rate_near_rpm_
+        # warning` (-0.3), an active decrease -- never merely frozen at
+        # zero.
+        assert float(lines[0]) <= -0.3 + 1e-6
+
+    def test_rotor_rpm_at_the_warning_threshold_is_not_yet_below_it(self) -> None:
+        """Strict `<` (`plans/flight-lift-vector/debug-2026-11-24b.md`,
+        question 3, same lesson re-applied): a reading exactly AT
+        `rotor_rpm_warning_pct` must not trip the ease, or a reading
+        that sits exactly on the boundary (the shipped dummy's `90.0`
+        sat exactly on the old floor+margin threshold and locked
+        collective out for every mode-1 frame, 2026-11-24)."""
+        driver = f"""
+local measured = {_measured(h_m=100.0, w_mps=-5.0, rotor_rpm_pct=88.0)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
+state.alt_goal_m = 1000.0
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) > 1e-3
 
     def test_the_shipped_dummy_rpm_reading_lets_collective_rise(self) -> None:
-        """`plans/flight-lift-vector/debug-2026-11-24b.md`, question 3:
-        the shipped `ROTOR_RPM_SOURCE = "dummy"` reading (90) sat exactly
-        on floor + margin (85 + 5) and, with `<=`, capped every rising
-        collective to zero -- the 2026-11-24 re-fly sank at 6 m/s with
-        collective frozen. Reads the dummy from the real module, so a
-        later change to the dummy or the margin that re-creates the
-        lockout fails here."""
+        """The shipped dummy (90.0, `ROTOR_RPM_DUMMY_PCT`) sits above
+        `rotor_rpm_warning_pct` (88.0), so a fallback-to-dummy read
+        (e.g. a failed live read) never eases collective by itself."""
         driver = f"""
-local rpm = flight_control.read_rotor_rpm_pct()
-local measured = {_measured(h_m=100.0, w_mps=-5.0)}
-measured.rotor_rpm_pct = rpm
+local measured = {_measured(h_m=100.0, w_mps=-5.0, rotor_rpm_pct=90.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
 local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)

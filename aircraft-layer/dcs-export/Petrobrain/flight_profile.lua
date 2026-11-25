@@ -213,22 +213,43 @@ M.PROFILES["Mi-24P"] = {
     -- replaced).
     k_lift_ff = 0.05,
     k_collective = 0.08,
-    -- Pedal/RPM/blade-stall collective-rate caps, unchanged from LV-0 --
+    -- Pedal/blade-stall collective-rate caps, unchanged from LV-0 --
     -- still the thresholds `collective_limited`'s own flag (E, G) is
     -- computed against.
     pedal_near_limit_margin = 0.1,
     collective_rate_cap_near_pedal_limit = 0.3,
-    rotor_rpm_near_floor_margin_pct = 5.0,
-    collective_rate_cap_near_rpm_floor = 0.0,
     retreating_blade_stall_margin_kmh = 20.0,
     collective_rate_cap_near_blade_stall = 0.0,
 
+    -- LV-1 amendment (2026-11-25, rotor-RPM warning, superseding the
+    -- margin-based `rotor_rpm_near_floor_margin_pct`/`collective_rate_
+    -- cap_near_rpm_floor` freeze-only guard this replaces outright):
+    -- the real Mi-24 gives the human pilot an audio warning as rotor
+    -- RPM nears the limit, cueing them to ease the collective -- user,
+    -- verbatim, "Petrovich won't get that audio cue, so we'll use the
+    -- rotor RPM reading instead." Below this threshold Petrovich eases
+    -- collective (never just holds), so rotor is meant to never reach
+    -- `limits.rotor_rpm_floor_pct` (85%, the generator-trip floor) at
+    -- all. First cut, tunable -- the real audio-warning threshold is
+    -- unknown; 88% leaves a 3-point margin above the 85% floor for the
+    -- ease to arrest the droop, informed by the RPM calibration
+    -- flight's own worst case (a hand-flown full-collective rise over
+    -- ~3 s took rotor to 85.4%, right at the floor).
+    rotor_rpm_warning_pct = 88.0,
+    -- Negative: an active decrease, not a freeze (`math.min(u_c_rate,
+    -- this)` below the warning, applied unconditionally -- freezing at
+    -- 0 would never recover lost RPM, only stop losing more). First
+    -- cut, tunable -- owed by a flight with the warning actually
+    -- engaged (the one flight that reached 85.4% flew before this
+    -- guard existed).
+    collective_ease_rate_near_rpm_warning = -0.3,
+
     -- LV-1 amendment (2026-11-24, fourth re-fly, section C/Q1): the
-    -- engine-RPM-gated collective-rate schedule, anticipatory above the
-    -- reactive rotor-RPM-floor guard above (which stays exactly as it
-    -- is, the backstop it was always meant to be). At/above this engine
-    -- RPM, a collective increase is capped only by the existing
-    -- physical/pedal-margin caps. Set to the user's own level-cruise
+    -- engine-RPM-gated collective-rate schedule -- independent of the
+    -- rotor-RPM warning above (engine RPM here, rotor RPM there, per
+    -- the user's own 2026-11-25 "not engine RPM for this"). At/above
+    -- this engine RPM, a collective increase is capped only by the
+    -- existing physical/pedal-margin caps. Set to the user's own level-cruise
     -- reading, not the acceleration one: "in level flight, 170 km/h --
     -- engine RPM steady at ~93%... fast acceleration -- engine RPM
     -- ~98-100%... fast descent at collective full down -- engine RPM
