@@ -134,3 +134,48 @@ neither is this role's job (the plan's own "no visual smoke test" posture; a liv
 the user's acceptance step). `optic_policy.py`'s and `attack_run.py`'s full diffs were read in full,
 not sampled, since mechanical parameter-threading is exactly the kind of change where a skim misses
 one dropped call site.
+
+### Fix round (commit `0ba18855`)
+
+Re-reviewed `0ba18855` ("BL-B124 Stages 1-3: apply review required fixes") on
+`feature/bl-b124-light-level`, fast-forwarded cleanly into this worktree (`HEAD` was a strict
+ancestor, tree clean before and after).
+
+**Required Fix 1 (rendered-`defaults.toml` warning).** Read the *rendered* file, not the diff:
+both `#:` blocks were restructured into one long first sentence, the same pattern
+`LOWRES_ANGULAR_RADIUS_RAD`/`MEDRES_ANGULAR_RADIUS_RAD` already use. Confirmed in
+`body-layer/config/defaults.toml` lines 610-621 — `EYE_FULL_DAYLIGHT_SUN_ELEV_DEG`'s comment now
+reads through to "...which is the dangerous direction since it under-dims a still-dim morning..."
+and `SIGHT_FULL_DARK_SUN_ELEV_DEG`'s reads through to "...which is the dangerous direction for the
+no-omniscience goal this feature exists for..." — both warnings survive generation. **Fixed.**
+
+**Required Fix 2 (no test for the gate-3/`tier_ranges()` desync).** `test_visibility.py` gained
+three new tests (`test_light_factor_shrinks_presence_range_and_gate_three_tracks_it`,
+`test_light_factor_candidate_within_scaled_range_still_resolves_a_tier`,
+`test_tier_ranges_light_factor_scales_the_presence_threshold`) — the first two are exactly the
+pairing the required fix asked for (a scaled-out candidate rejected at gate 3, a scaled-in
+candidate still resolving a real tier), the third is the optional direct-`tier_ranges()` pin,
+built anyway. **Verified by mutation, not by reading**: removed the `* light_factor[0]` term from
+`check_visibility`'s `size_curve_threshold_m` in `src/perception/visibility.py` and re-ran —
+`test_light_factor_shrinks_presence_range_and_gate_three_tracks_it` failed exactly as expected
+(the previously-rejected 300 m candidate now resolves to `tier='lowres'`), the other two still
+passed (they only exercise `tier_ranges()` directly, so a `check_visibility`-only regression is
+invisible to them — correctly scoped, not a gap). Reverted the mutation; tree confirmed clean
+afterward. **Fixed, and the fix is load-bearing, not decorative.**
+
+**Checks re-run on `0ba18855`** (body-layer, via the main checkout's `.venv` since this worktree
+has none): `ruff format --check`/`ruff check`/`mypy src` all clean;
+`.claude/scripts/fast-tests.sh body-layer` — smoke clean, 58 targeted files selected (parallel),
+2381 passed, 4 xfailed, no failures.
+
+### Verdict (fix round)
+APPROVED — both required fixes landed as asked, the second is confirmed load-bearing by mutation
+rather than taken on inspection, and all mechanical checks are green on the exact commit. No new
+Required or Optional findings. Ready to proceed per the original verdict's note: ride along with
+whatever batch review covers Stage 4 for Security/Performance, no new review needed for these two
+fixes alone.
+
+### Review Confidence (fix round)
+Full read of both changed hunks in `0ba18855` (the two `#:` comment blocks and the three new
+tests), the rendered `defaults.toml` output (not the diff), and a mutation test against the
+gate-3 scaling term to confirm the new coverage is real.
