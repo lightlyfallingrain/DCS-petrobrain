@@ -162,8 +162,8 @@ the test card, same posture `FIRE_LIFE_FRACTION_MAX` itself carries):
   (both wide and narrow) sees nothing but light sources.
 - `perception.light_level.EYE_FULL_DAYLIGHT_SUN_ELEV_DEG` (default +6.0) — above this, naked eye
   and binoculars are at their full clear-day ranges.
-- The three measured anchor points (−6.0°/−4.0°/−0.5° per the alignment doc's derivation from the
-  user's 2020-06-01 date) and their per-optic, per-tier factors from
+- The three measured anchor points (−5.3°/−3.5°/+0.3°, explore-notes' conversion from the user's
+  2020-06-01 mission date; the alignment doc's −6/−4/−0.5 was a pre-date estimate and is superseded) and their per-optic, per-tier factors from
   `docs/concept/detection-in-non-perfect-conditions.md` are declared as data inside
   `light_level.py`, not as individual tunables — the shape (which anchors exist, in what order) is
   a code structure, not a dial; only the two end-point elevations above and the flash duration
@@ -216,8 +216,9 @@ per root `CLAUDE.md`'s "batch of stages actually executed together" rule.
    normally once the light stops, visible out to roughly the player bubble radius, nothing else in
    the scene is visible.
 3. **Pilot-seat cockpit mask row** (user's own reminder, recorded in `BL-B124.md` and the
-   explore-notes): with the player in the CPG seat and Petrovich in the pilot seat, note what the
-   pilot-seat cockpit frame actually occludes, for a future per-seat mask. Measurement only — do
+   explore-notes): the user sits in the pilot seat and measures what its cockpit frame occludes
+   (the mask Petrovich will need whenever he sits there, i.e. the player is in the CPG seat), for
+   a future per-seat mask. Measurement only — do
    not build the per-seat mask in this work; it stays a separate item as the user asked.
 
 ### Risks & Unknowns
