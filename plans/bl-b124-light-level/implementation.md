@@ -175,3 +175,166 @@ real value yet.
 (`test_visibility.py`, `test_light_level.py`, `test_tuning_comment_renders.py`,
 `test_tuning_defaults_toml.py`) 77 passed, 1 xfailed; `.claude/scripts/fast-tests.sh body-layer`
 (smoke + 58 targeted files, parallel) 2381 passed, 4 xfailed — no regressions from either fix.
+
+### Stage 4 — wiring the real value into `body.py`'s poll loop
+
+Fast-forwarded onto the Stages 1–3 commit (`0ba18855`), no divergence.
+
+**Mission clock + sun elevation.** `body.ConsolePerceptionRunner` gains five new
+per-mission fields (`light_level_last_clock`, `_last_clock_model_time_s`,
+`_unavailable_since_wall`, `_error_logged`, `_sun_elevation_deg`), reset on a genuine
+mission (re)start like every other per-mission field. `run_once` (guarded on
+`self.theatre is not None` — no source is polled otherwise, so the extra `GET
+/firing/latest` would be pure waste and would force every aircraft-layer test double in
+this subproject to implement a method whose answer is discarded) fetches `get_firing_
+latest()` and calls the new `_resolve_sun_elevation_deg(runner, ownship, firing)`:
+
+- A fresh, well-typed `mission_clock` sub-dict (`_parse_mission_clock_dict`) updates the
+  cache and clears the unavailable timer/error latch.
+- Absent/malformed, with a cached sample still inside `MISSION_CLOCK_MAX_AGE_S` (new
+  tunable, `perception.light_level`, default 5.0s): extrapolates `abs_time_s` forward via
+  the ownship model-time delta (`ownship.t_sim - light_level_last_clock_model_time_s`) —
+  the "between 1 Hz Hook polls" case, not a failure, no log line.
+- Never had a sample yet, still within the same `MISSION_CLOCK_MAX_AGE_S` window (answers
+  the plan's own "what happens in the first second after load" question — the mission's
+  own age, not a separate grace constant): forced to `SIGHT_FULL_DARK_SUN_ELEV_DEG`
+  (never daylight — user Q6), silently.
+- Beyond that window, or `dcs_to_wgs84` raising `ValueError` for an already-validated
+  theatre (should not happen, treated the same as a genuine anomaly): one `logger.error`
+  per mission (`light_level_error_logged`, cleared the moment a fresh sample arrives) plus
+  the same forced-dark value.
+
+**The cross-optic correctness defect, found while wiring the value, not invented for
+this stage.** Stage 3 threaded one `light_factor: tuple[float, float, float]` through
+every `tier_ranges()` call in `belief/optic_policy.py`/`attack_run.py`, but several of
+those functions compare **two different named optics in one call**
+(`improvement_window_m`: `UNAIDED_OPTIC` vs `BINOCULAR_OPTIC`; `least_capable_sufficient_
+optic`/`guidance_request_for`: every rung of `_LADDER`) — and `perception.light_level.
+light_factor`'s curve is genuinely per-optic (the user's own dawn anchors, Q5: "use
+binoculars as long as they can viably see, then 9K113 only..."). A single shared tuple
+would dim every optic identically, collapsing exactly the differentiation Stage 2's own
+`_MEASURED_FACTORS` table encodes. **Fixed, not deferred**: renamed the threaded parameter
+from `light_factor` to `sun_elevation_deg: float | None` throughout `optic_policy.py`/
+`attack_run.py` (14 + 1 signatures), and resolve the real per-optic tuple at each
+`tier_ranges()` call site via a new `_light_factor_for(optic, sun_elevation_deg)` helper —
+`None` stays the true no-op `(1.0, 1.0, 1.0)` for every pre-existing caller/test. This also
+resolves Stage 3's own deferred decision on the four bare `can_improve` callbacks
+(`sight_can_still_improve`/`_area_or_glass_can_improve`): their five call sites now wrap
+them in a `lambda t: fn(t, sun_elevation_deg=sun_elevation_deg)` closure instead of
+leaving them at their keyword-only default.
+
+`NakedEyePerceptionSource.light_factor` is assigned in `body._apply_active_gaze`, *after*
+`decide_optic` has already chosen this poll's optic (`optic_decision.optic`) — the factor
+is computed against that specific optic, not a value threaded in from further up, so the
+two can never disagree about which optic a factor belongs to. `crew_console.
+drain_attack_run`/`belief.attack_run.decide` gained the same `sun_elevation_deg` keyword,
+threaded from `runner.light_level_sun_elevation_deg` (cached on the runner since
+`drain_attack_run` runs later in the poll loop, after `run_once` has already returned).
+
+**Test fixture fallout.** `test_body.py`'s `FakeConsoleAircraftClient.get_firing_latest`
+needed a `mission_clock` key (a fixed solar-noon 2020-06-01 sample) added — without it,
+every naked-eye-detection test driven through the real poll loop with a resolved theatre
+went dark (the designed Stage 4 behaviour correctly firing against a fixture nobody had
+anticipated). Five `spy_drain_attack_run`-shaped test doubles needed the new keyword
+added to their own signatures (mechanical, not a logic change).
+
+### Stage 5 — `EmitterKind.LAUNCH_FLASH`
+
+`aircraft-layer/src/collector/firing_receiver.py`'s `EmitterTracker._apply()` gains a
+branch for `S_EVENT_SHOT` (missiles and rockets alike, per the user's own "treat missile
+and rocket launch similarly"): opens/refreshes a `LAUNCH_FLASH` entry at the initiator's
+own name, `expires_at_sim = now + LAUNCH_FLASH_DURATION_S` (new constant, 4.0s default —
+**a plain module constant, not a body-layer `tuning.*` entry**, departing from the plan's
+own "Behaviour constants" section, which named it `perception.emitters.
+LAUNCH_FLASH_DURATION_S` — see Notable Discoveries). Never overwrites an existing
+`FIRING` entry for the same unit (a sustained gun engagement should not go dark early
+because the same unit also launched something); removed by `S_EVENT_DEAD`/`_CRASH`
+alongside `FIRING`.
+
+`body-layer/src/perception/emitters.py` gains `EmitterKind.LAUNCH_FLASH` (never
+`LAUNCH_SMOKE` — the user's own distinction between the few-second flash and `[[BL-B74]]`'s
+longer-lived smoke trail) and `launch_flash_emitters()`, folded into `resolve_emitters()`:
+`FIRING` wins over `LAUNCH_FLASH` wins over `BURNING` for wording priority (belt-and-
+suspenders over the collector's own non-overwrite rule above). `naked_eye_source.py` gains
+`PROVENANCE_EMITTER_LAUNCH_FLASH`, added to the existing `_PROVENANCE_BY_EMITTER_KIND`
+dict — the cluster-level fold in `_build_observation` needed no further change, since that
+code already reads any kind present in the dict generically. `belief.percept`'s closed
+`_EMITTER_KIND_BY_PROVENANCE` mapping gains the matching entry.
+
+### Files Changed (Stages 4–5)
+- `body-layer/src/body.py` — `_resolve_sun_elevation_deg`, `_parse_mission_clock_dict`,
+  five new `ConsolePerceptionRunner` fields, wiring into `run_once`/`_apply_active_gaze`.
+- `body-layer/src/perception/light_level.py` — `MISSION_CLOCK_MAX_AGE_S` tunable; module
+  docstring updated ("wired into body.py's poll loop as of Stage 4").
+- `body-layer/src/belief/optic_policy.py` — `light_factor` → `sun_elevation_deg` rename
+  across 14 signatures, new `_light_factor_for` helper, five `can_improve` closures.
+- `body-layer/src/belief/attack_run.py` — same rename on `decide()`.
+- `body-layer/src/belief/crew_console.py` — `drain_attack_run` gains `sun_elevation_deg`.
+- `body-layer/src/perception/naked_eye_source.py` — `light_factor` field docstring
+  updated; `PROVENANCE_EMITTER_LAUNCH_FLASH` + `_PROVENANCE_BY_EMITTER_KIND` entry.
+- `body-layer/src/perception/emitters.py` — `EmitterKind.LAUNCH_FLASH`,
+  `launch_flash_emitters()`, `resolve_emitters()` three-way merge.
+- `body-layer/src/belief/percept.py` — `PROVENANCE_EMITTER_LAUNCH_FLASH` mapping entry.
+- `aircraft-layer/src/collector/firing_receiver.py` — `EMITTER_KIND_LAUNCH_FLASH`,
+  `LAUNCH_FLASH_DURATION_S`, `_apply()`'s new `S_EVENT_SHOT` branch, death-removal extended.
+
+### Tests Added (Stages 4–5)
+- `body-layer/tests/test_body.py` — `TestResolveSunElevationDeg` (8 tests: fresh-clock
+  matches a direct `sun_elevation_deg` call, extrapolation between samples, no-theatre,
+  within-grace-no-error, beyond-grace-logs-once, logs-once-not-every-poll, recovery clears
+  the latch) and `TestParseMissionClockDict` (4 tests).
+- `body-layer/tests/test_optic_policy.py` — `TestBlB124SunElevationPerOptic` (2 tests): the
+  cross-optic fix proven by showing `improvement_window_m`'s two bounds (unaided vs
+  binocular) shrink by *different* ratios at the plan's own −3.5° anchor, and
+  `sight_can_still_improve` resolving a real, non-default factor vs. full dark.
+- `aircraft-layer/tests/test_firing_receiver.py` — replaced the flipped
+  `test_shot_event_does_not_create_an_entry` with four tests: entry creation, fixed-window
+  expiry (not watchdog-extended), non-overwrite of an existing `FIRING` entry, death
+  removal.
+- `body-layer/tests/test_emitters.py` — `launch_flash_emitters()` (4 tests, mirroring
+  `firing_emitters`'s own) and `resolve_emitters()` precedence (3 tests: firing-wins,
+  launch-flash-wins-over-burning, independent-unit merge).
+- `body-layer/tests/test_naked_eye_source.py` — three end-to-end `poll()`-level tests
+  (bubble-range admission, firing-precedence, launch-flash-over-burning precedence).
+- `body-layer/tests/test_percept.py` — the closed-mapping test for the new provenance.
+
+### Checks (Stages 4–5)
+- aircraft-layer: `ruff format --check`/`ruff check` clean; `mypy src` clean (28 source
+  files); full suite (`-m "not slow"`) 1065 passed.
+- body-layer: `ruff format --check`/`ruff check` clean; `mypy src` clean (94 source files);
+  full suite (`-m "not slow"`) 3768 passed, 4 xfailed (up from 3744 before these two
+  stages — 24 net new tests, some existing tests gained one new assertion line each).
+- `defaults.toml` regenerated after the new `MISSION_CLOCK_MAX_AGE_S` tunable; rendered
+  comment read directly (not the diff) to confirm the dangerous-direction warning survived
+  the single-long-first-sentence convention.
+
+### Notable Discoveries (Stages 4–5)
+- **A real, behaviour-relevant defect in Stage 3's own approved design**, found only once
+  a real `sun_elevation_deg` was available to feed it (its own default-no-op tests could
+  not have caught it) — see "the cross-optic correctness defect" above. Reported here
+  rather than silently worked around, per this role's "say what would make the claim
+  false" habit: the falsifying check was `light_factor(UNAIDED_OPTIC, -3.5) !=
+  light_factor(BINOCULAR_OPTIC, -3.5)` (confirmed true, both anchors already in Stage 2's
+  own `_MEASURED_FACTORS` table), which is now a standing test
+  (`test_improvement_window_m_shrinks_each_bound_by_its_own_optics_factor`).
+- **`LAUNCH_FLASH_DURATION_S`'s location departs from the plan's own "Behaviour constants"
+  section**, which named it `perception.emitters.LAUNCH_FLASH_DURATION_S` (implying a
+  body-layer tuning entry). The watchdog duration it actually controls lives entirely in
+  aircraft-layer's `EmitterTracker` (the same module that already declares
+  `FIRING_MIN_VISIBLE_S`/`FIRING_WATCHDOG_S` as plain constants, since aircraft-layer has
+  no `tuning.*` loader — root `CLAUDE.md`'s "Outside body-layer the loader does not exist
+  yet" instruction). Declared it there instead, with the same "flagged as a tuning
+  candidate" comment those two siblings already carry, rather than inventing a second
+  tuning mechanism or a cross-process constant with no consumer.
+- **`test_shot_event_does_not_create_an_entry` (aircraft-layer) flipped**, exactly the
+  class of test the plan's own "treat the test-impact list as a hypothesis" step warns
+  about — not named by the plan (it predates this feature, from `[[BL-B74]]`'s seam), and
+  found by `grep`ping `S_EVENT_SHOT` across the test suite before writing the `_apply()`
+  branch, not after the fact.
+- **`decide_optic`'s own `OpticDecision`/`AttackRunState` plumbing needed no change** —
+  only the keyword threading. The five `can_improve` closures are the only control-flow
+  change in `optic_policy.py`; everything else is a parameter rename plus a
+  `_light_factor_for` call at each existing `tier_ranges()` site.
+- **Not flown.** Both stages are code-complete and fully unit/integration-tested against
+  fakes; the plan's test card (dawn pass, night light-source row, pilot-seat cockpit mask
+  measurement) is the user's own live acceptance step, not run here.
