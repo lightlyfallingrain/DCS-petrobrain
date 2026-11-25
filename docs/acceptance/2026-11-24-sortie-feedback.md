@@ -458,3 +458,20 @@ decel command at t=339.3, 255 → ~150):
 
 No re-explore: the user's fourth-re-fly description already specifies the shape; this flight
 confirms the earlier amendment changed the caps but not the shaper that sits under them.
+
+### RPM calibration readings (U9), fifth re-fly — user, verbatim
+
+> *"RPMs:*
+> *\* level 170 km/h, T+0:51: engine 92%, rotor 97%*
+> *\* fast acceleration, T+1:10: engine1 99%, engine2 98%, rotor 90%*
+> *\* fast descent, T+2:10: engine 74%, rotor 101%*
+>
+> *Looking at the instruments, the scales for both engine and rotor RPM are 0-110%"*
+
+Main loop check against `refly5_flight_trace.log`: the trace has **no** fast acceleration at
+t≈70 s and no full-down descent at t≈130 s; across the whole trace engine args stay
+0.77–0.89 and rotor 0.82–0.88 (never 74% / 101% on any scale). So the readings come from a
+different flight segment than the trace sent (a later mission run, or T+ counted from something
+other than mission time). Partial fit only: with the 0–110% gauge scale (arg × 110), level flight
+in this trace reads engine ~91–92%, rotor ~96% — consistent with the level reading. The full
+calibration needs the trace that covers T+0:51 / 1:10 / 2:10.
