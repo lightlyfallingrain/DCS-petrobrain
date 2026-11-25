@@ -253,6 +253,49 @@ def test_empty_batch_before_anything_ingested_has_no_model_time() -> None:
     snapshot = tracker.snapshot()
     assert snapshot["dcs_model_time_s"] is None
     assert snapshot["active"] == {}
+    assert snapshot["mission_clock"] is None
+
+
+def test_snapshot_carries_the_most_recent_batchs_mission_clock() -> None:
+    tracker = EmitterTracker()
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|100.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="18300.5|2020|6|1",
+        )
+    )
+
+    mission_clock = tracker.snapshot()["mission_clock"]
+    assert mission_clock == {"abs_time_s": 18300.5, "year": 2020, "month": 6, "day": 1}
+
+
+def test_snapshot_mission_clock_goes_back_to_none_when_a_later_batch_cannot_read_it() -> (
+    None
+):
+    """The tracker reports exactly what the most recent batch said --
+    it does not hold onto a stale "last known good" reading (module
+    docstring's `_last_mission_clock` note)."""
+    tracker = EmitterTracker()
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|100.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="18300.5|2020|6|1",
+        )
+    )
+    tracker.ingest(
+        FiringEventBatch.from_wire(
+            "0|101.0|",
+            bridge_call_ms=0.0,
+            received_wall_clock_s=0.0,
+            mission_clock_raw="unavailable",
+        )
+    )
+
+    assert tracker.snapshot()["mission_clock"] is None
 
 
 def _send(port: int, payload: object) -> None:
@@ -301,6 +344,50 @@ def test_malformed_payload_is_dropped_not_ingested() -> None:
     _run_receiver_briefly(receiver)
 
     assert tracker.snapshot()["active"] == {}
+
+
+def test_mission_clock_envelope_key_reaches_the_snapshot() -> None:
+    tracker = EmitterTracker()
+    receiver = FiringEventsReceiver(tracker, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "0|60.0|",
+            "bridge_call_ms": 0.5,
+            "mission_clock": "18300.5|2020|6|1",
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    mission_clock = tracker.snapshot()["mission_clock"]
+    assert mission_clock == {"abs_time_s": 18300.5, "year": 2020, "month": 6, "day": 1}
+
+
+def test_mission_clock_envelope_key_absent_is_fine() -> None:
+    """Pre-amendment envelope shape (no `mission_clock` key at all) --
+    the firing events themselves still ingest normally."""
+    tracker = EmitterTracker()
+    receiver = FiringEventsReceiver(tracker, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|60.0|S_EVENT_SHOOTING_START:60.0:Unit_1:1:nil:nil",
+            "bridge_call_ms": 0.5,
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = tracker.snapshot()
+    assert snapshot["mission_clock"] is None
+    active = snapshot["active"]
+    assert isinstance(active, dict)
+    assert "Unit_1" in active
 
 
 def test_non_json_datagram_is_dropped() -> None:

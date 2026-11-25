@@ -87,8 +87,18 @@ project has no channel for.
 
 Wire format (this script -> collector), UDP, one JSON object per poll
 (matches `schema.firing.FiringEventBatch.from_wire`):
-    {"payload": "<count>|<dcs_model_time_s>|<entries>", "bridge_call_ms": <float>}
+    {"payload": "<count>|<dcs_model_time_s>|<entries>", "bridge_call_ms": <float>,
+     "mission_clock": "<abs_time_s>|<year>|<month>|<day>"}
 `entries` is `"<kind>:<t>:<initiator>:<targets_ownship01>:<x>:<z>;..."`.
+`mission_clock` (`BL-B124`, amendment 2026-11-25) carries either
+`"<abs_time_s>|<year>|<month>|<day>"` or the literal sentinel
+`"unavailable"` (the guarded `timer.getAbsTime()`/`env.mission.date`
+read failed this poll -- `schema.firing.MissionClockSample.from_wire`
+parses that sentinel to `None`, not an error). The key is omitted
+entirely only in the defensive case where `EVENT_POLL_CODE`'s own `\1`
+split could not be found at all. An old collector (no `AC-B8`-plus-this-
+amendment code) ignores the key entirely, same forward-compatibility the
+LOS Hook's own `probes` key already established.
 
 Reuses DCS's own shipped JSON encoder (`Scripts\JSON.lua`) and LuaSocket's
 `package.path`/`cpath` extension, mirroring every other Hook script here.
@@ -230,13 +240,35 @@ return "already-registered"
 ]]
 
 --: Drains `PB_FIRING_EVENT_QUEUE`, mirroring every other registration/poll
---: Hook script's own drain-and-clear snippet.
+--: Hook script's own drain-and-clear snippet. **`BL-B124` amendment
+--: (2026-11-25): also reads the mission's own wall clock** --
+--: `timer.getAbsTime()` (seconds since 00:00 of the mission's start day,
+--: still climbing past 86400 across midnight) and `env.mission.date`
+--: (`{Year, Month, Day}`) -- so body-layer can derive sun elevation
+--: without a second DCS read or a `.miz` date thread through Mission
+--: Interpreter. Both reads are `pcall`-guarded independently of the event
+--: drain above: a failure here must not lose this poll's firing events,
+--: and the clock reading must not raise even if the scripting state
+--: cannot answer it. The clock sub-string rides after a `\1` separator
+--: (same device `petrobrain-line-of-sight-hook.lua`'s own `probes`
+--: addition uses to keep an old collector/new Hook pairing, and the
+--: reverse, both working) so the pre-existing `<count>|<t>|<entries>`
+--: shape this poll already returns is untouched.
 local EVENT_POLL_CODE = [[
 local queue = PB_FIRING_EVENT_QUEUE or {}
 local out = {}
 for i = 1, #queue do out[i] = queue[i] end
 PB_FIRING_EVENT_QUEUE = {}
-return tostring(#out) .. "|" .. tostring(timer.getTime()) .. "|" .. table.concat(out, ";")
+local payload = tostring(#out) .. "|" .. tostring(timer.getTime()) .. "|" .. table.concat(out, ";")
+local absOk, absTime = pcall(timer.getAbsTime)
+local dateOk, date = pcall(function() return env.mission.date end)
+local clockStr = "unavailable"
+if absOk and dateOk and type(date) == "table"
+    and date.Year ~= nil and date.Month ~= nil and date.Day ~= nil then
+    clockStr = tostring(absTime) .. "|" .. tostring(date.Year)
+        .. "|" .. tostring(date.Month) .. "|" .. tostring(date.Day)
+end
+return payload .. "\1" .. clockStr
 ]]
 
 local petrobrainFiringEvents = {}
@@ -267,12 +299,21 @@ local function tryRegister()
     end
 end
 
-local function sendPayload(payload, bridgeCallMs)
+--: `missionClock` rides as its own JSON key, never folded into
+--: `payload` -- mirrors the LOS Hook's own `probes` key exactly (see
+--: `EVENT_POLL_CODE`'s own comment above). Omitted entirely when empty,
+--: so an old collector reading this new Hook's envelope sees nothing it
+--: does not already expect.
+local function sendPayload(payload, bridgeCallMs, missionClock)
     if sendSocket == nil then
         sendSocket = socket.udp()
     end
-    local envelope = JSON:encode({ payload = payload, bridge_call_ms = bridgeCallMs })
-    local ok, err = sendSocket:sendto(envelope, FIRING_SEND_HOST, FIRING_SEND_PORT)
+    local envelope = { payload = payload, bridge_call_ms = bridgeCallMs }
+    if missionClock ~= nil and missionClock ~= "" then
+        envelope.mission_clock = missionClock
+    end
+    local encoded = JSON:encode(envelope)
+    local ok, err = sendSocket:sendto(encoded, FIRING_SEND_HOST, FIRING_SEND_PORT)
     if not ok then
         logi("send failed: " .. tostring(err))
     end
@@ -286,11 +327,22 @@ local function pollAndSend()
         logi("event poll failed: ok=" .. tostring(ok) .. " result=" .. tostring(result))
         return
     end
-    local count = result:match("^(%d+)|") or "?"
+    -- Split the firing payload from the mission-clock sub-string on the
+    -- `\1` separator `EVENT_POLL_CODE` appends -- same split shape the
+    -- LOS Hook's own `probesPayload` match uses. A `result` with no `\1`
+    -- at all (an old deployed Export... no, an old EVENT_POLL_CODE this
+    -- Hook never sent) falls back to treating the whole string as the
+    -- firing payload with no clock, rather than failing the poll.
+    local firingPayload, clockPayload = result:match("^(.*)\1(.*)$")
+    if firingPayload == nil then
+        firingPayload = result
+        clockPayload = ""
+    end
+    local count = firingPayload:match("^(%d+)|") or "?"
     if count ~= "0" and count ~= "?" then
         logi("firing events poll: n=" .. count .. " bridge_call_ms=" .. string.format("%.2f", bridgeCallMs))
     end
-    sendPayload(result, bridgeCallMs)
+    sendPayload(firingPayload, bridgeCallMs, clockPayload)
 end
 
 function petrobrainFiringEvents.onSimulationStart()

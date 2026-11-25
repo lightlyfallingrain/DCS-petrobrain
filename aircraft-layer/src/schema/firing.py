@@ -42,7 +42,21 @@ event, on the Hook-script side, and the wire carries only the resulting
 boolean (never the raw target identity): the no-omniscience gate this
 feature's own acceptance document names (*"this gives detection only"*)
 has nothing to do with who is targeting whom beyond "is it us", so there
-is no reason to cross more than that one bit."""
+is no reason to cross more than that one bit.
+
+**`mission_clock` (`BL-B124`, amendment 2026-11-25)** rides as its own
+envelope key, never folded into `payload` -- mirrors `line_of_sight.py`'s
+own `probes` key exactly, both in shape (a separate optional sub-wire
+string, parsed by its own small dataclass) and in the reason (a second,
+independently-evolving field should not force every consumer of the
+first one to re-parse). Carries `"<abs_time_s>|<year>|<month>|<day>"`
+(`timer.getAbsTime()` plus `env.mission.date`, both read inside the same
+`net.dostring_in` call the firing-event drain already makes -- no new
+DCS read, no new port) or the literal sentinel `"unavailable"` when the
+Hook's own guarded read failed this poll; either collapses, on this side,
+to `FiringEventBatch.mission_clock is None` -- see
+`MissionClockSample.from_wire`'s own docstring for why "sentinel" and
+"key absent entirely" are not distinguished."""
 
 from __future__ import annotations
 
@@ -89,23 +103,102 @@ class FiringRawEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class MissionClockSample:
+    """One poll's own mission wall-clock reading (`BL-B124`, amendment
+    2026-11-25) -- `env.mission.date` (`Year`/`Month`/`Day`) plus
+    `timer.getAbsTime()` (seconds since 00:00 of the mission's start day,
+    still climbing past 86400 across midnight), both read inside the same
+    `net.dostring_in("scripting", ...)` call the firing-event drain
+    already makes. No new DCS read, no new port -- see this module's own
+    docstring for the wire shape and `petrobrain-firing-events-hook.lua`'s
+    `EVENT_POLL_CODE` for where these two reads happen.
+
+    Body-layer derives sun elevation from `abs_time_s` + `year`/`month`/
+    `day` + ownship lat/lon (`light_level.py`, Stage 2) -- that derivation
+    lives entirely on the body-layer side; this type carries no astronomy
+    of its own."""
+
+    abs_time_s: float
+    year: int
+    month: int
+    day: int
+
+    @staticmethod
+    def from_wire(raw: str) -> MissionClockSample | None:
+        """Parse one `"<abs_time_s>|<year>|<month>|<day>"` sub-wire
+        string. The literal sentinel `"unavailable"` (the Hook's own
+        guarded-failure case, module docstring) parses to `None` --
+        that is an *expected* state, not a malformed one, so it does not
+        raise. Anything else that fails to parse raises
+        `FiringParseError`; the caller (`FiringEventBatch.from_wire`)
+        drops a malformed `mission_clock` sub-wire the same way
+        `LineOfSightSnapshot.from_wire` drops a malformed `probes`
+        sub-wire -- without failing the rest of the batch."""
+        if raw == "unavailable":
+            return None
+        parts = raw.split("|")
+        if len(parts) != 4:
+            raise FiringParseError(
+                "expected '<abs_time_s>|<year>|<month>|<day>' or "
+                f"'unavailable', got {raw!r}"
+            )
+        abs_str, year_str, month_str, day_str = parts
+        try:
+            abs_time_s = float(abs_str)
+            year = int(year_str)
+            month = int(month_str)
+            day = int(day_str)
+        except ValueError as exc:
+            raise FiringParseError(
+                "expected '<abs_time_s>|<year>|<month>|<day>' or "
+                f"'unavailable', got {raw!r}"
+            ) from exc
+        return MissionClockSample(
+            abs_time_s=abs_time_s, year=year, month=month, day=day
+        )
+
+    def to_dict(self) -> dict[str, float | int]:
+        return {
+            "abs_time_s": self.abs_time_s,
+            "year": self.year,
+            "month": self.month,
+            "day": self.day,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class FiringEventBatch:
     """One poll's worth of drained firing events, plus that poll's own
     `dcs_model_time_s` -- mirrors `LineOfSightSnapshot`'s dual-clock shape,
     `received_wall_clock_s` stamped by the collector at receipt, not by the
-    Hook script (same posture as every other feed in this module)."""
+    Hook script (same posture as every other feed in this module).
+
+    `mission_clock` (`BL-B124`) defaults to `None` so every pre-amendment
+    caller/fixture that builds a `FiringEventBatch` without it (this
+    module's own tests, `collector.firing_receiver`'s test fixtures)
+    keeps working unchanged."""
 
     dcs_model_time_s: float
     received_wall_clock_s: float
     bridge_call_ms: float
     events: tuple[FiringRawEvent, ...]
+    mission_clock: MissionClockSample | None = None
 
     @staticmethod
     def from_wire(
-        payload: str, *, bridge_call_ms: float, received_wall_clock_s: float
+        payload: str,
+        *,
+        bridge_call_ms: float,
+        received_wall_clock_s: float,
+        mission_clock_raw: str | None = None,
     ) -> FiringEventBatch:
         """Parse one compact wire string (module docstring) into a typed
-        batch. `entries` may be empty (nothing fired this poll)."""
+        batch. `entries` may be empty (nothing fired this poll).
+        `mission_clock_raw` is the envelope's own separate `"mission_
+        clock"` key (`FiringEventsReceiver` passes it in) -- `None` or a
+        malformed sub-wire is dropped to `mission_clock=None` without
+        failing the rest of the batch, same posture
+        `LineOfSightSnapshot.from_wire` already established for `probes`."""
         parts = payload.split("|", 2)
         if len(parts) != 3:
             raise FiringParseError(f"expected '<count>|<t>|<entries>', got {payload!r}")
@@ -129,11 +222,19 @@ class FiringEventBatch:
                 continue
             events.append(_parse_entry(entry))
 
+        mission_clock: MissionClockSample | None = None
+        if mission_clock_raw:
+            try:
+                mission_clock = MissionClockSample.from_wire(mission_clock_raw)
+            except FiringParseError:
+                mission_clock = None
+
         return FiringEventBatch(
             dcs_model_time_s=dcs_model_time_s,
             received_wall_clock_s=received_wall_clock_s,
             bridge_call_ms=bridge_call_ms,
             events=tuple(events),
+            mission_clock=mission_clock,
         )
 
 

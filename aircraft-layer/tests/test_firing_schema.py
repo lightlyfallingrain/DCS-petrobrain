@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from schema.firing import FiringEventBatch, FiringParseError
+from schema.firing import FiringEventBatch, FiringParseError, MissionClockSample
 
 
 def test_empty_entries_is_a_well_formed_empty_batch() -> None:
@@ -126,3 +126,74 @@ def test_non_numeric_model_time_raises() -> None:
         FiringEventBatch.from_wire(
             "0|notanumber|", bridge_call_ms=0.5, received_wall_clock_s=1.0
         )
+
+
+def test_mission_clock_absent_by_default() -> None:
+    batch = FiringEventBatch.from_wire(
+        "0|120.5|", bridge_call_ms=1.2, received_wall_clock_s=99.0
+    )
+    assert batch.mission_clock is None
+
+
+def test_mission_clock_parses_from_wire() -> None:
+    batch = FiringEventBatch.from_wire(
+        "0|120.5|",
+        bridge_call_ms=1.2,
+        received_wall_clock_s=99.0,
+        mission_clock_raw="18300.5|2020|6|1",
+    )
+    assert batch.mission_clock == MissionClockSample(
+        abs_time_s=18300.5, year=2020, month=6, day=1
+    )
+
+
+def test_mission_clock_unavailable_sentinel_parses_to_none() -> None:
+    batch = FiringEventBatch.from_wire(
+        "0|120.5|",
+        bridge_call_ms=1.2,
+        received_wall_clock_s=99.0,
+        mission_clock_raw="unavailable",
+    )
+    assert batch.mission_clock is None
+
+
+def test_mission_clock_malformed_sub_wire_is_dropped_not_raised() -> None:
+    """A malformed `mission_clock` sub-wire drops to `None` -- it does not
+    fail the rest of the batch, mirroring `LineOfSightSnapshot.from_wire`'s
+    own `probes` posture."""
+    batch = FiringEventBatch.from_wire(
+        "1|60.3|S_EVENT_SHOOTING_START:60.3:Unit_013:1:nil:nil",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1.0,
+        mission_clock_raw="garbage",
+    )
+    assert batch.mission_clock is None
+    assert len(batch.events) == 1
+
+
+class TestMissionClockSample:
+    def test_from_wire_round_trips(self) -> None:
+        sample = MissionClockSample.from_wire("12345.6|2024|1|1")
+        assert sample == MissionClockSample(
+            abs_time_s=12345.6, year=2024, month=1, day=1
+        )
+
+    def test_unavailable_sentinel_is_none(self) -> None:
+        assert MissionClockSample.from_wire("unavailable") is None
+
+    def test_wrong_field_count_raises(self) -> None:
+        with pytest.raises(FiringParseError):
+            MissionClockSample.from_wire("12345.6|2024|1")
+
+    def test_non_numeric_field_raises(self) -> None:
+        with pytest.raises(FiringParseError):
+            MissionClockSample.from_wire("notanumber|2024|1|1")
+
+    def test_to_dict(self) -> None:
+        sample = MissionClockSample(abs_time_s=1.0, year=2024, month=1, day=1)
+        assert sample.to_dict() == {
+            "abs_time_s": 1.0,
+            "year": 2024,
+            "month": 1,
+            "day": 1,
+        }

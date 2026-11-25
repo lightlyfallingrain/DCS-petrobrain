@@ -57,7 +57,12 @@ import time
 from types import TracebackType
 from typing import Final, Self
 
-from schema.firing import FiringEventBatch, FiringParseError, FiringRawEvent
+from schema.firing import (
+    FiringEventBatch,
+    FiringParseError,
+    FiringRawEvent,
+    MissionClockSample,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +188,15 @@ class EmitterTracker:
     def __init__(self) -> None:
         self._active: dict[str, ActiveEmitter] = {}
         self._last_dcs_model_time_s: float | None = None
+        #: The most recent poll's own `MissionClockSample`, or `None` --
+        #: either no batch has arrived yet, or the most recent batch's own
+        #: read failed/was absent (`BL-B124`). Overwritten every `ingest()`
+        #: call with exactly what that batch reported -- this tracker does
+        #: not try to paper over a transient miss by holding onto a stale
+        #: reading; a consumer that wants "last known good" behaviour
+        #: builds that on its own side (deferred to Stage 4, out of this
+        #: stage's scope).
+        self._last_mission_clock: MissionClockSample | None = None
 
     def ingest(self, batch: FiringEventBatch) -> None:
         """Apply one poll's drained events, in order, then prune every
@@ -206,6 +220,7 @@ class EmitterTracker:
             )
             self._active.clear()
         self._last_dcs_model_time_s = now
+        self._last_mission_clock = batch.mission_clock
 
         for event in batch.events:
             self._apply(event, now)
@@ -250,14 +265,23 @@ class EmitterTracker:
         (`api.server._handle_firing_latest`), mirroring every other
         `*Snapshot.to_dict()` shape in this module even though this one is
         computed on demand rather than stored. `None` entries never
-        appear: `active` only ever holds units this tracker currently
-        believes are emitting."""
+        appear in `active`: it only ever holds units this tracker
+        currently believes are emitting. `mission_clock` (`BL-B124`) is
+        `None` whenever the most recent batch's own read was absent or
+        failed -- the same "not an error, just unavailable this poll"
+        posture every other optional sub-wire field in this codebase
+        takes."""
         return {
             "dcs_model_time_s": self._last_dcs_model_time_s,
             "received_wall_clock_s": time.time(),
             "active": {
                 name: emitter.to_dict() for name, emitter in self._active.items()
             },
+            "mission_clock": (
+                self._last_mission_clock.to_dict()
+                if self._last_mission_clock is not None
+                else None
+            ),
         }
 
 
@@ -345,11 +369,16 @@ class FiringEventsReceiver:
             logger.debug("dropping malformed firing-events envelope: %r", envelope)
             return
 
+        mission_clock_raw = envelope.get("mission_clock")
+        if not isinstance(mission_clock_raw, str):
+            mission_clock_raw = None
+
         try:
             batch = FiringEventBatch.from_wire(
                 payload,
                 bridge_call_ms=float(bridge_call_ms),
                 received_wall_clock_s=time.time(),
+                mission_clock_raw=mission_clock_raw,
             )
         except FiringParseError:
             logger.debug("dropping malformed firing-events payload: %r", payload)
