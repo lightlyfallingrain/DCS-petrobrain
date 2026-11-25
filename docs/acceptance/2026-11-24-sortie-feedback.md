@@ -493,3 +493,11 @@ precision. Args 838/839 equal 40/41; 845 equals 42 (pilot and operator gauges ar
 floor — then recovered to ~90 % by t=70, where the user read it. A brisk full-collective
 acceleration therefore sits on the 85 % limit; the rotor-RPM guard has to bite there, not be a
 formality.
+
+**User on the low-rotor-RPM cue (2026-11-25, verbatim):** *"The Mi-24 has an audio warning when
+rotor RPM drops to near the limit (not sure of the exact value, but it gives a second or two to
+react). That is a cue for the human pilot to ease on the collective. Petrovich won't get that audio
+cue, so we'll use the engine RPM reading instead."* — main loop asked which reading is meant;
+user: *"Oh, I meant the rotor RPM."* So Petrovich's stand-in for the audio cue is the rotor gauge:
+ease collective from a warning level (first cut 88 %, tunable; the real audio-warning value is
+unknown) so rotor never reaches the 85 % generator-trip floor.
