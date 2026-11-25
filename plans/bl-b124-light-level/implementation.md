@@ -93,11 +93,11 @@ real value yet.
 - ruff format --check: pass (both)
 - ruff check: pass (both)
 - mypy --strict (run from inside each subproject): pass (both)
-- pytest -q: aircraft-layer full suite 1049 passed; body-layer targeted suite (visibility,
-  vision_calibration, detection_trace, naked_eye_source, optic_policy, attack_run, light_level,
-  tuning_defaults_toml, body, crew_console, estimation, bl_b104_association_scenarios) all passed,
-  4 pre-existing xfails unaffected; `tests --collect-only` smoke clean (3772 collected); full
-  body-layer suite run in background, see below for result once it lands.
+- pytest -q: aircraft-layer full suite 1062 passed (1049 at Stage 1, +13 new tests across Stages
+  1-3). body-layer **full suite** (not just targeted): 3768 passed, 4 pre-existing xfailed, 0
+  failed -- caught and fixed one real defect this stage introduced
+  (`test_tuning_comment_renders.py`'s cross-key-comment check, see Notable Discoveries), green on
+  the re-run after the fix.
 - Lua syntax (`luac5.1 -p`) on the Hook file and the extracted bridged `EVENT_POLL_CODE` literal:
   both clean; `GETGLOBAL` audit shows no stray names.
 
