@@ -536,6 +536,9 @@ _AI_PILOT_WHEEL_INTEGRATION_CONSTANTS = (
     "MODE_CYCLE_MAX_ATTEMPTS",
     "MODE_BLOCKED_RETRY_S",
     "HVRT_TRANSLATE_MAX_HOLD_S",
+    # `[[BL-B139]]` -- the recovery wake-kick's own bounded retry window,
+    # closed over by `ai_pilot_wake_kick_direction_hold`/`_tap`.
+    "AI_PILOT_WAKE_KICK_TIMEOUT_S",
     # fix/ai-wheel-pilot-seat-gate -- `run_ai_pilot_wheel` now calls
     # `ai_pilot_update_seat`, which closes over these.
     "SEAT_BOUNDARY_FWD_M",
@@ -656,6 +659,11 @@ local ai_pilot_goal = {
     hvrt_started_t = nil,
     hvrt_mode_cycle_attempts = 0,
     hvrt_mode_blocked_since_t = nil,
+    wake = false,
+    wake_done_seq = nil,
+    wake_kick_dir = nil,
+    wake_kick_started_t = nil,
+    wake_kick_tried_up = false,
 }
 
 -- Stage P3+P4's own co-moving state and pending-release pair --
@@ -791,6 +799,11 @@ flight_desired = {
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_decide_correction"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_check_hold_convergence"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_heading"),
+            # `[[BL-B139]]` -- the wake-kick decisions, closed over by
+            # the altitude/speed ticks just below, in the real file's
+            # own order (Lua has no hoisting).
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_wake_kick_direction_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_wake_kick_direction_tap"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_altitude"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),
@@ -2072,6 +2085,8 @@ _GOAL_INTEGRATION_CONSTANTS = (
     "AI_WHEEL_DOWN",
     "AI_WHEEL_LEFT",
     "AI_WHEEL_RIGHT",
+    # `[[BL-B139]]` -- the recovery wake-kick's own bounded retry window.
+    "AI_PILOT_WAKE_KICK_TIMEOUT_S",
 )
 
 
@@ -2121,6 +2136,11 @@ local ai_pilot_goal = {
     hvrt_started_t = nil,
     hvrt_mode_cycle_attempts = 0,
     hvrt_mode_blocked_since_t = nil,
+    wake = false,
+    wake_done_seq = nil,
+    wake_kick_dir = nil,
+    wake_kick_started_t = nil,
+    wake_kick_tried_up = false,
 }
 
 -- Stage P3+P4's own co-moving state and pending-release pair --
@@ -2159,6 +2179,7 @@ end
             (_CORE_LUA, "safe_call"),
             (_CORE_LUA, "extract_json_string_field"),
             (_CORE_LUA, "extract_json_number_field"),
+            (_AI_PILOT_WHEEL_LUA, "extract_json_bool_field"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_correction_direction"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_parse_altitude_text"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_mode_ready"),
@@ -2171,6 +2192,10 @@ end
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_open_hold"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_release_hold"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_heading"),
+            # `[[BL-B139]]` -- the wake-kick decisions, same relative
+            # order as the real file (Lua has no hoisting).
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_wake_kick_direction_hold"),
+            (_AI_PILOT_WHEEL_LUA, "ai_pilot_wake_kick_direction_tap"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_altitude"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick_speed"),
             (_AI_PILOT_WHEEL_LUA, "ai_pilot_goal_tick"),

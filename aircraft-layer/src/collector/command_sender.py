@@ -247,6 +247,7 @@ class CommandSender:
             | None
         ) = None,
         cbtm_seq: int | None = None,
+        wake: bool = False,
     ) -> None:
         """Send `{"op": "ai_pilot_goal", "goal_seq": ..., "param": ...,
         "heading_target_deg": ..., "altitude_target_m": ...,
@@ -305,7 +306,13 @@ class CommandSender:
         shape `hvrt_step` above already uses. `Export.lua` acts on
         `cbtm_action` exactly once per distinct `cbtm_seq` it has not
         already seen; the caller (`body.py`) bumps `cbtm_seq` on every
-        call that carries a new, non-`None` `cbtm_action`."""
+        call that carries a new, non-`None` `cbtm_action`.
+
+        `wake` (`[[BL-B139]]`) marks this message as a recovery-from-
+        align-for-launch goal, so `Export.lua`'s own altitude/speed goal
+        ticks know to force a one-step-down-then-back kick when the
+        displayed value already matches the target -- a plain settle
+        is only correct for an ordinary voice goal."""
         if self._socket is None:
             self.open()
         sock = self._socket
@@ -324,6 +331,7 @@ class CommandSender:
                 "hvrt_step": hvrt_step,
                 "cbtm_action": cbtm_action,
                 "cbtm_seq": cbtm_seq,
+                "wake": wake,
             }
         ).encode("utf-8")
         try:

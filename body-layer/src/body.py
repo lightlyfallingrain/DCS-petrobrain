@@ -3836,6 +3836,14 @@ def _apply_ai_pilot_wheel_goal(
         ias_kmh=runner.last_ias_kmh,
     )
 
+    # BL-B139: whether Export.lua should treat this activation's
+    # altitude/speed ticks as a recovery, needing a one-step "wake" kick
+    # if the displayed value already matches the target (see `write_ai_
+    # pilot_goal`'s own docstring for why) -- read once per poll, after
+    # `decide_ai_pilot_wheel` above has had its chance to end a finished
+    # recovery this same poll, and reused by every send below.
+    wake = runner.parked_flight_state.align_phase == "recovering"
+
     final_goal = runner.parked_flight_state.goal
     if (
         final_goal is not None
@@ -3850,6 +3858,7 @@ def _apply_ai_pilot_wheel_goal(
                 final_goal.altitude_target_ref,
                 final_goal.speed_target_kmh,
                 final_goal.hvrt_direction,
+                wake=wake,
             )
         except AircraftLayerError:
             logger.warning("ai-pilot-goal write failed (continuing)", exc_info=True)
@@ -3926,6 +3935,7 @@ def _apply_ai_pilot_wheel_goal(
                 final_goal.speed_target_kmh if final_goal is not None else None,
                 final_goal.hvrt_direction if final_goal is not None else None,
                 step,
+                wake=wake,
             )
         except AircraftLayerError:
             logger.warning(
@@ -3957,6 +3967,7 @@ def _apply_ai_pilot_wheel_goal(
                 None,
                 cbtm_transition,
                 bumped_cbtm_seq,
+                wake=wake,
             )
         except AircraftLayerError:
             logger.warning(

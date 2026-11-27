@@ -54,9 +54,11 @@ class _FakeAircraftClient:
     def __init__(self) -> None:
         self.ai_pilot_goal_calls: list[tuple[Any, ...]] = []
         self.flight_calls: list[tuple[Any, ...]] = []
+        self.ai_pilot_goal_kwargs: list[dict[str, Any]] = []
 
-    def write_ai_pilot_goal(self, *args: Any) -> None:
+    def write_ai_pilot_goal(self, *args: Any, **kwargs: Any) -> None:
         self.ai_pilot_goal_calls.append(args)
+        self.ai_pilot_goal_kwargs.append(kwargs)
 
     def write_flight(self, *args: Any) -> None:
         """BL-16 Stage 3's own dual-write (`plans/flight-desired-state/
@@ -830,6 +832,39 @@ class TestRecoveryTriggerWiring:
         _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
 
         assert runner.parked_flight_state.align_phase == "launch_aligned"
+
+    def test_a_recovery_trip_sends_wake_true(self) -> None:
+        """`[[BL-B139]]` -- entering `"recovering"` this same poll must
+        mark the goal message `wake=True`, so `Export.lua` knows a
+        value already matching the target needs the one-step kick
+        rather than settling silently."""
+        runner, client = _runner(
+            align_phase="launch_aligned", pre_align_snapshot=self._SNAPSHOT
+        )
+        runner.last_ownship_state = OwnshipState(
+            t_sim=10.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=950.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, CrewConsole(store=ContactStore()), client)
+
+        assert runner.parked_flight_state.align_phase == "recovering"
+        assert client.ai_pilot_goal_kwargs[-1]["wake"] is True
+
+    def test_an_ordinary_goal_sends_wake_false(self) -> None:
+        """Companion to the recovery case above -- a plain voice goal,
+        with no recovery underway, must never set `wake` (an ordinary
+        goal that happens to already match the held value is correctly
+        a no-op, per `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M`'s own
+        posture)."""
+        runner, client = _runner()
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_goal_transition = AiPilotGoalRequest(
+            param="heading", heading_deg=90.0
+        )
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        assert client.ai_pilot_goal_kwargs[-1]["wake"] is False
 
     def test_ias_from_last_ias_kmh_crossing_the_ceiling_triggers_recovery(self) -> None:
         runner, client = _runner(

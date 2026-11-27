@@ -426,6 +426,7 @@ def test_write_ai_pilot_goal_posts_to_command_endpoint(
             "hvrt_step": None,
             "cbtm_action": None,
             "cbtm_seq": None,
+            "wake": False,
         }
     ]
 
@@ -439,6 +440,22 @@ def test_write_ai_pilot_goal_with_hvrt_step_posts_it(
     client.write_ai_pilot_goal(2, None, None, None, None, None, None, "up")
 
     assert calls[0]["hvrt_step"] == "up"
+
+
+def test_write_ai_pilot_goal_wake_true_posts_it(
+    server_url_with_ai_pilot_goal_calls: tuple[str, list[dict[str, object]]],
+) -> None:
+    """`[[BL-B139]]` -- the recovery-only wake flag rides the same
+    message, defaulting to `False` (asserted above) and posting `True`
+    only when the caller passes it."""
+    url, calls = server_url_with_ai_pilot_goal_calls
+    client = AircraftLayerClient(base_url=url)
+
+    client.write_ai_pilot_goal(
+        3, "altitude", None, 300.0, "barometric", None, None, wake=True
+    )
+
+    assert calls[0]["wake"] is True
 
 
 def test_write_ai_pilot_goal_raises_on_unreachable_host() -> None:

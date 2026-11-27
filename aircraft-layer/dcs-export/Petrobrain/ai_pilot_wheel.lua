@@ -132,6 +132,25 @@ local AI_PILOT_ALT_TOLERANCE_M = 20.0
 -- band is the only lever available.
 local AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M = 0.5
 
+-- ``BL-B139`` (`docs/acceptance/2026-11-27-mode2-recovery-feedback.md`):
+-- ED's AI pilot only reacts to a *change* of its displayed set altitude/
+-- speed -- a recovery whose target already equals what the overlay shows
+-- would otherwise settle with zero presses and never wake it up. While a
+-- goal message carries `.wake` (set only for a recovery, body-layer's
+-- own `ParkedFlightState.align_phase == "recovering"`), the altitude/
+-- speed goal ticks below force one step away from the target before
+-- letting the ordinary hold-and-poll/tap loop converge it right back --
+-- "step down a bit, then back," never more than that. This is the
+-- longest either direction is forced before the ticks below try the
+-- opposite one (altitude's own continuous hold only -- the speed tap is
+-- always exactly one tap, bounded by construction, see `ai_pilot_goal_
+-- tick_speed`'s own comment): long enough that a few ticks' worth of
+-- climb/descend rate clears `AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M`, short
+-- enough that a genuinely stuck wheel (the lower/upper stop) is retried
+-- the other way within a couple of seconds rather than holding one
+-- button open indefinitely.
+local AI_PILOT_WAKE_KICK_TIMEOUT_S = 1.5
+
 -- Delay from the park-rising edge to the blind reference-toggle press
 -- (pilot, verbatim: "I'd put a half second delay there").
 local AI_PILOT_REFERENCE_TOGGLE_DELAY_S = 0.5
@@ -449,6 +468,19 @@ local ai_pilot_takeover = {
 -- mode-cycle (into `HVRT`) previously had no bound at all, so it is kept
 -- separate rather than sharing the FLT/HVR pair, since both ticks run
 -- every overlay tick and must count their own attempts independently.
+--
+-- ``BL-B139``'s own wake-kick fields, same table rather than a third
+-- one (they only ever matter alongside `.param`/`.goal_seq`): `.wake`
+-- mirrors body-layer's own flag, sticky like `.param` (not a one-shot).
+-- `.wake_done_seq`: the `.goal_seq` the kick has already run (or been
+-- judged unnecessary) for -- `nil` until the first tick of a fresh
+-- `.goal_seq` decides either way. `.wake_kick_dir`: the direction
+-- currently being forced away from the target (`AI_WHEEL_DOWN`/`_UP`),
+-- `nil` while not kicking. `.wake_kick_started_t`: the model time the
+-- *current* forced direction began, for `AI_PILOT_WAKE_KICK_TIMEOUT_S`.
+-- `.wake_kick_tried_up`: whether the down-then-up fallback has already
+-- spent its one retry this `.goal_seq`, so a wheel stuck at both ends
+-- gives up rather than flip-flopping forever.
 local ai_pilot_goal = {
     param = nil,
     heading_target_deg = nil,
@@ -466,6 +498,11 @@ local ai_pilot_goal = {
     hvrt_direction = nil,
     hvrt_hold_cmd = nil,
     hvrt_started_t = nil,
+    wake = false,
+    wake_done_seq = nil,
+    wake_kick_dir = nil,
+    wake_kick_started_t = nil,
+    wake_kick_tried_up = false,
 }
 
 -- Stage P3+P4's own co-moving state -- the CBTM one-shot channel
@@ -997,6 +1034,94 @@ local function ai_pilot_goal_tick_heading(t)
     end
 end
 
+-- ``BL-B139``'s own altitude kick decision -- a continuous hold, so
+-- the same forced direction is simply re-returned every tick the kick
+-- is open (the caller's own `hold_cmd ~= dir` check keeps it open
+-- without flicker); `AI_PILOT_WAKE_KICK_TIMEOUT_S` of holding one way
+-- is what "steps the value" far enough to clear `AI_PILOT_GOAL_ALT_
+-- EXACT_TOLERANCE_M`. Returns the direction to hold *instead of*
+-- `ordinary_dir` this tick, or `nil` to use `ordinary_dir` unchanged --
+-- `nil` covers both "no wake requested/already done" and "the kick (or
+-- a real mismatch) has just been confirmed, hand off to the ordinary
+-- correction converging back to the exact target."
+local function ai_pilot_wake_kick_direction_hold(t, ordinary_dir)
+    if not ai_pilot_goal.wake or ai_pilot_goal.wake_done_seq == ai_pilot_goal.goal_seq then
+        return nil
+    end
+    if ordinary_dir ~= nil then
+        -- Off target already -- either the kick just took effect, or
+        -- this was never a "already at target" case to begin with.
+        -- Either way, wake is achieved and the ordinary hold-and-poll
+        -- loop below takes it the rest of the way.
+        ai_pilot_goal.wake_done_seq = ai_pilot_goal.goal_seq
+        ai_pilot_goal.wake_kick_dir = nil
+        ai_pilot_goal.wake_kick_tried_up = false
+        return nil
+    end
+    if ai_pilot_goal.wake_kick_dir == nil then
+        ai_pilot_goal.wake_kick_dir = AI_WHEEL_DOWN
+        ai_pilot_goal.wake_kick_started_t = t
+    elseif t - ai_pilot_goal.wake_kick_started_t >= AI_PILOT_WAKE_KICK_TIMEOUT_S then
+        if not ai_pilot_goal.wake_kick_tried_up then
+            -- Holding down for the full timeout produced no detectable
+            -- change -- the wheel's own lower stop. Try up instead.
+            ai_pilot_goal.wake_kick_dir = AI_WHEEL_UP
+            ai_pilot_goal.wake_kick_tried_up = true
+            ai_pilot_goal.wake_kick_started_t = t
+        else
+            -- Both directions tried, neither moved the display -- give
+            -- up rather than hold a button open forever (same "never
+            -- stall forever" posture as `MODE_BLOCKED_RETRY_S`).
+            ai_pilot_goal.wake_done_seq = ai_pilot_goal.goal_seq
+            ai_pilot_goal.wake_kick_dir = nil
+            ai_pilot_goal.wake_kick_tried_up = false
+            return nil
+        end
+    end
+    return ai_pilot_goal.wake_kick_dir
+end
+
+-- ``BL-B139``'s own speed kick decision -- the speed goal tick is a
+-- single tap per tick, never a hold (see `ai_pilot_goal_tick_speed`'s
+-- own comment), so a kick must tap **exactly once** per forced
+-- direction and then wait for the next readback rather than re-tapping
+-- every tick, which would walk the ladder more steps than "one press
+-- down, then back" asks for. Returns a direction to tap *this* tick,
+-- the string `"wait"` to take no action while a just-issued tap's
+-- readback is still pending, or `nil` to use `ordinary_dir` unchanged.
+local function ai_pilot_wake_kick_direction_tap(t, ordinary_dir)
+    if not ai_pilot_goal.wake or ai_pilot_goal.wake_done_seq == ai_pilot_goal.goal_seq then
+        return nil
+    end
+    if ordinary_dir ~= nil then
+        ai_pilot_goal.wake_done_seq = ai_pilot_goal.goal_seq
+        ai_pilot_goal.wake_kick_dir = nil
+        ai_pilot_goal.wake_kick_tried_up = false
+        return nil
+    end
+    if ai_pilot_goal.wake_kick_dir == nil then
+        ai_pilot_goal.wake_kick_dir = AI_WHEEL_DOWN
+        ai_pilot_goal.wake_kick_started_t = t
+        return AI_WHEEL_DOWN
+    end
+    if t - ai_pilot_goal.wake_kick_started_t >= AI_PILOT_WAKE_KICK_TIMEOUT_S then
+        if not ai_pilot_goal.wake_kick_tried_up then
+            -- The down tap produced no detectable step -- the ladder's
+            -- own lower rung. Try one tap up instead.
+            ai_pilot_goal.wake_kick_dir = AI_WHEEL_UP
+            ai_pilot_goal.wake_kick_tried_up = true
+            ai_pilot_goal.wake_kick_started_t = t
+            return AI_WHEEL_UP
+        end
+        -- Neither direction produced a detectable step -- give up.
+        ai_pilot_goal.wake_done_seq = ai_pilot_goal.goal_seq
+        ai_pilot_goal.wake_kick_dir = nil
+        ai_pilot_goal.wake_kick_tried_up = false
+        return nil
+    end
+    return "wait"
+end
+
 -- Stage P2a: the altitude goal's own tick. Reuses `ai_pilot_correction_
 -- direction` for the hold-and-poll direction (identical "good enough"
 -- semantics to the takeover correction, plan: "reusing Stage P1's own
@@ -1024,6 +1149,15 @@ local function ai_pilot_goal_tick_altitude(t)
     local held_m = ai_pilot_parse_altitude_text(ai_pilot_alt_text)
     local dir = ai_pilot_correction_direction(
         held_m, ai_pilot_goal.altitude_target_m, AI_PILOT_GOAL_ALT_EXACT_TOLERANCE_M)
+    -- ``BL-B139``: while recovering, a value that already matches the
+    -- target needs a forced kick instead of settling silently -- see
+    -- `ai_pilot_wake_kick_direction_hold`'s own comment. `nil` back
+    -- means "use `dir` as computed above" (no wake requested, already
+    -- done, or the kick/mismatch just got picked up this tick).
+    local kick_dir = ai_pilot_wake_kick_direction_hold(t, dir)
+    if kick_dir ~= nil then
+        dir = kick_dir
+    end
     if dir == nil then
         ai_pilot_goal_release_hold()
         ai_pilot_goal.progress = "settled"
@@ -1042,6 +1176,19 @@ end
 local function ai_pilot_goal_tick_speed(t)
     local dir = ai_pilot_goal_speed_tap_direction(
         ai_pilot_speed_text, ai_pilot_goal.speed_target_kmh)
+    -- ``BL-B139``: same reasoning as the altitude tick above, but a
+    -- single discrete tap per forced direction (`ai_pilot_wake_kick_
+    -- direction_tap`'s own comment) -- `"wait"` means a just-issued
+    -- tap's readback has not arrived yet, so no tap this tick, but
+    -- still "pressing," not settled.
+    local kick_dir = ai_pilot_wake_kick_direction_tap(t, dir)
+    if kick_dir == "wait" then
+        ai_pilot_goal.progress = "pressing"
+        return
+    end
+    if kick_dir ~= nil then
+        dir = kick_dir
+    end
     if dir == nil then
         ai_pilot_goal.progress = "settled"
         return
@@ -1651,6 +1798,21 @@ end
 -- (plan's own note) and needs no such reconciliation: Stage P2b's own
 -- tick already opens/redirects/releases purely from reading the field's
 -- current value each tick, never from an edge detected here.
+
+-- ``BL-B139``'s own bool parse -- `extract_json_string_field`/`_number_
+-- field` (`core.lua`) have no boolean sibling; mirrors `flight_control.
+-- lua`'s own local copy of the same helper (kept local there too, not
+-- promoted to `_G`) rather than inventing a third shape.
+local function extract_json_bool_field(json_text, field_name)
+    if json_text:match("\"" .. field_name .. "\"%s*:%s*true") then
+        return true
+    end
+    if json_text:match("\"" .. field_name .. "\"%s*:%s*false") then
+        return false
+    end
+    return nil
+end
+
 local function handle_ai_pilot_goal_command(data, t)
     local goal_seq = extract_json_number_field(data, "goal_seq")
     if goal_seq == nil then
@@ -1663,6 +1825,14 @@ local function handle_ai_pilot_goal_command(data, t)
     local altitude_target_ref = extract_json_string_field(data, "altitude_target_ref")
     local speed_target_kmh = extract_json_number_field(data, "speed_target_kmh")
     local hvrt_direction = extract_json_string_field(data, "hvrt_direction")
+    -- ``BL-B139``'s own sticky flag -- absent (`nil`, an older body-
+    -- layer or a message that never set it) reads as `false`, same
+    -- "missing means the old behaviour" posture every additive field on
+    -- this channel already takes.
+    local wake = extract_json_bool_field(data, "wake")
+    if wake == nil then
+        wake = false
+    end
     -- `hvrt_step` is a **one-shot trigger**, not sticky state like every
     -- other field here (Stage P2b's own task list, not in the plan's
     -- "wire shape" section -- see `CommandSender.send_ai_pilot_goal`'s
@@ -1689,10 +1859,17 @@ local function handle_ai_pilot_goal_command(data, t)
         ai_pilot_goal.mode_cycle_attempts = 0
         ai_pilot_goal.mode_blocked_since_t = nil
         ai_pilot_goal.toggling_reference = false
+        -- ``BL-B139``: a wake kick in progress for the *previous*
+        -- param must not bleed into the new one -- same reasoning as
+        -- the three resets above, extended to the wake-kick fields.
+        ai_pilot_goal.wake_kick_dir = nil
+        ai_pilot_goal.wake_kick_started_t = nil
+        ai_pilot_goal.wake_kick_tried_up = false
     end
 
     ai_pilot_goal.goal_seq = goal_seq
     ai_pilot_goal.param = param
+    ai_pilot_goal.wake = wake
     ai_pilot_goal.heading_target_deg = heading_target_deg
     ai_pilot_goal.altitude_target_m = altitude_target_m
     ai_pilot_goal.altitude_target_ref = altitude_target_ref

@@ -249,11 +249,15 @@ the body/brain process, on either Windows or Mac (compute topology note in
   "radar"|"barometric"|null, "speed_target_kmh": number|null,
   "hvrt_direction": "left"|"right"|"forward"|"back"|null, "hvrt_step":
   "up"|"down"|null, "cbtm_action": "align"|"align_for_launch"|
-  "break_left"|"break_right"|"break_away"|null, "cbtm_seq": int|null}`
+  "break_left"|"break_right"|"break_away"|null, "cbtm_seq": int|null,
+  "wake": bool}`
   (`cbtm_action`/`cbtm_seq` are Stage P3+P4's own sibling one-shot
   fields, "Revised 2026-11-18" -- same closed-vocabulary/
   act-once-per-distinct-seq contract as `hvrt_step`, see `CommandSender.
-  send_ai_pilot_goal`'s own docstring); forwards to `collector.
+  send_ai_pilot_goal`'s own docstring; `wake`, `[[BL-B139]]`, is optional
+  and defaults `False`, marking a recovery-from-align-for-launch goal so
+  `Export.lua`'s own ticks force a one-step kick instead of settling
+  when the displayed value already matches the target); forwards to `collector.
   command_sender.CommandSender.send_ai_pilot_goal`, which fires the
   JSON command at
   `Export.lua`'s inbound UDP listener (the same listener
@@ -1574,6 +1578,19 @@ def _make_handler(
             else:
                 cbtm_seq = cbtm_seq_raw
 
+            # `[[BL-B139]]` -- the recovery-only wake flag. Optional,
+            # defaults `False` (every pre-existing caller that never
+            # sends it keeps the old no-op-when-already-there
+            # behaviour); a strict bool, same posture every other
+            # closed-vocabulary field on this endpoint already takes.
+            wake_raw = data.get("wake", False)
+            if not isinstance(wake_raw, bool):
+                self._respond_json(
+                    400,
+                    {"error": f"'wake' must be a boolean, got {wake_raw!r}"},
+                )
+                return
+
             try:
                 command_sender.send_ai_pilot_goal(
                     goal_seq_raw,
@@ -1586,6 +1603,7 @@ def _make_handler(
                     hvrt_step,
                     cbtm_action,
                     cbtm_seq,
+                    wake_raw,
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})

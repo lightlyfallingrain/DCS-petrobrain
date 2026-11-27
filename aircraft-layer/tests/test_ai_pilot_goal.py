@@ -82,7 +82,27 @@ class TestSendAiPilotGoal:
                 "hvrt_step": None,
                 "cbtm_action": None,
                 "cbtm_seq": None,
+                "wake": False,
             }
+        finally:
+            receiver.close()
+
+    def test_wake_true_is_forwarded(self) -> None:
+        """`[[BL-B139]]` -- the recovery-only wake flag."""
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(2.0)
+        port = receiver.getsockname()[1]
+
+        try:
+            with CommandSender(host="127.0.0.1", port=port) as sender:
+                sender.send_ai_pilot_goal(
+                    3, "altitude", None, 300.0, "barometric", None, None, wake=True
+                )
+
+            data, _addr = receiver.recvfrom(4096)
+            decoded = json.loads(data.decode("utf-8"))
+            assert decoded["wake"] is True
         finally:
             receiver.close()
 
@@ -158,6 +178,7 @@ class _RecordingCommandSender(CommandSender):
         hvrt_step: object = None,
         cbtm_action: object = None,
         cbtm_seq: object = None,
+        wake: object = False,
     ) -> None:
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
@@ -173,6 +194,7 @@ class _RecordingCommandSender(CommandSender):
                 hvrt_step,
                 cbtm_action,
                 cbtm_seq,
+                wake,
             )
         )
 
@@ -215,7 +237,7 @@ class TestAiPilotGoalCommandEndpoint:
         assert status == 200
         assert body == {"ok": True}
         assert sender.sent == [
-            (1, "heading", 90.0, None, None, None, None, None, None, None)
+            (1, "heading", 90.0, None, None, None, None, None, None, None, False)
         ]
 
     def test_the_idle_message_is_accepted(
@@ -226,7 +248,7 @@ class TestAiPilotGoalCommandEndpoint:
         status, _body = _post(server, "/command/ai_pilot_goal", _IDLE_BODY)
         assert status == 200
         assert sender.sent == [
-            (0, None, None, None, None, None, None, None, None, None)
+            (0, None, None, None, None, None, None, None, None, None, False)
         ]
 
     def test_integer_target_values_are_accepted_and_forwarded_as_floats(
@@ -238,8 +260,34 @@ class TestAiPilotGoalCommandEndpoint:
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
         assert sender.sent == [
-            (1, "heading", 90.0, None, None, None, None, None, None, None)
+            (1, "heading", 90.0, None, None, None, None, None, None, None, False)
         ]
+
+    def test_a_wake_true_message_is_forwarded(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """`[[BL-B139]]` -- `body.py` sets `wake` only while a recovery
+        is underway; this endpoint just forwards whatever boolean it is
+        given, same shape-validation-only posture as every other field
+        here."""
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "wake": True}
+        status, _body = _post(server, "/command/ai_pilot_goal", body)
+        assert status == 200
+        assert sender.sent == [
+            (1, "heading", 90.0, None, None, None, None, None, None, None, True)
+        ]
+
+    def test_a_non_boolean_wake_returns_400(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        body = {**_VALID_BODY, "wake": "yes"}
+        status, _body = _post(server, "/command/ai_pilot_goal", body)
+        assert status == 400
+        assert sender.sent == []
 
     def test_an_hvrt_direction_message_is_accepted(
         self,
@@ -250,7 +298,7 @@ class TestAiPilotGoalCommandEndpoint:
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
         assert sender.sent == [
-            (2, None, None, None, None, None, "left", None, None, None)
+            (2, None, None, None, None, None, "left", None, None, None, False)
         ]
 
     def test_an_invalid_param_returns_400(
@@ -297,7 +345,7 @@ class TestAiPilotGoalCommandEndpoint:
         status, _body = _post(server, "/command/ai_pilot_goal", body)
         assert status == 200
         assert sender.sent == [
-            (3, None, None, None, None, None, None, "up", None, None)
+            (3, None, None, None, None, None, None, "up", None, None, False)
         ]
 
     def test_an_invalid_hvrt_step_returns_400(

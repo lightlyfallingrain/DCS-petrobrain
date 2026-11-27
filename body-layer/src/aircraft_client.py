@@ -505,6 +505,7 @@ class AircraftLayerClient:
             | None
         ) = None,
         cbtm_seq: int | None = None,
+        wake: bool = False,
     ) -> None:
         """`POST /command/ai_pilot_goal` -> sends BL-16 mode 2's goal
         channel message (`plans/flight-control/plan.md`, "Stage P2 ready
@@ -529,7 +530,20 @@ class AircraftLayerClient:
         fields (plan, "Revised 2026-11-18 -- Stages P3+P4 ready to
         build", "The CBTM one-shot wire channel") -- same message, this
         channel's own distinct sequence space, same "act once per
-        distinct seq" contract as `hvrt_step`."""
+        distinct seq" contract as `hvrt_step`.
+
+        `wake` (`[[BL-B139]]`, `docs/acceptance/2026-11-27-mode2-recovery-
+        feedback.md`) marks the message as a recovery-from-align-for-
+        launch goal: ED's AI pilot only reacts to a *change* of its
+        displayed set altitude/speed, so a recovery target that already
+        equals what the overlay shows would otherwise settle with zero
+        presses and never wake the AI up. `body._apply_ai_pilot_wheel_goal`
+        is the one caller that ever passes `True` -- exactly while
+        `ParkedFlightState.align_phase == "recovering"` -- so an ordinary
+        voice goal that happens to match the held value keeps its existing
+        no-op-when-already-there behaviour. `Export.lua`'s own goal ticks
+        are what actually decide and bound the one-step kick; this client
+        only carries the flag."""
         self._post_json(
             "/command/ai_pilot_goal",
             {
@@ -543,6 +557,7 @@ class AircraftLayerClient:
                 "hvrt_step": hvrt_step,
                 "cbtm_action": cbtm_action,
                 "cbtm_seq": cbtm_seq,
+                "wake": wake,
             },
         )
 
