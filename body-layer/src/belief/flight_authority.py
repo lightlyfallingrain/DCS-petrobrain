@@ -23,6 +23,7 @@ channel, not built here."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -63,9 +64,19 @@ def _as_optional_str(value: object) -> str | None:
 
 
 def _as_optional_float(value: object) -> float | None:
+    """A non-finite wire value (`NaN`/`Infinity`/`-Infinity`) degrades
+    to `None` -- "nothing received yet this part" -- rather than
+    carrying forward a value that later comparisons/`int()` calls
+    cannot handle (root `CLAUDE.md`'s standing finite-float rule; this
+    boundary's own case, `[[BL-16]] security review`: an unguarded
+    `NaN` reaching `decide_carried_value_speech`'s `int(flown_alt)`
+    raised `ValueError` and skipped the rest of that poll)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        return None
+    return result
 
 
 def _as_optional_int(value: object) -> int | None:

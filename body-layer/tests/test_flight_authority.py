@@ -150,6 +150,53 @@ class TestAdvanceFlightAuthority:
         assert state.hdg_true_deg == pytest.approx(355.0)
         assert state.hdg_mag_deg == pytest.approx(359.93212)
 
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    @pytest.mark.parametrize(
+        "field", ["fd_alt", "fd_ias", "fd_heading", "fd_turn_rate"]
+    )
+    def test_a_non_finite_wire_value_degrades_to_none(
+        self, server_with_sample: str, field: str, bad: float
+    ) -> None:
+        """Security review, `plans/flight-lift-vector/security.md`
+        Required Fix 1: a LAN peer answering `GET /flight_desired/
+        latest` with a non-standard `NaN`/`Infinity` literal (which
+        Python's `json.loads` accepts by default) must not reach belief
+        state as a value -- it degrades to `None`, the same "nothing
+        received yet" state a missing field already gets, rather than
+        carrying a non-finite float into a later `clamp_*`/`int()`
+        call."""
+        _Handler.sample = dict(_Handler.sample or {})
+        _Handler.sample[field] = bad
+        client = AircraftLayerClient(base_url=server_with_sample)
+        state = advance_flight_authority(FlightAuthorityState(), client)
+        attr = {
+            "fd_alt": "alt_m",
+            "fd_ias": "ias_kmh",
+            "fd_heading": "heading_deg",
+            "fd_turn_rate": "turn_rate_deg_s",
+        }[field]
+        assert getattr(state, attr) is None
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    @pytest.mark.parametrize("field", ["fd_hdg_true_deg", "fd_hdg_mag_deg"])
+    def test_a_non_finite_degree_field_degrades_to_none(
+        self, server_with_sample: str, field: str, bad: float
+    ) -> None:
+        """Same guard, for the `_as_optional_degrees_0_360` wrapper --
+        `NaN % 360.0`/`inf % 360.0` are themselves non-finite (`NaN`),
+        so without the guard this field would carry a `NaN` degree
+        forward into belief state; it must degrade to `None` same as
+        the plain float fields above."""
+        _Handler.sample = dict(_Handler.sample or {})
+        _Handler.sample[field] = bad
+        client = AircraftLayerClient(base_url=server_with_sample)
+        state = advance_flight_authority(FlightAuthorityState(), client)
+        attr = {
+            "fd_hdg_true_deg": "hdg_true_deg",
+            "fd_hdg_mag_deg": "hdg_mag_deg",
+        }[field]
+        assert getattr(state, attr) is None
+
 
 class TestDecideFlightSpeech:
     def test_no_mode_n_on_either_side_is_a_no_op(self) -> None:
