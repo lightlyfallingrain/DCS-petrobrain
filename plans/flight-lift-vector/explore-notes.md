@@ -345,3 +345,7 @@ controls to the player from any mode**, H, K, T, B ON — already built (`contro
 never uses the SAU (no trim, no stage 2). The main loop's mode-2 concern above is answered: ED's AI
 does not use the SAU.
 
+**SAU switch timing (user, verbatim, 2026-11-28):** *"for the SAU channel on/off changes, do not
+wait between them, just turn all on right away. (referring to the general rule of 1 s between
+effector writes, this case is exception.)"* — applies to both the take-side (off) and hand-back
+(on) SAU rows; the ~1 s default spacing stays for every other sequence.
