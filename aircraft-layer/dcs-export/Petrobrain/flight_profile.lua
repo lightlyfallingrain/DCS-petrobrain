@@ -261,6 +261,51 @@ M.PROFILES["Mi-24P"] = {
     -- enforced here) -- none of the three ever travels the wire or
     -- enters `flight_control.lua`'s own `FC_LIMIT_BOUNDS`.
     --
+    -- Shaper bandwidth for a break's heading-rate step (B) -- fix pass
+    -- after `review-lv2.md` required fix 1. The break's own bank/rate
+    -- cap (`break_max_bank_deg`, below) was built correctly but, as
+    -- first shipped, reused the *ordinary* `omega_heading` (0.3) for
+    -- the closed-loop shaper feeding it -- a critically-damped 2nd-
+    -- order step response peaks at `err*omega/e`, independent of speed
+    -- and of any ceiling above that peak, so a bare 90 deg break error
+    -- only ever drove the rate to ~9.95 deg/s regardless of
+    -- `break_max_bank_deg`, never reaching the cap. `break_omega_
+    -- heading` is a second, break-only bandwidth so the cap has
+    -- something to actually cap. `zeta` (`law_zeta`, below) is shared
+    -- and unchanged, so the SHAPER's own reference (`r_ref`/`psi_ref`)
+    -- is still critically damped -- zero overshoot by construction,
+    -- confirmed numerically for a bare 90 deg and 180 deg step at this
+    -- bandwidth, independent of the cap. First cut **1.0 rad/s**: its
+    -- own natural peak rate for a 90 deg error (`90*1.0/e` ~= 33.1
+    -- deg/s) exceeds every card speed's bank-derived cap (~14-29 deg/s,
+    -- see `break_max_bank_deg` below), so the cap binds at (120 km/h,
+    -- ~97%) to fully (180/250 km/h) rather than being inert, and the
+    -- pre-existing 40 deg/s override ceiling (`BREAK_TURN_RATE_DEG_S`)
+    -- binds the same way below ~88 km/h where the bank cap does not.
+    -- Ordinary (non-break) heading flight is untouched -- `omega_
+    -- heading` is read unchanged whenever `state.rate_override_deg_s`
+    -- is nil.
+    --
+    -- **Known residual, measured not assumed** (fix-pass toy-plant run
+    -- through the REAL heading error, with the toy plant's own first-
+    -- order bank lag -- `TestBreakTurnChannel`'s/`TestLV2BreakTurnRate
+    -- AndOvershoot`'s own closed loop, not this comment's idealized
+    -- `r_ref`/`psi_ref` math above): the real (lagged) heading
+    -- overshoots the break's own target by ~5.4-5.5 deg at 120/180/250
+    -- km/h for a 90 deg break (single overshoot-and-settle, not
+    -- sustained ringing -- at most 2 zero-crossings of the error, never
+    -- more), growing to ~7-10 deg for a 180 deg break-away, because the
+    -- aircraft's own bank cannot reverse instantly once the shaper
+    -- starts decelerating. This is a property of flying the turn
+    -- *faster* (any `break_omega_heading` above ~0.5 shows it, growing
+    -- with the bandwidth), not a defect this amendment's zeta=1 shaper
+    -- introduces -- the ordinary (slow) case never showed it only
+    -- because it never turns fast enough to expose it. Not fixed here
+    -- (would need a lookahead/anticipation term, out of this fix
+    -- pass's scope); flagged on the LV-2 card's own "roll-out on the
+    -- break heading" watch line for a live read against this measured
+    -- figure.
+    break_omega_heading = 1.0,
     -- Bank cap for a break's heading-rate step (B) -- reuses `law_turn_
     -- rate_at_bank`, the same function the ordinary continuous-turn
     -- branch already calls with `limits.max_turn_bank_deg`, with this
@@ -274,10 +319,20 @@ M.PROFILES["Mi-24P"] = {
     -- ~2.37 G for the whole turn, above the user's own "about 2 G"
     -- (2026-11-27 explore). At 60 deg the cap still binds at all three
     -- card speeds (`atan(w*V/g)` needs 67/74/79 deg for a bare 40 deg/s
-    -- at those speeds, all above 60) -- steady rate at the cap is
-    -- ~32/21/15 deg/s (90 deg in ~2.8/4.3/6.0 s). Below ~88 km/h a bare
-    -- 40 deg/s needs less than 60 deg of bank, so the cap stops binding
-    -- there (the card's own "cap not binding" row).
+    -- at those speeds, all above 60) -- the idealized shaper's own
+    -- steady rate at the cap, now that `break_omega_heading` (above)
+    -- actually drives `r_ref` up to it, is ~29.2/19.5/14.0 deg/s (90
+    -- deg in ~4.5/5.6/7.0 s) -- the fix pass's own toy-plant numbers,
+    -- replacing the ~32/21/15 deg/s (~2.8/4.3/6.0 s) figure this
+    -- comment carried before the shaper-bandwidth gap was found; that
+    -- figure assumed the cap bound instantly, which it did not until
+    -- the fix above. The REAL closed loop (with bank lag, see `break_
+    -- omega_heading`'s own "known residual" note) reaches bank ~56/63/
+    -- 64 deg and 90% of the turn in ~5.4/6.2/7.3 s at 120/180/250 km/h.
+    -- Below ~88 km/h a bare 40 deg/s needs less than 60 deg of bank, so
+    -- the cap stops binding there (the card's own "cap not binding"
+    -- row) -- the 40 deg/s override ceiling itself still binds
+    -- promptly at the new bandwidth.
     break_max_bank_deg = 60.0,
     -- Break-only safety floor (D) -- 50.0 m AGL, replacing `fc_limits.
     -- floor_agl_m` (40.0, unchanged) only in the break-floor clamp

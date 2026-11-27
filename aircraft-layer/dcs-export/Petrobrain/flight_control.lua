@@ -912,9 +912,25 @@ local function law_update(state, dt, measured, limits, profile)
         -- `law_turn_rate_at_bank` is reused, the same function the
         -- ordinary continuous-turn branch above already calls with a
         -- different bank argument -- not a new formula.
+        --
+        -- LV-2 fix pass (review-lv2.md required fix 1): the cap above
+        -- was built correctly but, as shipped, almost never binds --
+        -- the `a_ref` formula below is the SAME critically-damped
+        -- shaper the ordinary (non-break) case uses, and at
+        -- `omega_heading` (0.3) its own natural peak rate for a 90 deg
+        -- step (`err*omega/e`, independent of any ceiling once the
+        -- ceiling exceeds it) is ~9.95 deg/s at every speed -- well
+        -- under the break_max_bank_deg-derived cap (~14-29 deg/s at
+        -- 120-250 km/h), so nothing ever drove `r_ref` far enough to
+        -- reach it. A break needs its own, faster shaper bandwidth so
+        -- the cap this section builds has something to actually cap --
+        -- `break_omega_heading`, used only while a break is active,
+        -- `zeta` unchanged (still critically damped, no overshoot).
+        local omega_heading = profile.omega_heading
         local rate_limit = r_max > 0.0 and r_max or 30.0
         local accel_limit = heading_accel_cap
         if state.rate_override_deg_s ~= nil then
+            omega_heading = profile.break_omega_heading
             rate_limit = math.min(
                 math.abs(state.rate_override_deg_s),
                 law_turn_rate_at_bank(profile.break_max_bank_deg, measured.v_t_mps))
@@ -941,8 +957,8 @@ local function law_update(state, dt, measured, limits, profile)
             rate_limit = math.max(rate_limit, math.abs(state.r_ref))
         end
         local err = law_wrap180(state.heading_goal_deg - state.psi_ref)
-        local a_ref = profile.omega_heading * profile.omega_heading * err
-            - 2.0 * profile.law_zeta * profile.omega_heading * state.r_ref
+        local a_ref = omega_heading * omega_heading * err
+            - 2.0 * profile.law_zeta * omega_heading * state.r_ref
         a_ref = law_clamp(a_ref, -accel_limit, accel_limit)
         next_state.r_ref = law_clamp(state.r_ref + a_ref * dt, -rate_limit, rate_limit)
         next_state.psi_ref = law_wrap360(state.psi_ref + next_state.r_ref * dt)

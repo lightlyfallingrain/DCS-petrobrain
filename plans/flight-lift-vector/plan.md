@@ -1405,3 +1405,49 @@ every card speed, so a break sits at ~2.37 G for seconds, above the user's own *
 **`break_max_bank_deg` first cut is 60° (2.0 G)**, not 65°, matching the user's figure; still a
 `flight_profile.lua` tunable the card measures. Steady rate at 60°: ~32 / 21 / 15°/s at 120 / 180 /
 250 km/h. Where this section says 65°, read 60°.
+
+### LV-2 fix pass (2026-11-27, `review-lv2.md` required fix 1) — "Effect, by speed" corrected
+
+The two paragraphs above (and this section's own "steady rate at 60°: ~32/21/15°/s" figure) assumed
+the bank/rate cap bound as soon as a break was commanded. It did not: section B's `rate_limit` was
+correctly capped, but the `a_ref` formula feeding `r_ref` toward it reused the *ordinary*
+`omega_heading` (0.3) — a critically-damped 2nd-order step response peaks at `err·ω/e`, independent
+of speed and of any ceiling above that peak, so a bare 90° break error only ever drove the rate to
+~9.95°/s at every speed, regardless of `break_max_bank_deg`. The cap this section built had,
+almost always, nothing to cap (full finding and the measured numbers: `review-lv2.md`).
+
+**Fix, same scope as section B, no new mechanism**: a second, break-only shaper bandwidth,
+`break_omega_heading` (first cut **1.0 rad/s** — its own natural peak rate for a 90° error,
+`90·1.0/e ≈ 33.1°/s`, exceeds every card speed's bank-derived cap, ~14–29°/s, so the cap now binds
+at 120 km/h to ~97% and fully at 180/250 km/h), used only while `state.rate_override_deg_s ~= nil`
+(the same test section B's own `rate_limit`/`accel_limit` selection already uses). `zeta` is
+unchanged and shared — the shaper's own reference (`r_ref`/`psi_ref`) stays critically damped, zero
+overshoot by construction, confirmed numerically independent of the cap. Ordinary (non-break)
+heading flight reads `omega_heading` exactly as before — bit-identical, confirmed by the full
+pre-existing regression suite and a new pinned test.
+
+**Real numbers, toy-plant (closed loop through the real heading error, shipped profile), replacing
+the two paragraphs above**:
+
+| speed | 90° break: peak bank / 90%-of-turn time | ordinary 90° turn (unaffected) | 90° break overshoot | 180° break-away overshoot |
+|---|---|---|---|---|
+| 120 km/h | ~56° / ~5.4 s | ~23° / ~15.4 s | ~5.5° | ~10.1° |
+| 180 km/h | ~63° / ~6.2 s | ~23° / ~20.9 s | ~5.4° | ~8.9° |
+| 250 km/h | ~64° / ~7.3 s | ~23° / ~28.1 s | ~5.4° | ~6.9° |
+
+The break is genuinely faster than before at every speed (previously it was not — both pre-fix
+break and ordinary turns converged on the same ~10°/s shaper-limited peak) and now actually flies
+close to the 60° bank cap rather than well under it.
+
+**Known residual, not fixed by this pass, flagged for the card and for the user**: the real
+(lagged) heading overshoots the break's own target by ~5.4–5.5° for a 90° break and ~7–10° for a
+180° break-away, because the aircraft's own bank cannot reverse instantly once the shaper starts
+decelerating — a single overshoot-and-settle (confirmed by zero-crossing count, never more than
+one reversal), not sustained oscillation, but not the "no overshoot" this section's own earlier
+text assumed either. This is a property of flying the turn *faster* (present at any
+`break_omega_heading` above ~0.5, growing with the bandwidth) — the SHAPER's own reference is still
+overshoot-free by design (zeta=1); it is the toy plant's own first-order bank lag, reached once the
+break is fast enough to expose it, that overshoots. Not addressed here (would need a lookahead/
+anticipation term ahead of the deceleration, a separate mechanism, out of this one-constant fix's
+scope) — added to the LV-2 card's own "roll-out on the break heading" watch line for a live read
+against these measured figures.

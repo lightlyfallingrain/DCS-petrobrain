@@ -148,6 +148,11 @@ local PROFILE = {
     break_max_bank_deg = 60.0,
     break_floor_agl_m = 50.0,
     break_height_give_band_m = 30.0,
+    -- LV-2 fix pass (review-lv2.md required fix 1) -- break-only
+    -- shaper bandwidth so `break_max_bank_deg`'s own cap, above, is
+    -- actually reached. Shipped value (`flight_profile.lua`), not a
+    -- placeholder.
+    break_omega_heading = 1.0,
     k_lift_ff = 0.05,
     k_collective = 0.08,
     theta_min_deg = -15.0,
@@ -641,27 +646,27 @@ class TestBreakTurnChannel:
     plan's own hand-derived worked example ("150 km/h, 40 deg/s -> ~71
     deg; 220 km/h, 40 deg/s -> ~76 deg").
 
-    **Measured finding, not asserted as a bound here**: running this
-    exact mechanism through the toy plant does not reach that 60-80 deg
+    **Superseded by the LV-2 fix pass (review-lv2.md required fix 1,
+    2026-11-27)**: this originally read, verbatim, "running this exact
+    mechanism through the toy plant does not reach that 60-80 deg
     window -- 150 km/h settles around ~43 deg of bank, 220 km/h around
-    ~54 deg (both measured against this suite's run). The plan's own
-    hand-derivation assumes the commanded rate (`turn_rate_deg_s`, 40)
-    is actually reached; it is not, here, because the heading-mode
-    shaper's `OMEGA_HEADING` (0.3, an explicitly unmeasured placeholder)
-    critically damps the rate well below that ceiling for a 90 deg
-    error (a 2nd-order critically-damped step response peaks near
-    `E*omega/e`, independent of `rate_limit` once `rate_limit` exceeds
-    that natural peak) -- the override *raises the ceiling*, but
-    nothing in this mechanism drives the rate up *to* it for an error
-    this size. The bank reached is still well past the ordinary 20 deg
-    turn-bank ceiling (`max_turn_bank_deg`), and part of the margin
-    above the pure-kinematic rate prediction comes from `phi_i`'s own
-    unclamped growth (the plan's own named Risk: "Integrator windup in
-    `phi_i`... deliberately not fixed this batch"). So: these tests
-    assert the qualitative properties Decision 27 promises (steeper
-    than an ordinary turn, converges, settling clears the override),
-    not the plan's specific 60-80 deg figure -- flagged for Flight M-A's
-    retune, same as every other placeholder gain in this module."""
+    ~54 deg... because the heading-mode shaper's `OMEGA_HEADING` (0.3)
+    critically damps the rate well below [the override] ceiling... for
+    an error this size." That measurement was real but mechanism-wide,
+    not specific to this test: the LV-2 amendment's own bank/rate cap
+    (`break_max_bank_deg`) relied on this same shaper to ever reach it
+    and, as first shipped, almost never did (the finding that drove the
+    fix pass). With the fix (a break-only shaper bandwidth, `break_
+    omega_heading` = 1.0), this file's own run now measures ~60 deg at
+    150 km/h and ~64 deg at 220 km/h -- close to the plan's own 60-80 deg
+    window, since the break now actually flies to its own bank cap (60
+    deg) rather than being held well under it by an unrelated shaper
+    slowness; the margin above 60 is `phi_i`'s own unclamped growth
+    (the plan's own named Risk: "Integrator windup in `phi_i`...
+    deliberately not fixed this batch"), still present and still
+    unaddressed. These tests assert the qualitative properties Decision
+    27 promises (steeper than an ordinary turn, converges, settling
+    clears the override), not an exact figure."""
 
     def test_150_kmh_break_is_much_steeper_than_an_ordinary_turn_and_settles(
         self,
@@ -2669,21 +2674,25 @@ class TestLV2BreakBankRateCap:
     `law_turn_rate_at_bank(profile.break_max_bank_deg, v_t)` whenever
     that bank-derived rate is lower. Tested directly against `law_
     update`'s own one-frame clamp (`law_clamp(state.r_ref + a_ref*dt,
-    -rate_limit, rate_limit)`), not the full closed-loop toy plant --
-    `TestBreakTurnChannel`'s own docstring already measured that this
-    mechanism's heading-mode shaper (critically damped, `omega_heading`
-    = 0.3) peaks at ~10 deg/s for a 90 deg step error, never approaching
-    any rate ceiling in that scenario at all, so neither the old 40
-    deg/s ceiling nor this amendment's bank cap can be observed through
-    bank growth. Seeding `state.r_ref` directly at a rate the clamp
-    must act on in one frame (via `law_init_at_take`'s own `seed.r_deg_
-    s` -> `r_ref` path, the same technique `TestUnparkMidTurnRateNever
-    SlammedToTheOrdinaryCeiling` uses) isolates the clamp itself from
-    the shaper's own unrelated slowness. Uses the shipped `flight_
-    profile.lua` (`break_max_bank_deg` = 60.0) via `dofile`, per
-    `feedback_toy_plant_test_profile_must_match_shipped_values.md` --
-    this amendment's own first-cut number is exactly what the cap/no-
-    cap split below depends on."""
+    -rate_limit, rate_limit)`), not the full closed-loop toy plant.
+    Historically (before the LV-2 fix pass, review-lv2.md required fix
+    1) `TestBreakTurnChannel`'s own docstring measured that this
+    mechanism's heading-mode shaper, at the ordinary `omega_heading`
+    (0.3) it still used for a break back then, peaked at ~10 deg/s for
+    a 90 deg step error -- never approaching any rate ceiling, so
+    neither the old 40 deg/s ceiling nor this amendment's bank cap
+    could be observed through bank growth, which is why this class
+    seeds `state.r_ref` directly instead. With the fix pass's `break_
+    omega_heading` the full closed-loop toy plant now DOES drive the
+    rate up to these same ceilings (`TestBreakTurnChannel`'s own
+    docstring, updated) -- this class's seeded-`r_ref` technique still
+    isolates the one-frame clamp cleanly and needs no change, it is
+    simply no longer the *only* way to observe the cap. Uses the
+    shipped `flight_profile.lua` (`break_max_bank_deg` = 60.0,
+    `break_omega_heading` = 1.0) via `dofile`, per `feedback_toy_plant_
+    test_profile_must_match_shipped_values.md` -- this amendment's own
+    first-cut numbers are exactly what the cap/no-cap split below
+    depends on."""
 
     @staticmethod
     def _rate_after_one_break_frame(kmh: float) -> tuple[float, float]:
@@ -2721,21 +2730,37 @@ print(string.format("%.9f", expected_bank_cap_rate))
         assert expected_cap < 40.0  # confirms the bank cap is the binding one
         assert abs(r_after - expected_cap) < 1e-6
 
-    def test_cap_does_not_bind_below_88_kmh_leaving_the_seeded_rate_untouched(
+    def test_cap_does_not_bind_below_88_kmh_leaving_the_rate_free_to_move(
         self,
     ) -> None:
         """At 70 km/h, a bare 40 deg/s needs only ~50 deg of bank --
         under `break_max_bank_deg` (60) -- so the bank cap exceeds the
         override's own 40 deg/s ceiling and never binds; the seeded 38
-        deg/s (already below both) is left to the ordinary heading-
-        error dynamics, not clamped toward either ceiling in one
-        frame."""
+        deg/s is left to the ordinary heading-error dynamics, not
+        clamped toward either ceiling in one frame.
+
+        LV-2 fix pass (review-lv2.md required fix 1): before
+        `break_omega_heading` existed, the heading-mode shaper's own
+        `omega_heading` (0.3) moved the seeded rate by well under 1
+        deg/s in one frame, so "close to the seeded 38" was this test's
+        proxy for "not clamped." With the break's own faster bandwidth
+        (1.0) that proxy no longer holds -- the shaper's own pull *is*
+        the point of this fix pass -- so this asserts the real property
+        instead: `r_ref` moves toward the goal by the shaper's own
+        (unclamped -- `a_ref = 1.0^2*90 - 2*1*1.0*38 = 14 deg/s^2`,
+        under the 20 deg/s^2 roll-in accel limit) one-frame step,
+        landing strictly between the seeded rate and the override
+        ceiling (40), never equal to either ceiling -- the "not hard-
+        clamped" property this test actually names."""
         r_after, expected_cap = self._rate_after_one_break_frame(70.0)
         assert (
             expected_cap > 40.0
         )  # bank cap would allow MORE than the override ceiling
-        # Not slammed toward any ceiling -- still close to the seeded 38.
-        assert abs(r_after - 38.0) < 1.0
+        # Moved toward the goal by the shaper's own (unclamped) pull,
+        # not slammed to either ceiling (40 deg/s override, ~50 deg/s
+        # bank cap).
+        assert 38.0 < r_after < 40.0
+        assert abs(r_after - 38.7) < 1e-6  # 38 + (90 - 2*38) * 0.05
 
 
 class TestLV2HeightGivesFirst:
@@ -2870,6 +2895,202 @@ print(string.format("%.6f", min_h_ref))
         # this bound.
         assert min_h_ref >= 50.0 - 1e-6
         assert min_h_ref < 55.0
+
+
+#: LV-2 fix pass (review-lv2.md required fix 1) -- the real closed-loop
+#: toy plant (bank lag via a first-order filter on `phi_d`, same shape
+#: `_BREAK_PLANT_DRIVER`/`_HEADING_PLANT_DRIVER` already use), reading
+#: `break_omega_heading`/`break_max_bank_deg` from the SHIPPED `flight_
+#: profile.lua` via `dofile` (not this file's own hand-maintained
+#: `_PROFILE`), per `feedback_toy_plant_test_profile_must_match_shipped_
+#: values.md` -- this fix pass's own first-cut number is exactly what
+#: these tests depend on. Tracks the SIGNED cumulative turn (`sum(r*dt)`
+#: against a `target` the caller states), not the wrapped `psi_deg`, so
+#: an exact-antipodal (180 deg break-away) goal's own direction tie
+#: (`law_wrap180(180)` deterministically resolves to -180) never trips a
+#: modulo artifact -- a first draft of this test measured the wrapped
+#: `psi_deg` directly and got a nonsensical ~180 deg "overshoot" from
+#: exactly this.
+_LV2_CLOSED_LOOP_DRIVER = """
+local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { heading_deg = {goal}, turn_rate_deg_s = {rate} }, LIMITS, PROFILE)
+local dt = 0.05
+local tau = 1.0
+local max_bank = 0.0
+local delta = 0.0
+local max_abs_delta = 0.0
+local t90 = -1.0
+local crossings = 0
+local last_sign = 0
+local target = {target}
+for i = 1, {steps} do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt / tau)
+    measured.a_r = 9.81 * math.tan(math.rad(measured.bank_deg))
+    measured.p_deg_s = (state.phi_d - measured.bank_deg) / tau
+    local r = flight_control.law_turn_rate_at_bank(measured.bank_deg, measured.v_t_mps)
+    delta = delta + r * dt
+    measured.psi_deg = (measured.psi_deg + r * dt) % 360.0
+    measured.r_deg_s = r
+    if math.abs(measured.bank_deg) > max_bank then max_bank = math.abs(measured.bank_deg) end
+    if math.abs(delta) > max_abs_delta then max_abs_delta = math.abs(delta) end
+    if t90 < 0.0 and math.abs(delta) >= 0.9 * math.abs(target) then t90 = i * dt end
+    local err_sign_val = math.abs(delta) - math.abs(target)
+    local sign = 0
+    if err_sign_val > 0.01 then sign = 1 elseif err_sign_val < -0.01 then sign = -1 end
+    if sign ~= 0 then
+        if last_sign ~= 0 and sign ~= last_sign then crossings = crossings + 1 end
+        last_sign = sign
+    end
+end
+print(string.format("%.6f %.6f %.6f %d", max_bank, max_abs_delta - math.abs(target), t90, crossings))
+""".replace("{profile_path}", str(_FLIGHT_PROFILE_LUA))
+
+
+class TestLV2BreakShaperBandwidth:
+    """LV-2 fix pass (review-lv2.md required fix 1) -- `break_omega_
+    heading` gives the break its own heading-rate shaper bandwidth so
+    `break_max_bank_deg`'s own cap (section B) is actually reached
+    through the REAL heading error, not a seeded `r_ref`
+    (`TestLV2BreakBankRateCap`'s own technique, still valid for
+    isolating the one-frame clamp, but no longer the only way to
+    observe the cap). Uses the shipped `flight_profile.lua` (`break_
+    omega_heading` = 1.0, `break_max_bank_deg` = 60.0) via `dofile`.
+
+    **Known, measured residual -- said here, not hidden**: because the
+    real bank cannot reverse instantly once the shaper starts
+    decelerating, the real (lagged) heading overshoots the break's own
+    target once the break flies fast enough for the cap to matter --
+    `break_omega_heading`'s own comment in `flight_profile.lua` carries
+    the measured figures (~5.4-5.5 deg for a 90 deg break, ~7-10 deg for
+    a 180 deg break-away, at 120/180/250 km/h) and the reasoning (a
+    property of flying the turn faster, not a defect this fix pass's
+    zeta=1 shaper introduces -- the SHAPER's own reference, `r_ref`/
+    `psi_ref`, is still critically damped and overshoots nothing; the
+    toy plant's own bank lag is what overshoots). The bound these tests
+    assert (15 deg, well above the measured figures) is deliberately
+    generous -- it exists to catch a regression toward unbounded
+    ringing, not to re-assert the measured number as a magic constant."""
+
+    @staticmethod
+    def _run_closed_loop(
+        kmh: float,
+        goal_deg: float,
+        rate: float | None,
+        target: float,
+        steps: int = 3000,
+    ) -> tuple[float, float, float, int]:
+        driver = (
+            _LV2_CLOSED_LOOP_DRIVER.replace("{goal}", str(goal_deg))
+            .replace("{rate}", "nil" if rate is None else str(rate))
+            .replace("{target}", str(target))
+            .replace("{steps}", str(steps))
+            .replace(
+                "{measured}",
+                _measured(psi_deg=0.0, ias_mps=kmh / 3.6, v_t_mps=kmh / 3.6),
+            )
+        )
+        lines = _run(driver)
+        max_bank, overshoot, t90, crossings = lines[0].split()
+        return float(max_bank), float(overshoot), float(t90), int(crossings)
+
+    @pytest.mark.parametrize(
+        "kmh,expected_cap", [(120.0, 29.2), (180.0, 19.5), (250.0, 14.0)]
+    )
+    def test_cap_binds_through_the_real_heading_error_not_a_seeded_r_ref(
+        self, kmh: float, expected_cap: float
+    ) -> None:
+        """At each card speed the break reaches a bank close to `break_
+        max_bank_deg` (60 deg) -- not the ~22-23 deg an ordinary turn's
+        own `max_turn_bank_deg` (20) would cap it at, and nowhere near
+        the pre-fix finding (review-lv2.md: "peak rate ~9.95 deg/s at
+        every speed", which kinematically never gets past ~30-51 deg of
+        bank). `expected_cap` (the bank-derived rate the hard clamp
+        would allow) is informational here, confirming which ceiling is
+        in play at this speed -- the assertion is on the bank actually
+        reached."""
+        max_bank, _overshoot, _t90, _crossings = self._run_closed_loop(
+            kmh, goal_deg=90.0, rate=40.0, target=90.0
+        )
+        assert (
+            max_bank > 55.0
+        )  # close to the 60 deg cap, not the 20 deg ordinary ceiling
+        assert max_bank < 70.0  # not runaway past the cap plus phi_i's own known margin
+
+    @pytest.mark.parametrize("kmh", [120.0, 180.0, 250.0])
+    def test_break_is_faster_than_an_ordinary_turn_at_the_same_speed(
+        self, kmh: float
+    ) -> None:
+        """Time to 90% of the commanded turn -- the card's own pass/
+        fail framing ("brisk... fast turn rate") -- is far shorter for
+        a break than for an ordinary heading change at the same speed,
+        at every card speed (review-lv2.md's own finding was that this
+        was NOT true as first shipped, both reaching the same ~10 deg/s
+        shaper-limited peak)."""
+        _max_bank_break, _overshoot, t90_break, _crossings = self._run_closed_loop(
+            kmh, goal_deg=90.0, rate=40.0, target=90.0
+        )
+        _max_bank_ord, _overshoot_ord, t90_ordinary, _crossings_ord = (
+            self._run_closed_loop(kmh, goal_deg=90.0, rate=None, target=90.0)
+        )
+        assert t90_break > 0.0
+        assert t90_ordinary > 0.0
+        assert t90_break < 0.5 * t90_ordinary
+
+    @pytest.mark.parametrize("kmh", [120.0, 180.0, 250.0])
+    def test_90_degree_break_settles_with_no_sustained_oscillation(
+        self, kmh: float
+    ) -> None:
+        """A single overshoot-and-settle (at most 2 zero-crossings of
+        the heading error against the target), never repeated ringing,
+        and the overshoot itself stays well inside a generous bound --
+        this does not assert zero overshoot (the toy plant's own bank
+        lag makes a few degrees of overshoot a measured, documented
+        property of flying the turn this much faster, see this class's
+        own docstring), only that it is bounded and single-shot."""
+        _max_bank, overshoot, _t90, crossings = self._run_closed_loop(
+            kmh, goal_deg=90.0, rate=40.0, target=90.0
+        )
+        assert crossings <= 2
+        assert 0.0 <= overshoot < 15.0
+
+    @pytest.mark.parametrize("kmh", [120.0, 180.0, 250.0])
+    def test_180_degree_break_away_settles_with_no_sustained_oscillation(
+        self, kmh: float
+    ) -> None:
+        """Same property as the 90 deg break, for a break-away (`axes_
+        break_away`'s own 180 deg target) -- the longer time at/near the
+        bank cap (section B) gives the bank lag more time to carry the
+        heading past the target before the shaper's own deceleration
+        catches up, so this bound is wider (25 deg) than the 90 deg
+        case's, not because the mechanism is different, but because it
+        runs longer at full rate."""
+        _max_bank, overshoot, _t90, crossings = self._run_closed_loop(
+            kmh, goal_deg=180.0, rate=40.0, target=180.0
+        )
+        assert crossings <= 2
+        assert 0.0 <= overshoot < 25.0
+
+    def test_ordinary_heading_change_is_bit_identical_to_before_this_fix_pass(
+        self,
+    ) -> None:
+        """LV-1 regression: `omega_heading` (not `break_omega_heading`)
+        still governs an ordinary heading command (`state.rate_override_
+        deg_s == nil`) -- pinned against this exact run's own measured
+        value (120 km/h, 90 deg goal) rather than re-derived by hand, so
+        a future change that accidentally reads `break_omega_heading`
+        for the ordinary case fails this test instead of passing it
+        silently."""
+        max_bank, overshoot, t90, crossings = self._run_closed_loop(
+            120.0, goal_deg=90.0, rate=None, target=90.0
+        )
+        assert abs(max_bank - 22.842) < 0.01
+        assert abs(overshoot - (-0.019)) < 0.01
+        assert abs(t90 - 15.35) < 0.05
+        assert crossings == 0
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:
