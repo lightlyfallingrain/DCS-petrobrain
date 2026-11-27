@@ -1029,12 +1029,6 @@ local function law_update(state, dt, measured, limits, profile)
     local n_d = law_lift_length_g(a_f_d, a_r_d, a_u_d)
     local e_u = a_u_d - a_u
     local c_dot_nominal = profile.k_collective * e_u
-    -- Sortie 2026-11-20, user, verbatim: "Slowing down is always pitch
-    -- back and also less collective" -- a rule for the speed channel
-    -- generally, not only while the lift length is capped (section G).
-    if a_f_d < 0.0 then
-        c_dot_nominal = c_dot_nominal - profile.k_collective_speed_give * math.abs(a_f_d)
-    end
     local collective_saturated = state.u_c >= 0.999 or state.u_c <= -0.999
     local blade_stall_limited = ias_kmh
         >= (limits.retreating_blade_stall_ias_kmh - profile.retreating_blade_stall_margin_kmh)
@@ -1047,7 +1041,29 @@ local function law_update(state, dt, measured, limits, profile)
     -- climb goal) walk straight through the RPM-floor/blade-stall/
     -- pedal-limit guards via the feed-forward term instead.
     local u_c_ff = profile.k_lift_ff * (n_d - 1.0)
-    local u_c_candidate = u_c_ff + state.u_c_i + c_dot_nominal * dt
+    -- Sortie 2026-11-20, user, verbatim: "Slowing down is always pitch
+    -- back and also less collective" -- a rule for the speed channel
+    -- generally, not only while the lift length is capped (section G).
+    -- Debug-2026-11-27 (`plans/flight-lift-vector/debug-2026-11-27.md`):
+    -- this used to bias `c_dot_nominal`, a RATE, so it integrated into
+    -- `state.u_c_i` for as long as a deceleration was commanded --
+    -- several seconds -- and outweighed the vertical loop's own `e_u`
+    -- term, which only grows once altitude has already sagged (a
+    -- commanded decel was losing ~100 m). It is now a bounded, value-
+    -- level feed-forward nudge recomputed fresh every frame from the
+    -- *current* deceleration demand (capped, so a feedback spike in
+    -- `a_f_d` cannot push it past its own bound) rather than integrated,
+    -- added alongside `u_c_ff` the same way `u_c_ff` itself already is:
+    -- the vertical loop's `e_u` integrator (`u_c_i`) still fully holds
+    -- altitude by adding on top of this nudge, exactly the way it
+    -- already overrides `u_c_ff`.
+    local u_c_speed_give_ff = 0.0
+    if a_f_d < 0.0 then
+        local capped_decel = math.min(math.abs(a_f_d), profile.collective_speed_give_max_a_f_d_mps2)
+        u_c_speed_give_ff = -profile.k_collective_speed_give * capped_decel
+    end
+    local u_c_ff_total = u_c_ff + u_c_speed_give_ff
+    local u_c_candidate = u_c_ff_total + state.u_c_i + c_dot_nominal * dt
     local u_c_rate_nominal = (u_c_candidate - state.u_c) / dt
     local u_c_rate = u_c_rate_nominal
     -- Rotor-RPM warning (2026-11-25, user, verbatim: "The Mi-24 has an
@@ -1149,7 +1165,11 @@ local function law_update(state, dt, measured, limits, profile)
     -- output -- backed out of the clamped `u_c`, not re-derived from
     -- `c_dot_nominal`, so a clamp at +-1 (rather than a guard cap) is
     -- also reflected in what `u_c_i` carries into the next frame.
-    next_state.u_c_i = next_state.u_c - u_c_ff
+    -- Backed out against `u_c_ff_total` (feed-forward plus the speed-
+    -- give nudge), not `u_c_ff` alone, so the speed-give nudge is never
+    -- double-counted: it is a value recomputed fresh every frame, like
+    -- `u_c_ff` itself, never something for `u_c_i` to carry forward.
+    next_state.u_c_i = next_state.u_c - u_c_ff_total
 
     -- Section D: lift-vector direction -- a feed-forward nudge (scaled
     -- down by `phi_scale` when turn rate is giving, G) plus a slow trim

@@ -212,10 +212,30 @@ M.PROFILES["Mi-24P"] = {
     -- always pitch back and also less collective" -- a rule for the
     -- speed channel generally, not only while the lift length is
     -- capped: whenever the speed shaper is asking to decelerate
-    -- (`a_f,d < 0`), the collective feed-forward/integrator step is
-    -- biased down by this gain times the deceleration demand, on top
-    -- of (never instead of) the ordinary vertical-error term.
+    -- (`a_f,d < 0`), the collective feed-forward is nudged down by this
+    -- gain times the (capped) deceleration demand, on top of (never
+    -- instead of) the ordinary vertical-error term.
+    -- Debug-2026-11-27 (`plans/flight-lift-vector/debug-2026-11-27.md`,
+    -- sixth re-fly, "deceleration leads to descent... should maintain
+    -- altitude"): this used to bias the collective *rate* (`c_dot_
+    -- nominal`), so it integrated into `u_c_i` for as long as a
+    -- deceleration lasted -- several seconds -- and drove `u_c` to
+    -- -1.00 while the vertical loop was asking to climb, losing ~100 m.
+    -- It is now a bounded, value-level feed-forward nudge alongside
+    -- `u_c_ff` (recomputed fresh every frame from the current
+    -- deceleration demand, capped by `collective_speed_give_max_a_f_d_
+    -- mps2` below, never integrated) -- the vertical loop's `e_u`
+    -- integrator can still fully override it, the same way it already
+    -- overrides `u_c_ff` itself.
     k_collective_speed_give = 0.1,
+    -- The `|a_f_d|` this nudge reads is clamped to this before the gain
+    -- above is applied, so a transient feedback spike in `a_f_d`
+    -- (observed up to ~3.7 m/s^2 against the 1.9 cap, from `k_speed_
+    -- error`'s own push) cannot drive the nudge past
+    -- `k_collective_speed_give * collective_speed_give_max_a_f_d_mps2`
+    -- (0.1 * 3.0 = 0.30 of collective travel, well short of saturating
+    -- `u_c`). First cut, owed by the re-fly.
+    collective_speed_give_max_a_f_d_mps2 = 3.0,
 
     -- ---- LV-1 (section E, "Lift-vector length"): feed-forward from
     -- the lift length the desired acceleration needs, plus an

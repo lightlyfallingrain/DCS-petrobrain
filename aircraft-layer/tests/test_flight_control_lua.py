@@ -235,6 +235,7 @@ flight_profile = {
         k_phi_give = 4.0,
         phi_ff_min_scale = 0.3,
         k_collective_speed_give = 0.1,
+        collective_speed_give_max_a_f_d_mps2 = 3.0,
         k_lift_ff = 0.05,
         k_collective = 0.08,
         theta_min_deg = -15.0,

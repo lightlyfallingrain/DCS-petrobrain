@@ -130,6 +130,7 @@ local PROFILE = {
     k_phi_give = 4.0,
     phi_ff_min_scale = 0.3,
     k_collective_speed_give = 0.1,
+    collective_speed_give_max_a_f_d_mps2 = 3.0,
     k_lift_ff = 0.05,
     k_collective = 0.08,
     theta_min_deg = -15.0,
@@ -2387,6 +2388,143 @@ print(string.format("%.6f", max_abs_theta_d))
         # 30 deg "did not diverge" bound, which this scenario would
         # pass even with the combined clamp removed entirely.
         assert max_abs_theta_d <= 15.0 + 1e-6
+
+
+class TestDecelerationHoldsAltitude:
+    """Debug-2026-11-27 (`plans/flight-lift-vector/debug-2026-11-27.md`,
+    sixth re-fly): user, verbatim, "deceleration leads to descent as
+    well. Should maintain altitude." The trace showed `u_c` pinned at
+    -1.00 for ~9 s while `a_u_d` was asking to climb, losing ~100 m --
+    the old `k_collective_speed_give` term biased the collective
+    *rate*, so it integrated for as long as the deceleration lasted and
+    outweighed the vertical loop. This toy plant closes the vertical
+    loop for real (`w_mps`/`h_m` integrated from `u_c` via a first-order
+    lift-to-vertical-speed plant, `a_u` fed back from that same plant,
+    not left at its `measured.a_u or 0.0` fallback) so an altitude loss
+    of this kind is visible to the test, not just to a flight."""
+
+    @staticmethod
+    def _run_decel_scenario() -> tuple[float, float, float]:
+        driver = """
+local u_c_trim = 0.3
+local measured = {measured}
+local command = { pitch = -3.5, roll = 0.0, pedals = 0.0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+-- Commanded decel only -- no altitude command at all, so `alt_goal_m`
+-- stays at the take's own stopping height (== the take altitude,
+-- `w_mps` is 0 at take): holding the CURRENT altitude is exactly what
+-- the user's own "should maintain altitude" means here.
+state = flight_control.law_apply_goal(state, { ias_kmh = 108.0 }, LIMITS, PROFILE)
+local dt = 0.05
+local start_h = measured.h_m
+local min_h, max_h = start_h, start_h
+for i = 1, 400 do -- 20 s
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    -- Pitch plant (same style as `TestSpeedChannelIsBrisk`'s realistic-
+    -- gain run): pitch chases `theta_d`, forward accel driven by pitch
+    -- relative to the level-flight trim (-3.5 deg, the fourth re-fly's
+    -- own figure).
+    local tau_p = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau_p)
+    local ax = 0.2 * (-3.5 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    -- Vertical plant: `w_mps` chases a target set by how far `u_c` sits
+    -- above its level-flight trim (0.3, same as `command.collective`
+    -- at take) -- `a_u` is this plant's own derivative, fed back to the
+    -- law exactly the way the real estimator would, so `e_u` is a real
+    -- trajectory error, not always zero.
+    local target_w = (state.u_c - u_c_trim) * 10.0
+    local prev_w = measured.w_mps
+    measured.w_mps = measured.w_mps + (target_w - measured.w_mps) * (dt / 1.0)
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    measured.h_m = measured.h_m + measured.w_mps * dt
+    measured.asl_m = measured.h_m
+    if measured.h_m < min_h then min_h = measured.h_m end
+    if measured.h_m > max_h then max_h = measured.h_m end
+end
+print(string.format("%.6f", min_h - start_h))
+print(string.format("%.6f", max_h - start_h))
+print(string.format("%.6f", measured.ias_mps * 3.6))
+print(string.format("%.6f", u_c_trim))
+""".replace(
+            "{measured}",
+            _measured(
+                pitch_deg=-3.5,
+                ias_mps=273.0 / 3.6,
+                v_t_mps=273.0 / 3.6 + 2.0,
+                h_m=300.0,
+                asl_m=300.0,
+            ),
+        )
+        lines = _run(driver)
+        min_dev, max_dev, final_kmh, _ = (float(x) for x in lines)
+        return min_dev, max_dev, final_kmh
+
+    def test_altitude_deviation_stays_small_through_a_large_decel(self) -> None:
+        min_dev, max_dev, final_kmh = self._run_decel_scenario()
+        # The sixth re-fly lost ~100 m (h_m 384 -> 282) over the same
+        # kind of commanded decel (273 -> 108 km/h). The fix bounds the
+        # speed-give nudge instead of letting it integrate, so the
+        # vertical loop's own `e_u` integrator can hold the altitude
+        # reference within a small band throughout.
+        assert min_dev > -15.0
+        assert max_dev < 15.0
+        # The decel itself still actually happens -- the fix must not
+        # have gutted "less collective when slowing" into a no-op, only
+        # bounded it. This file's shared `_PROFILE` stays at the
+        # deliberate pre-amendment baseline (`omega_speed`/`speed_accel_
+        # cap_mps2`/`k_speed_error`/`c_theta` all slower than production
+        # -- `TestSpeedChannelIsBrisk`'s own docstring), so 20 s does not
+        # reach the 108 km/h goal here; a meaningful drop from the 273
+        # km/h start is what this scenario can assert against that
+        # baseline.
+        assert final_kmh < 273.0 - 20.0
+
+    def test_speed_give_nudge_still_reduces_collective_below_the_vertical_term_alone(
+        self,
+    ) -> None:
+        """Negative control: with `k_collective_speed_give` zeroed, the
+        same scenario's own collective at the moment of peak deceleration
+        demand is higher than with the nudge active -- confirming the
+        nudge is still doing the "less collective when slowing" job the
+        user asked for, not merely bounded into nothing."""
+        driver_template = """
+PROFILE.k_collective_speed_give = {k}
+local u_c_trim = 0.3
+local measured = {measured}
+local command = { pitch = -3.5, roll = 0.0, pedals = 0.0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 108.0 }, LIMITS, PROFILE)
+local dt = 0.05
+for i = 1, 40 do -- 2 s, well inside the decel
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local tau_p = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau_p)
+    local ax = 0.2 * (-3.5 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    local target_w = (state.u_c - u_c_trim) * 10.0
+    local prev_w = measured.w_mps
+    measured.w_mps = measured.w_mps + (target_w - measured.w_mps) * (dt / 1.0)
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    measured.h_m = measured.h_m + measured.w_mps * dt
+    measured.asl_m = measured.h_m
+end
+print(string.format("%.6f", state.u_c))
+""".replace(
+            "{measured}",
+            _measured(
+                pitch_deg=-3.5,
+                ias_mps=273.0 / 3.6,
+                v_t_mps=273.0 / 3.6 + 2.0,
+                h_m=300.0,
+                asl_m=300.0,
+            ),
+        )
+        u_c_with_nudge = float(_run(driver_template.replace("{k}", "0.1"))[0])
+        u_c_without_nudge = float(_run(driver_template.replace("{k}", "0.0"))[0])
+        assert u_c_with_nudge < u_c_without_nudge
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

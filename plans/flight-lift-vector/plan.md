@@ -554,7 +554,11 @@ SAU H, K and T off itself before each new take.
    translate commands stay in BL-16 "Later". Card: speed 150→60→0 (no jerk, settles over the
    ground), heading change of 90° at speed 0 (pedal, bank stays within a few degrees), speed 0→150
    (smooth through 25–50 km/h), a voice take at 20 km/h (accepted), low-slow with the lowered RPM
-   dummy (accelerates).
+   dummy (accelerates). **Routed here from the sixth re-fly** (`docs/acceptance/2026-11-27-sortie-
+   feedback.md`, LV-1 debug-2026-11-27.md): user, verbatim, *"on command to speed 60, nearing the
+   60 speed, right pedal was added too late and too slowly which caused left yaw to run away. This
+   is more slow speed behaviour, so can go to that stage."* Watch the pedal loop's own response
+   near 60 km/h on this stage's card, not only the blend/jerk behaviour already listed.
 
 Each stage runs the subproject checks (`fast-tests.sh aircraft-layer`; body-layer too in LV-1 and
 LV-3). LV-1 and LV-2 may be built back to back as one perf/security batch if LV-1's card is flown
