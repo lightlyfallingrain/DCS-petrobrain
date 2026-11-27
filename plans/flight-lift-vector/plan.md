@@ -1114,3 +1114,284 @@ in full (reproduced above) and `body-layer/config/defaults.toml`'s flight-contro
   defect in a function (`law_init_at_take`'s unpark branch) LV-1 is already touching for the new
   `"bank"` take-mode seeding, and LV-1's card already has a bank-handover row to retest it against
   (rows 8-9). A separate debugging pass would retest the same code path twice.
+
+## LV-2 amendment (2026-11-27)
+
+Architect pass. Branch `fix/bl16-flight-epoch-bound`, tip `866fb63b` (*"BL-16 LV-2: capture break
+explore answers (2 G, less pull, height to 50 m AGL, heading goal)"*), reached here via `lv2-plan`
+at the same sha in this worktree's own object store (`feature/bl16-lift-vector-law`'s own tip,
+`6a28a6a6`, is not an ancestor of `866fb63b` — the two diverged after LV-1's card pass; harvesting
+this amendment back onto `feature/bl16-lift-vector-law` is the main loop's job, not this pass's).
+LV-1 is flown and passed (user, verbatim: *"speed change: pass. proceed to next stage"*). Inputs
+read in full: `explore-notes.md`'s "LV-2 explore — breaks (2026-11-27)"; this plan's sections B–G,
+I, J (as amended 2026-11-24) and diagram 4; `alignment.md` E5/E17 and "Open assumptions"; `aircraft-
+layer/research/2026-11-27-mi24p-rotor-engine-limits.md`; `docs/acceptance/2026-11-24-sortie-
+feedback.md`'s fourth re-fly break note and `2026-11-27-sortie-feedback.md`. Code read in full for
+every break-touching path: `flight_control.lua`'s `law_apply_goal` (break's `desired`→`state` write),
+`law_update`'s heading/turn-rate step (the `else` branch, `rate_override_deg_s`), the altitude
+shaper's break-floor clamp, and the shortfall chain (`n_d`/`e_u`/`u_c_rate`/`shortfall`/
+`theta_speed_give`/`phi_scale`/`theta_i`/`phi_i`); `body-layer/src/belief/crew_console.py`'s
+`axes_break_turn`/`axes_break_away`; `body-layer/config/rules/flight.lua`'s `BREAK_TURN_RATE_DEG_S`.
+
+**Correction, same day (coordinator, from the user's own further words):** the user's answer 3
+is *both* budgets, not one replacing the other — *"In a break turn, we should not lose more than
+100 m of altitude. The 50 m AGL is the safety floor below which we must not descend in a break."*
+So: height loss ≤ 100 m from the break's own entry height, **and** never below 50 m AGL (50
+replaces the plan's old 40 m break floor; see "D. The floor" below for whether this also moves the
+*ordinary*-flight floor). This is settled, not an open decision.
+
+### What reading the code turned up (step 3a), before designing anything new
+
+Three things this amendment needs already exist, and one gap explains the fourth/sixth re-fly's
+break complaint better than a gain tune would:
+
+1. **"A break is an ordinary heading goal" is already built, exactly as the user described it.**
+   `axes_break_turn`/`axes_break_away` (`crew_console.py`) already compute `target = current ±
+   90°`/`current − 180°` and send one `FlightControlGoalRequest(heading_deg=target,
+   turn_rate_deg_s=±rate)`; `law_apply_goal`'s `goal.heading_deg` branch is the **one** place a
+   break's `desired` reaches `state` — it writes `heading_goal_deg`, the signed
+   `rate_override_deg_s`, and snapshots `break_entry_h_m`. There is no separate break state
+   machine anywhere in Lua. **Ending needs no new code either**: `law_update`'s own "settling
+   clears it" block (Decision 27) clears `rate_override_deg_s`/`break_entry_h_m` the instant
+   `in_band_heading` goes true — a break ends by *reaching its heading goal*, nothing else, which
+   is already answer 4 (*"just set desired heading as usual and fly to it"*) in full. This
+   amendment changes none of this; it is cited so the implementer does not re-build it.
+2. **The break's commanded rate has no bank/G cap today.** In `law_update`'s heading step, the
+   `else` branch's `rate_limit` is `math.abs(state.rate_override_deg_s)` when a break is active —
+   the fixed 40°/s `BREAK_TURN_RATE_DEG_S`, unconditionally, with **no comparison against any
+   bank or load limit**. Contrast the ordinary/continuous-turn branch two cases above it, which
+   derives its rate *from* a bank cap (`law_turn_rate_at_bank(limits.max_turn_bank_deg, v_t)`) —
+   the break is the one heading-rate path in this file that commands a rate with nothing capping
+   the resulting bank. At typical break-entry speeds (120–250 km/h) a steady 40°/s turn needs a
+   bank well past 80° (`atan(ω·V/g)`), so this path is already relying on something *else* to keep
+   the bank sane — and the thing that actually does is the item below, which reduces bank as a
+   side-effect of pitching the nose up, not by capping the bank itself. This is the real "G cap"
+   gap item 3 of the brief asks after; it is not a separate load-sensing mechanism to invent, it is
+   a missing ceiling on an existing rate commanded with none.
+3. **The envelope-shortfall chain is class-blind — it is the "too much pull back" bug.** Section G's
+   prose gives the break a different absorber order (height, speed, turn rate) from ordinary flight
+   (speed, turn rate, height), but the code implementing it (`law_update`, the `shortfall`/
+   `theta_speed_give`/`phi_scale` block, right after the collective-rate guards) reads no manoeuvre
+   class at all — the same `shortfall = max(0, u_c_rate_nominal − u_c_rate)` feeds
+   `theta_speed_give` (pitch back) and `phi_scale` (bank eases) whether or not a break is active.
+   Worse for a break specifically: `shortfall` is driven by `u_c_rate_nominal − u_c_rate`, and
+   `u_c_rate` is already capped by the RPM-warning ease, the blade-stall margin, the pedal-limit
+   margin and (LV-1 amendment C) the engine-RPM-gated schedule — all **rate** caps on how fast
+   collective can rise. A break's fast roll-in (bank going 0→60–80° quickly, E5) asks `n_d` to
+   jump from 1 toward ~2 in a second or two; if collective's *rate* cannot keep up with that jump
+   even momentarily, `shortfall` appears and is converted **immediately** into aggressive pitch-
+   back and bank easing — exactly *"roll-in is good, pull back is too much… bank smooths soon"*.
+   This is not a gain-tuning symptom; it is the ordinary chain firing during a transient the break
+   chain was never given a different answer for. Fixed in C below.
+
+### Design Overview (diagrams)
+
+**1. Break as a heading goal — confirming the existing mechanism, nothing new.** What changes this
+amendment is only inside the shaded box.
+
+```mermaid
+flowchart LR
+  CMD["pilot/voice: 'break left/right'/'break away'"] --> AX["axes_break_turn / axes_break_away<br/>(crew_console.py, UNCHANGED)<br/>target = heading +-90 deg / -180 deg<br/>rate = BREAK_TURN_RATE_DEG_S (40 deg/s)"]
+  AX --> WIRE["FlightControlGoalRequest<br/>heading_deg, turn_rate_deg_s<br/>(UNCHANGED wire)"]
+  WIRE --> APPLY["law_apply_goal (UNCHANGED)<br/>writes heading_goal_deg,<br/>rate_override_deg_s, break_entry_h_m"]
+  subgraph NEW["LV-2: what changes"]
+    RATE["heading-rate step<br/>rate_limit = min(|rate_override|,<br/>law_turn_rate_at_bank(break_max_bank_deg, V_t))"]
+    CHAIN["shortfall chain, class-aware (C)<br/>break: height gives before pitch/bank"]
+  end
+  APPLY --> RATE --> CHAIN --> OUT["phi_d, theta_d, u_c (law_outputs)"]
+  CHAIN -. "in_band_heading" .-> SETTLE["settling clears rate_override/<br/>break_entry_h_m (UNCHANGED, Decision 27)"]
+```
+
+**2. Priority chain for a break, as it will actually run.** Height is consulted *before* the
+shortfall reaches pitch or bank, not after (today it never is consulted at all — §3 above).
+
+```mermaid
+flowchart TB
+  S["shortfall this frame<br/>(u_c_rate_nominal - u_c_rate, UNCHANGED source)"] --> Q{"class == break<br/>AND height above<br/>break_floor + margin?"}
+  Q -- "yes: height has budget" --> H["absorb via height:<br/>scale theta_speed_give/phi_scale input<br/>toward 0 (new, profile-scheduled on margin)<br/>-- altitude reference keeps sinking<br/>toward the break floor instead"]
+  Q -- "no: at/near break_floor,<br/>or class != break" --> P["ordinary chain (UNCHANGED):<br/>theta_speed_give (pitch back),<br/>then phi_scale (bank eases)"]
+  H -.->|"margin shrinks toward 0"| P
+```
+
+### B. Shape and G — the bank/rate cap (item 2 and 3 of the brief)
+
+**New profile constants**, break-specific, so ordinary flight's own `max_turn_bank_deg` (20°) is
+untouched:
+
+- `break_max_bank_deg` — first cut **65°**. Chosen to land inside E5's own target window (60–80°)
+  and close to the ~2 G the user accepts momentarily (`n = 1/cos(φ)`; 60° → 2.0 G exactly, 65° →
+  2.37 G — deliberately a touch above 2.0 G rather than below it, since the user's own figure was
+  "about 2 G", and the rate-cap below, not this angle alone, is what actually bounds the load a
+  break reaches in practice: see the note on `n_d` below).
+- **The heading-rate step's `else` branch gains one line**: when `state.rate_override_deg_s ~=
+  nil` (a break), `rate_limit = math.min(math.abs(state.rate_override_deg_s),
+  law_turn_rate_at_bank(profile.break_max_bank_deg, measured.v_t_mps))` — reusing
+  `law_turn_rate_at_bank`, the same function the ordinary continuous-turn branch already calls
+  with a different bank argument, not a new formula. `accel_limit` (the roll-in rate) is derived
+  from this same capped `rate_limit` exactly as today (`rate_limit / profile.t_roll`).
+- **Effect, by speed**: at 250 km/h, 40°/s would need ~75° bank (close to the cap, so the break
+  flies near 40°/s, close to today); at 120 km/h, 40°/s needs only ~50° bank (well under the cap,
+  unchanged from today); the cap only binds where the commanded rate would otherwise ask for more
+  bank than `break_max_bank_deg` allows — exactly "steep bank angle … to get a fast turn rate" (the
+  turn rate is a *consequence* of flying to the bank/G cap, the same relationship ordinary turns
+  already have with `max_turn_bank_deg`, not a second mechanism).
+- **This does not, by itself, fix "too much pull back."** The resulting `n_d` from a capped bank
+  alone is already ≈ 2 G by construction (`a_r_d = g·tan(break_max_bank_deg)`, feeding `law_phi_ff_
+  deg`/`law_lift_length_g` exactly as section D/E already do) — the pitch-back/bank-easing the user
+  reports comes from the **collective's own rate lagging the roll-in**, not from the target bank
+  being too large. That is section C.
+
+### C. Height gives first in a break (item 3's real fix, from §3 above)
+
+**New, class-aware shortfall routing** — the one place `law_update`'s shortfall block changes:
+
+- **Manoeuvre class, derived, never stored** (G's own stated design, now actually read):
+  `class = "break"` if `state.rate_override_deg_s ~= nil`, else unchanged. (`low_slow_rpm`'s own
+  class is out of this amendment's scope — LV-3.)
+- **`break_floor_agl_m` (new, 50.0, see "D. The floor" below)** replaces `limits.floor_agl_m` only
+  in the break-floor clamp the altitude shaper already computes (`break_floor = max(limits.
+  break_floor_agl_m, state.break_entry_h_m − limits.break_max_height_loss_m)`, same formula,
+  one constant swapped).
+- **`height_margin_m = measured.h_m − break_floor`**, read at the same point in `law_update` the
+  shaper already computed `break_floor` (hoisted one step earlier if needed so the shortfall block
+  can read it; no second computation of the formula).
+- **A new profile band, `break_height_give_band_m` (first cut 30.0)**: `height_available_frac =
+  clamp(height_margin_m / break_height_give_band_m, 0, 1)` — 1 with plenty of height above the
+  floor, ramping to 0 as the aircraft nears it.
+- **The shortfall feeding `theta_speed_give`/`phi_scale` is scaled by this fraction only in break
+  class**: `effective_shortfall = (class == "break") and (shortfall * (1 − height_available_frac))
+  or shortfall`. With height to spare, `effective_shortfall ≈ 0` — no pitch-back, no bank easing —
+  and the vertical loop's own `e_u` integrator (`u_c_i`, unchanged) is left to under-track `a_u,d`,
+  which is exactly "height gives": the altitude reference itself sinks toward the break floor
+  rather than the aircraft fighting to hold it with pitch or a shallower bank. As height runs out,
+  `effective_shortfall` rises back toward the full `shortfall` and the ordinary absorbers (speed,
+  then turn rate) take over near the floor — the order the user answered (U3, break: height,
+  speed, turn rate), finally implemented rather than only described.
+- **Nothing about the ordinary (non-break) chain changes** — `class != "break"` keeps
+  `effective_shortfall = shortfall` exactly as today, so LV-1's own cards are not retested by this.
+
+### D. The floor — both budgets, and whether the 50 m is break-only
+
+The user's words apply to a break specifically (*"below which we must not descend **in a break**"*).
+`limits.floor_agl_m` (40.0) is shared today by the break-floor clamp **and** the ordinary chain's
+own passive height-giving and the unpark seed clamp (`flight_control.lua:2612-2613`) — raising it
+globally to 50 would also raise the floor for ordinary flight and the unpark seed, which the user
+did not ask for here (though it would match this project's own recorded 50–800 m AGL operating
+envelope). **Kept separate, deliberately, to not expand scope silently**: a new
+`break_floor_agl_m = 50.0` is added beside the unchanged `floor_agl_m = 40.0`; only the break-floor
+clamp (section C above) reads the new one. `break_max_height_loss_m` (100.0) is unchanged — both
+budgets apply together, exactly as the correction states (`break_floor =
+max(break_floor_agl_m, break_entry_h_m − break_max_height_loss_m)`, the same `max()` shape as
+today, so whichever is more restrictive at a given entry height still wins).
+
+### E. U6 (a break entered slow turns more gently) — already satisfied, no new mechanism
+
+Unchanged from the original plan's own claim: the roll-in's `accel_limit` is `heading_accel_cap *
+schedule_g` (section B, kept), and `schedule_g` falls toward `profile.schedule_gain_min` at low
+speed regardless of manoeuvre class. A break entered at ~100 km/h therefore ramps into its turn
+rate more slowly than one entered at 250 km/h, with no break-specific code — confirmed by reading
+the code (not re-derived), so no new constant is added for this item.
+
+### F. The RPM/G-load items routed here from debug round 3 — status
+
+Per the task brief: **both remain deferred, unbuilt, recorded only** — not retroactively built by
+this amendment, since neither was asked for in items 1–4 and building either now risks tuning
+against one flight's worth of symptom before this amendment's own fix is flown:
+
+- **A general ordinary-flight G-load cap above 200 km/h** (1.8 G light / 1.5–1.6 G combat,
+  tighter above 2 000 m or in turbulence, `aircraft-layer/research/2026-11-27-mi24p-rotor-engine-
+  limits.md`) — this is a cap on *ordinary* flight's own accel demand, separate from the break-
+  specific `break_max_bank_deg`/~2 G allowance just built; nothing here reads or enforces it.
+- **Keeping rotor RPM ≥ 92 % at high speed** (a *proactive* floor, stricter than the existing
+  *reactive* backstops this amendment relies on and leaves untouched: `rotor_rpm_warning_pct =
+  88.0`'s ease guard, `rotor_rpm_floor_pct = 85.0`'s generator-trip floor, and the engine-RPM-gated
+  collective schedule from the LV-1 amendment). Those three already exist and already bound a
+  break's collective-rate excursions; a 92 % anticipatory floor is a different, additional
+  mechanism and stays recorded-only.
+
+### Tuning constants
+
+All new, in `flight_profile.lua` (this subproject's loop-constant convention, no `tuning.py`
+equivalent outside body-layer): `break_max_bank_deg` (65.0), `break_floor_agl_m` (50.0),
+`break_height_give_band_m` (30.0). `break_max_height_loss_m` (100.0, `flight_control.lua` limits
+table) is unchanged — confirmed by reading `flight_profile.lua` and `flight_control.lua`'s limits
+table in full (widened 4a rule) before naming any of these; none overlaps an existing key.
+
+**Non-finite check (standing rule).** `break_max_bank_deg`, `break_floor_agl_m` and
+`break_height_give_band_m` are boundary floats read from profile/limits data the same way every
+other constant in these tables is — the implementer checks each with `math.isfinite`-style
+guarding (or the project's established pattern for these tables) the same way the other limits in
+`flight_control.lua`'s bounds tables already are, per the architect/implementer/reviewer standing
+rule on boundary floats (merged to `main` as `f832991b`, "Standing rule: check boundary floats for
+being finite").
+
+### Co-moving Fields
+
+Trigger (6a) checked: a break is a phase the law tracks via `rate_override_deg_s`/
+`break_entry_h_m`, written both externally (`axes_break_turn`/`axes_break_away` → `goal.heading_deg`
++ `goal.turn_rate_deg_s`) and internally (settling clears both). **This amendment adds no new
+persisted field** — `class` is derived fresh every frame from the existing `rate_override_deg_s`
+(never stored), and `break_floor_agl_m`/`break_height_give_band_m` are profile constants, not
+state. The full construction/write/clear table for `rate_override_deg_s`/`break_entry_h_m` is
+already in the original plan's own Co-moving Fields section above (`law_apply_goal`'s `turn`/
+`heading_deg` branches, the settling clear in `law_update`) and is unchanged by this amendment — no
+new row is owed because no new field exists to leak.
+
+### Tests
+
+- Bank/rate cap: at 250 km/h a break commands bank approaching `break_max_bank_deg` (within the
+  toy plant's settle tolerance), not the kinematic bank a bare 40°/s would imply; at 120 km/h the
+  cap does not bind (bank stays below it, rate stays at 40°/s).
+- Height-gives-first: with the plant's collective rate artificially capped low (simulating a
+  roll-in collective lag), a break entered with height to spare shows altitude sinking and
+  `theta_i`/`phi_scale` essentially untouched; the same scenario entered near `break_floor_agl_m`
+  shows `theta_speed_give`/`phi_scale` engaging at close to today's (pre-amendment) strength.
+- Floor: `break_floor_agl_m` (50) binds instead of `floor_agl_m` (40) for the break-floor clamp;
+  the ordinary chain's own floor and the unpark seed clamp are unaffected (still 40).
+- Settle: unchanged from the original plan's own break tests (in-band heading clears
+  `rate_override_deg_s`/`break_entry_h_m` the same frame, nothing left wound up).
+- Regression: every LV-1 card scenario (`class != "break"`) produces bit-identical
+  `effective_shortfall == shortfall`, i.e. no behaviour change outside break class.
+
+### LV-2 card (rewritten against the answers)
+
+SAU off before every take (U4, unchanged project-wide rule). Break left and right at 120, 180 and
+250 km/h (watch: steep bank reached promptly, **little to no nose-up**, ball centred, speed near
+entry, height loss ≤ 100 m and never below 50 m AGL, roll-out on the break heading); break away;
+one break started at about 70 m AGL (both budgets should bind: the 100 m loss and the 50 m floor —
+watch which one actually limits the sink at that entry height); one break entered at about 100
+km/h (gentler roll-in, U6, no hand-back); one break entered already near the rotor-RPM warning
+threshold (88 %) — e.g. right after a hard pull or a high-power climb, not a dummy toggle (the RPM
+read is now live, `arg_proxy`, not `"dummy"` — the original card's "lowered `ROTOR_RPM_DUMMY_PCT`"
+row no longer applies and is replaced by this one). Each row: note whether the fix reads as *"roll-
+in good, pull-back gone"* against the fourth re-fly's own words, or whether the shortfall is still
+reaching pitch/bank sooner than the margin band predicts — that comparison is this card's real
+pass/fail, more than any single number.
+
+### Risks & Unknowns (amendment-specific)
+
+- **`break_max_bank_deg = 65°` and `break_height_give_band_m = 30 m` are first cuts**, like every
+  gain in this plan — the card above is where they are measured, not derived analytically; 65°
+  sits inside E5's 60–80° window but the resulting G depends on how close to the cap a given entry
+  speed actually drives the bank.
+- **The height-gives mechanism trades a known problem (pitch-back) for a new one (sink rate)** —
+  if `break_height_give_band_m` is too wide, a break could sink more briskly than the fourth re-
+  fly's own complaint anticipated; the card's 70 m AGL row is where this is checked against the
+  50 m floor rather than discovered in a flight.
+- **Interaction with the LV-1 amendment's engine-RPM-gated collective schedule (section C there)
+  is untested until this card flies** — a break's roll-in is exactly the brisk-acceleration case
+  that schedule already anticipates (collective fast when engine RPM is near 100 %), so the two
+  mechanisms may already cooperate; if the card shows collective still lagging the bank, the
+  schedule's own thresholds (not this amendment's height-gives logic) are the first place to look.
+- **The deferred G-load cap and the 92 % RPM floor (F) stay unbuilt** — if the card's high-speed
+  break rows show RPM or load excursions the existing reactive backstops do not catch cleanly,
+  that is the point at which either gets its own look, not retrofitted blind into this amendment.
+
+### Decisions Requiring User Input (amendment)
+
+- **U11: Does the new 50 m break floor also move the ordinary-flight floor (`floor_agl_m`, still
+  40 m) and the unpark seed clamp?** — recommend: no, keep them separate (`break_floor_agl_m`,
+  new, 50 m, break-only; `floor_agl_m`, unchanged, 40 m, everything else) — the user's own words
+  named the break specifically, and widening to ordinary flight is a separate, if plausible
+  (matches the project's own 50–800 m AGL operating-envelope note), change this amendment was not
+  asked to make. Flagging rather than deciding silently, per "do not expand scope silently."
