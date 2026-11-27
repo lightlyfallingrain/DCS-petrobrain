@@ -273,3 +273,61 @@ unexplained yaw at all speeds alongside the ball loop; pedal lead from the exist
 feed-forward, low-speed pedal need left to feedback; hover pedal bounded to **±0.3 in the command
 domain (−1…+1) around the learnt hover-stable pedal value** (the existing absolute limits, right
 +0.5, still apply on top); first cut, to be refined from the card.
+
+## M4 SAU explore (2026-11-28)
+
+Main loop opened with what was already on file (the 2026-11-20 "SAU in mode 1" section above, the
+2026-10-26 addendum in `plans/flight-control/explore-notes.md`, M0-H unflown, the hand-back
+sequence `controls-to-player.md` already built), a mock 90° turn with trim held through the change,
+and five questions: (1) what the SAU should change in the cockpit when Petrovich flies; (2) take
+with the channels as the player left them?; (3) trim held through a sustained turn, or trimmed in
+the bank?; (4) does pedal movement release heading hold without the microswitch, given LV-3's yaw
+damper moves the pedals constantly?; (5) lean on the SAU at hover?
+
+Answers (user, verbatim, 2026-11-28):
+
+> - " Trim: pressing trim stops the SAU holding while pressed, and on release it holds whatever
+>   attitude or heading the aircraft has at that moment." -> Cyclic trim affects aircraft pitch and
+>   bank channels, *not* heading channel. Pedal microswitch affects heading channel. On cyclic trim
+>   release, SAU stabilizes (stabilize != hold, aerodynamics or cyclic movement overpowers SAU)
+>   aircraft pitch and bank, not heading. On release of pedal microswitch SAU stabilizes current
+>   heading. Each appropriate SAU channel must be ON, otherwise there is no stabilization of that
+>   pitch/bank/heading.
+>
+> - "whether the SAU fights Petrovich's control writes" -> most likely yes. SAU fight Players
+>   inputs too. Not by much, it will allow control movement to affect aircraft, but it stabilizes
+>   the movements. SAU really is a stabilizer, not a full control autopilot.
+>
+> 1 - SAU adds a bit of stabilization that we don't then need to build in the control law.
+> Alternative solution: when Petrovich has controls, turn off all SAU channels (not B) and when
+> Player is handed conrols back, turn SAU channels back on.
+> 2 - I normally fly with SAU on. On take, Petrovich can decide what SAU to use/not use. Do not
+> assume any channel state set by Player.
+> 3 - I stabilize pitch and bank and release trim -> SAU keeps the attitude stable. (Heading
+> channel must be OFF or pedals microswitch pressed while turning.)
+> 4 - I need to press the microswitch button (key 'Y' by default, I've mapped it to joystick
+> button). It needs to be pressed for a moment while the SAU adjust, 1 s is enough. SAU heading
+> hold might actually achieve that yaw dampening for us.
+> 5 - There's hover mode in SAU, but holding 'well' is not certain at all.
+>
+> All this kinda leans towards option: not using SAU, since we have calculation based control law,
+> not human moving stick.
+
+Reading (main loop):
+
+- **Corrections to the 2026-11-20 model:** cyclic trim re-references **pitch and bank only**;
+  the pedal microswitch re-references **heading only** (pressed ~1 s, not by pedal movement). The
+  SAU **stabilises, it does not hold** — aerodynamics or control movement overpower it. A channel
+  stabilises nothing unless it is ON.
+- **It fights control inputs, mildly** — the player's and, most likely, Petrovich's (M0-H's first
+  question, answered from experience rather than a probe).
+- **Direction, leaning: do not use the SAU in mode 1.** The law is computed, not a hand on a
+  stick; the SAU's stabilisation duplicates what the law already does and mildly fights it. So:
+  on take, switch **H, K, T OFF** (B stays ON); on hand-back, H, K, T ON (already built,
+  `controls-to-player.md`). Never assume the channel state the player left.
+- **Consequence for the LV cards:** the "switch SAU H, K, T off before every take" step becomes
+  Petrovich's job once built.
+- **Open, main loop's own concern, not the user's:** mode 2 (parked) flies through ED's AI, which
+  is linked to the SAU device (`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md`
+  §2/§4, path (a) unresolved). The switch-off must apply to a **mode-1 take only**, including the
+  unpark mode 2 → mode 1 take, and never while ED's AI is flying.
