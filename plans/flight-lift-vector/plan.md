@@ -1624,10 +1624,11 @@ stateDiagram-v2
   end note
   note right of Hover
     speed = ground speed along the nose
-    pedal owns heading (yaw-rate loop), never bank
-    lateral cyclic holds sideways ground speed at 0
-    pedal within +-0.3 of the learnt hover pedal
-    a held bank ends here, heading holds
+    pedal turns to heading (yaw-rate loop), bank does not turn
+    bank (lateral cyclic) counters crosswind drift, sideways ground speed held at 0
+    pedal within +-0.3 of the learnt hover pedal only during a commanded heading change
+    holding heading: any pedal, full range
+    a turning bank ends here, heading holds (drift bank stays)
   end note
 ```
 
@@ -1992,9 +1993,14 @@ top-level locals (of 200); LV-3 adds no module-level local beyond the two getter
 
 ### Risks & unknowns (LV-3)
 
-- **The DCS Mi-24P's hover pedal need is unknown.** If a stable hover needs more right pedal than
-  `t_y`'s +0.5 clamp, hover cannot hold heading — the trace shows `t_y` pinned at +0.5 with a left
-  yaw. Row 3 finds it first; U13 is the decision behind it.
+- **The DCS Mi-24P's hover pedal need is unknown.** With the full pedal range (U13, 2026-11-28)
+  no software cap stands in the way any more; what remains is the aircraft's own right-pedal margin
+  at hover, which the user describes as small (*"not much right rudder left for additional right
+  yaw"*, 2026-10-26). A right hover turn, a collective increase, or a gust from the left can then
+  run the pedal into its physical stop — visible in the trace as the pedal output at +1.0 with a
+  left yaw it cannot stop. Row 3 (hover heading change, both directions) watches for it; the
+  near-stop collective-rate guard is the only protection built, and a slower right turn at hover
+  is the first remedy if the card shows it.
 - **IAS may include the sideways component** (finding 1). If row 2's trace shows IAS ≈ total ground
   speed while sliding, the speed loop decelerates the wrong component during a slide; a
   `cos(sideslip)` correction would then need `aoss` confirmed in wind. Not built; the damper should
