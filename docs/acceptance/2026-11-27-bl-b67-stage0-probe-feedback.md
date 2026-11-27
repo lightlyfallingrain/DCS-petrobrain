@@ -46,5 +46,23 @@ Mission clock ↔ probe time: probe t ≈ mission time − 8:00:00 (all five sho
   knob moved only when the user turned it (arg963 in steps of 0.1). Absolute-set via 3038: **no**.
 - **Q5 — Radiation Reset via 3029 works:** arg 882 went 0 → 1 → 0 on the scripted press/release
   (t 20–21).
-- **Q6 — `S_EVENT_SHOT` / `isExist()` / `S_EVENT_HIT`:** unanswered; needs `dcs.log` from this run.
+- **Q6 — answered from `dcs.log`** (brought back afterwards, `logs-2026-11-27-b67/dcs.log`, third
+  simulation start, 18:11:57; mission t matches the probe's t):
+
+  | shot | `S_EVENT_SHOT` t | typeName / category / guidance | displayName | `WEAPON_GONE` | first `S_EVENT_HIT` | flight |
+  |---|---|---|---|---|---|---|
+  | 9M120 | 160.86 | `Ataka_9M120` / 1 / 8 | 9M120 Ataka (AT-9 Spiral-2) | 171.88 | 171.83 (5 units hit) | 11.0 s |
+  | 9M120 | 198.60 | `Ataka_9M120` / 1 / 8 | — | 207.63 | 207.59 (2 units) | 9.0 s |
+  | 9M114 | 300.41 | `AT_6` / 1 / 8 | 9M114 Shturm (AT-6 Spiral) | 306.35 | 306.17 (kill) | 5.9 s |
+  | S-8TsM | 364.98 | `C_8CM` / 2 / nil | S-8TsM SM Orange | 370.51 | — | — |
+  | S-8KOM ×3 | 375.76, 376.17, 376.22 | `C_8` / 2 / nil | S-8KOM HEAT/Frag | 381.32 | — | — |
+
+  - `S_EVENT_SHOT` arrives for **our** ATGM every time, `event.weapon` populated
+    (`isExist()` true at launch). **Guided-missile filter: `category == 1` and `guidance == 8`**;
+    rockets are category 2, guidance nil — one SHOT per rocket (3 for the 3-rocket burst).
+  - `isExist()` goes false at impact: `WEAPON_GONE` lands 0.04–0.2 s after the first `S_EVENT_HIT`
+    (within one 1 Hz poll).
+  - `S_EVENT_HIT` fires on the kept weapon (`HIT_ON_KEPT_WEAPON`), initiator = own aircraft — and on
+    **every unit in the blast**, not only the aimed one (first 9M120: 5 units, a Grad-URAL and
+    Ural-375 damaged, others killed). A hit does not say which unit was aimed at.
 - One S-8KOM press dropped station 4 by 3 (20 → 17): a rocket burst, not a single round.
