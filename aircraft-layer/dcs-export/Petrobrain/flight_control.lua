@@ -902,10 +902,22 @@ local function law_update(state, dt, measured, limits, profile)
         -- the accel limit uses the same roll-in formula (`r_max /
         -- t_roll`) `turn_mode` above already uses, just against the
         -- override's own magnitude.
+        --
+        -- LV-2 amendment, section B: the override's own 40 deg/s
+        -- (`BREAK_TURN_RATE_DEG_S`) is a ceiling, not a target -- at
+        -- typical break-entry speeds a steady 40 deg/s needs a bank
+        -- well past the break's own `break_max_bank_deg` cap (the one
+        -- heading-rate path in this file that, before this amendment,
+        -- commanded a rate with nothing capping the resulting bank).
+        -- `law_turn_rate_at_bank` is reused, the same function the
+        -- ordinary continuous-turn branch above already calls with a
+        -- different bank argument -- not a new formula.
         local rate_limit = r_max > 0.0 and r_max or 30.0
         local accel_limit = heading_accel_cap
         if state.rate_override_deg_s ~= nil then
-            rate_limit = math.abs(state.rate_override_deg_s)
+            rate_limit = math.min(
+                math.abs(state.rate_override_deg_s),
+                law_turn_rate_at_bank(profile.break_max_bank_deg, measured.v_t_mps))
             accel_limit = rate_limit / profile.t_roll
         else
             -- LV-1 amendment, section A, E12 -- an inherited rate from
@@ -951,9 +963,21 @@ local function law_update(state, dt, measured, limits, profile)
     -- standing `alt_goal_m` itself, which a break never writes -- "a
     -- break replaces only the heading goal"). Stops applying the
     -- instant the break settles (the clearing below).
+    --
+    -- LV-2 amendment, section D: `profile.break_floor_agl_m` (50.0)
+    -- replaces `limits.floor_agl_m` (40.0) in THIS clamp only -- the
+    -- user's own floor applies to a break specifically (U11 answered,
+    -- 2026-11-27, verbatim: "only breaks"); the ordinary chain's own
+    -- passive height-giving and the unpark seed clamp both keep reading
+    -- `limits.floor_agl_m` unchanged. `break_max_height_loss_m` (100.0)
+    -- is unchanged -- both budgets apply together via this same `max()`.
+    -- `break_floor` is hoisted to the enclosing scope (declared just
+    -- above this `if`) so the shortfall block (section C, below) can
+    -- read the same computed value rather than re-deriving the formula.
+    local break_floor = nil
     if state.rate_override_deg_s ~= nil and state.break_entry_h_m ~= nil then
-        local break_floor = math.max(
-            limits.floor_agl_m, state.break_entry_h_m - limits.break_max_height_loss_m)
+        break_floor = math.max(
+            profile.break_floor_agl_m, state.break_entry_h_m - limits.break_max_height_loss_m)
         alt_goal_agl = math.max(alt_goal_agl, break_floor)
     end
     local err_h = alt_goal_agl - state.h_ref
@@ -1160,10 +1184,44 @@ local function law_update(state, dt, measured, limits, profile)
     -- just stops tracking `a_u_d` once collective cannot rise further
     -- (goal-check finding 1).
     local shortfall = math.max(0.0, u_c_rate_nominal - u_c_rate)
-    local theta_speed_give = profile.k_theta_speed_give * shortfall
+    -- LV-2 amendment, section C: class-aware shortfall routing -- a
+    -- break's own absorber order is height, then speed, then turn rate
+    -- (U3), the opposite of the ordinary chain's speed/turn/height.
+    -- `class` is derived fresh every frame from `rate_override_deg_s`,
+    -- never stored (G's own stated design, now actually read); this is
+    -- the "too much pull back" fix (plan, "What reading the code turned
+    -- up" item 3) -- a break's fast roll-in asks collective to rise
+    -- faster than its own rate guards allow even momentarily, and
+    -- before this amendment that transient `shortfall` was converted
+    -- immediately into pitch-back and bank-easing regardless of class.
+    local effective_shortfall = shortfall
+    if state.rate_override_deg_s ~= nil and break_floor ~= nil then
+        local height_margin_m = measured.h_m - break_floor
+        -- Guard against a non-positive band (division safety, the
+        -- boundary-float standing rule): `0` would be `shortfall / 0`
+        -- (NaN for a zero margin, +-inf otherwise), not "no band to
+        -- give" -- `law_turn_rate_at_bank`'s own near-zero-input guard
+        -- is the same project convention this mirrors. A non-positive
+        -- band degrades to no height-giving at all (the pre-amendment,
+        -- always-full-shortfall behaviour), never a crash or a
+        -- propagated non-finite value.
+        local height_available_frac = 0.0
+        if profile.break_height_give_band_m > 0.0 then
+            height_available_frac = law_clamp(
+                height_margin_m / profile.break_height_give_band_m, 0.0, 1.0)
+        end
+        effective_shortfall = shortfall * (1.0 - height_available_frac)
+    end
+    -- Debug-2026-11-27, LV-2 amendment -- diagnostic-only, same posture
+    -- as `dbg_r_d`/`dbg_u_c_rate` above: never read by any `law_*`
+    -- function, only so a flight trace or a toy-plant test can see the
+    -- class-aware routing actually engaging (or not).
+    next_state.dbg_shortfall = shortfall
+    next_state.dbg_effective_shortfall = effective_shortfall
+    local theta_speed_give = profile.k_theta_speed_give * effective_shortfall
     local phi_scale = 1.0
-    if shortfall > profile.speed_give_capacity then
-        local excess = shortfall - profile.speed_give_capacity
+    if effective_shortfall > profile.speed_give_capacity then
+        local excess = effective_shortfall - profile.speed_give_capacity
         phi_scale = law_clamp(1.0 - profile.k_phi_give * excess, profile.phi_ff_min_scale, 1.0)
     end
     next_state.u_c = law_clamp(state.u_c + u_c_rate * dt, -1.0, 1.0)

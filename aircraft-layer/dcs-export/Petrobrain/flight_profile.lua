@@ -250,6 +250,55 @@ M.PROFILES["Mi-24P"] = {
     -- Round 1 already bounded -- not a separate, unaddressed path.
     collective_speed_give_max_a_f_d_mps2 = 3.0,
 
+    -- ---- LV-2 amendment (`plans/flight-lift-vector/plan.md`, "LV-2
+    -- amendment (2026-11-27)", sections B/C/D): a break-specific bank/
+    -- rate cap plus a class-aware shortfall order (height gives first,
+    -- down to a break-only floor), fixing "roll-in is good, pull back
+    -- is too much" (the fourth re-fly's own words) -- the ordinary
+    -- chain's shortfall routing (G, above) is unchanged for every other
+    -- manoeuvre class. These three are Lua-edited data like every other
+    -- field in this table (module docstring: no `lo`/`hi` bounds
+    -- enforced here) -- none of the three ever travels the wire or
+    -- enters `flight_control.lua`'s own `FC_LIMIT_BOUNDS`.
+    --
+    -- Bank cap for a break's heading-rate step (B) -- reuses `law_turn_
+    -- rate_at_bank`, the same function the ordinary continuous-turn
+    -- branch already calls with `limits.max_turn_bank_deg`, with this
+    -- break-specific angle instead; the break's own `BREAK_TURN_RATE_
+    -- DEG_S` (40 deg/s, `body-layer/config/rules/flight.lua`) stays the
+    -- *ceiling* this caps, never replaced. First cut **60 deg** (2.0 G
+    -- exactly, `n = 1/cos(phi)`), not the original plan text's 65 deg --
+    -- lowered by the plan-check/main-loop correction (`alignment.md`
+    -- Finding 1, resolved 2026-11-27): 65 deg binds at every one of the
+    -- card's three speeds (120/180/250 km/h), so a break would sit at
+    -- ~2.37 G for the whole turn, above the user's own "about 2 G"
+    -- (2026-11-27 explore). At 60 deg the cap still binds at all three
+    -- card speeds (`atan(w*V/g)` needs 67/74/79 deg for a bare 40 deg/s
+    -- at those speeds, all above 60) -- steady rate at the cap is
+    -- ~32/21/15 deg/s (90 deg in ~2.8/4.3/6.0 s). Below ~88 km/h a bare
+    -- 40 deg/s needs less than 60 deg of bank, so the cap stops binding
+    -- there (the card's own "cap not binding" row).
+    break_max_bank_deg = 60.0,
+    -- Break-only safety floor (D) -- 50.0 m AGL, replacing `fc_limits.
+    -- floor_agl_m` (40.0, unchanged) only in the break-floor clamp
+    -- `law_update` already computes; ordinary flight and the unpark
+    -- seed clamp keep reading `floor_agl_m` (U11 answered, 2026-11-27,
+    -- verbatim: "only breaks"). Both height budgets apply together --
+    -- `break_max_height_loss_m` (100.0, `fc_limits`, unchanged) is the
+    -- other one, via the same `max()` the break-floor clamp already
+    -- used.
+    break_floor_agl_m = 50.0,
+    -- Height-gives-first band (C) -- how many metres of margin above
+    -- the break floor it takes to fully suppress the shortfall chain's
+    -- pitch-back/bank-easing; the fraction ramps from 1 (full margin)
+    -- to 0 (at/below the floor) linearly across this band. First cut,
+    -- the card's own 70 m-AGL-entry row is where this is measured
+    -- against the 50 m floor rather than derived analytically (plan
+    -- Risks: "if `break_height_give_band_m` is too wide, a break could
+    -- sink more briskly than the fourth re-fly's own complaint
+    -- anticipated").
+    break_height_give_band_m = 30.0,
+
     -- ---- LV-1 (section E, "Lift-vector length"): feed-forward from
     -- the lift length the desired acceleration needs, plus an
     -- integrator on vertical-acceleration error (replaces the old `a_z`

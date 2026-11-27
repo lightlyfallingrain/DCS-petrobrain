@@ -138,6 +138,16 @@ local PROFILE = {
     phi_ff_min_scale = 0.3,
     k_collective_speed_give = 0.1,
     collective_speed_give_max_a_f_d_mps2 = 3.0,
+    -- LV-2 amendment (`plans/flight-lift-vector/plan.md`, "LV-2
+    -- amendment (2026-11-27)") -- shipped values (`flight_profile.lua`),
+    -- not placeholders: every pre-existing break scenario in this file
+    -- (`TestBreakTurnChannel`, `TestBreakHeightFloor`) reaches a bank
+    -- well under 60 deg and a floor well below 200.0 m, so these do not
+    -- change any pre-existing assertion -- confirmed by running the
+    -- suite with these added, not assumed.
+    break_max_bank_deg = 60.0,
+    break_floor_agl_m = 50.0,
+    break_height_give_band_m = 30.0,
     k_lift_ff = 0.05,
     k_collective = 0.08,
     theta_min_deg = -15.0,
@@ -2650,6 +2660,216 @@ print(string.format("%.6f", measured.h_m - start_h))
         assert max_dev > 1.0
         assert abs(final_dev) < 1.0
         assert abs(final_kmh - 108.0) < 5.0
+
+
+class TestLV2BreakBankRateCap:
+    """LV-2 amendment (`plans/flight-lift-vector/plan.md`, "LV-2
+    amendment (2026-11-27)", section B) -- the break's own 40 deg/s
+    override (`rate_override_deg_s`) is now a CEILING, capped by
+    `law_turn_rate_at_bank(profile.break_max_bank_deg, v_t)` whenever
+    that bank-derived rate is lower. Tested directly against `law_
+    update`'s own one-frame clamp (`law_clamp(state.r_ref + a_ref*dt,
+    -rate_limit, rate_limit)`), not the full closed-loop toy plant --
+    `TestBreakTurnChannel`'s own docstring already measured that this
+    mechanism's heading-mode shaper (critically damped, `omega_heading`
+    = 0.3) peaks at ~10 deg/s for a 90 deg step error, never approaching
+    any rate ceiling in that scenario at all, so neither the old 40
+    deg/s ceiling nor this amendment's bank cap can be observed through
+    bank growth. Seeding `state.r_ref` directly at a rate the clamp
+    must act on in one frame (via `law_init_at_take`'s own `seed.r_deg_
+    s` -> `r_ref` path, the same technique `TestUnparkMidTurnRateNever
+    SlammedToTheOrdinaryCeiling` uses) isolates the clamp itself from
+    the shaper's own unrelated slowness. Uses the shipped `flight_
+    profile.lua` (`break_max_bank_deg` = 60.0) via `dofile`, per
+    `feedback_toy_plant_test_profile_must_match_shipped_values.md` --
+    this amendment's own first-cut number is exactly what the cap/no-
+    cap split below depends on."""
+
+    @staticmethod
+    def _rate_after_one_break_frame(kmh: float) -> tuple[float, float]:
+        driver = """
+local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0 }, PROFILE)
+state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
+state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+local expected_bank_cap_rate = flight_control.law_turn_rate_at_bank(PROFILE.break_max_bank_deg, measured.v_t_mps)
+print(string.format("%.9f", state.r_ref))
+print(string.format("%.9f", expected_bank_cap_rate))
+""".replace("{profile_path}", str(_FLIGHT_PROFILE_LUA)).replace(
+            "{measured}",
+            _measured(
+                r_deg_s=38.0,
+                ias_mps=kmh / 3.6,
+                v_t_mps=kmh / 3.6,
+            ),
+        )
+        lines = _run(driver)
+        r_after_one_frame, expected_cap = (float(x) for x in lines)
+        return r_after_one_frame, expected_cap
+
+    def test_cap_binds_at_250_kmh_clamping_an_inherited_38_deg_s_down_to_the_bank_cap(
+        self,
+    ) -> None:
+        """At 250 km/h the bank-derived rate for `break_max_bank_deg`
+        (60 deg) is ~14 deg/s -- well under both the override's own 40
+        deg/s ceiling and the seeded 38 deg/s -- so the one-frame clamp
+        pulls `r_ref` down to exactly that bank-derived value,
+        regardless of the heading-error term's own sign/magnitude this
+        frame (the hard clamp always wins an overshoot this large)."""
+        r_after, expected_cap = self._rate_after_one_break_frame(250.0)
+        assert expected_cap < 40.0  # confirms the bank cap is the binding one
+        assert abs(r_after - expected_cap) < 1e-6
+
+    def test_cap_does_not_bind_below_88_kmh_leaving_the_seeded_rate_untouched(
+        self,
+    ) -> None:
+        """At 70 km/h, a bare 40 deg/s needs only ~50 deg of bank --
+        under `break_max_bank_deg` (60) -- so the bank cap exceeds the
+        override's own 40 deg/s ceiling and never binds; the seeded 38
+        deg/s (already below both) is left to the ordinary heading-
+        error dynamics, not clamped toward either ceiling in one
+        frame."""
+        r_after, expected_cap = self._rate_after_one_break_frame(70.0)
+        assert (
+            expected_cap > 40.0
+        )  # bank cap would allow MORE than the override ceiling
+        # Not slammed toward any ceiling -- still close to the seeded 38.
+        assert abs(r_after - 38.0) < 1.0
+
+
+class TestLV2HeightGivesFirst:
+    """LV-2 amendment, section C -- "too much pull back" fix: while a
+    break is active, the shortfall the ordinary chain would otherwise
+    convert immediately into pitch-back (`theta_speed_give`) and bank-
+    easing (`phi_scale`) is instead absorbed by height, in proportion to
+    how much margin remains above the break floor (`break_height_give_
+    band_m`). The scenario forces a real, nonzero `shortfall` via the
+    rotor-RPM-warning guard (`measured.rotor_rpm_pct` below `profile.
+    rotor_rpm_warning_pct`, forcing `collective_ease_rate_near_rpm_
+    warning`) while a large climb demand (`alt_m` far above the current
+    height) makes the nominal collective rate clearly positive -- one of
+    the "u_c_rate is already capped" guards section C's own plan prose
+    names, standing in for a break roll-in's own collective-rate lag.
+    Shipped `flight_profile.lua` values throughout (`dofile`), since the
+    30 m band and the 0.1/0.5 feed-forward gains below are what this
+    amendment's own numbers depend on."""
+
+    @staticmethod
+    def _run_scenario(
+        entry_h_m: float, steps: int
+    ) -> list[tuple[float, float, float, float]]:
+        driver = (
+            """
+local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = {alt_m} }, PROFILE)
+state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
+for i = 1, {steps} do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+    print(string.format("%.9f;%.9f;%.9f;%.9f", state.dbg_shortfall, state.dbg_effective_shortfall, state.theta_i, state.phi_d))
+end
+""".replace("{profile_path}", str(_FLIGHT_PROFILE_LUA))
+            .replace("{alt_m}", f"{entry_h_m + 500.0}")
+            .replace("{steps}", str(steps))
+            .replace(
+                "{measured}",
+                _measured(
+                    ias_mps=150.0 / 3.6,
+                    v_t_mps=150.0 / 3.6,
+                    h_m=entry_h_m,
+                    asl_m=entry_h_m,
+                    rotor_rpm_pct=80.0,
+                ),
+            )
+        )
+        lines = _run(driver)
+        return [tuple(float(x) for x in line.split(";")) for line in lines]  # type: ignore[misc]
+
+    def test_height_to_spare_suppresses_pitch_back_and_bank_easing(self) -> None:
+        """Entry height 150 m: `break_floor = max(50, 150-100) = 50`, so
+        `height_margin_m = 100` -- ten times `break_height_give_band_m`
+        (30) -- so `height_available_frac` saturates at 1 and `effective_
+        shortfall` is driven to (near) zero even though the raw
+        `shortfall` this guard produces is large (~0.49)."""
+        rows = self._run_scenario(entry_h_m=150.0, steps=10)
+        for shortfall, effective, theta_i, _phi_d in rows:
+            assert shortfall > 0.3  # the guard really is producing a shortfall
+            assert effective < 1e-6
+            assert theta_i == 0.0  # theta_speed_give never engages
+
+    def test_near_the_break_floor_engages_at_pre_amendment_strength(self) -> None:
+        """Entry height 50 m: `break_floor = max(50, 50-100) = 50`, so
+        `height_margin_m = 0` -- `height_available_frac` is 0 and
+        `effective_shortfall` equals the raw `shortfall` exactly, the
+        same as the ordinary (non-break) chain would have produced
+        before this amendment."""
+        rows = self._run_scenario(entry_h_m=50.0, steps=10)
+        for shortfall, effective, theta_i, _phi_d in rows:
+            assert shortfall > 0.3
+            assert abs(effective - shortfall) < 1e-6
+            assert theta_i > 0.0  # theta_speed_give is engaging
+
+    def test_bank_feed_forward_is_steeper_with_height_to_spare_than_near_the_floor(
+        self,
+    ) -> None:
+        """The same comparison, from the bank side (`phi_ff * phi_scale`,
+        section B/G combined): with height to spare the feed-forward is
+        never eased, so the commanded bank after the same ten frames is
+        well past the near-floor case, where `phi_scale` is actively
+        shrinking it -- "steep bank angle ... to get a fast turn rate",
+        not a shallower one fighting a pitch-back correction."""
+        spare = self._run_scenario(entry_h_m=150.0, steps=10)
+        near_floor = self._run_scenario(entry_h_m=50.0, steps=10)
+        phi_d_spare = spare[-1][3]
+        phi_d_near_floor = near_floor[-1][3]
+        assert phi_d_spare > phi_d_near_floor * 2.0
+
+
+class TestLV2BreakFloorIsBreakOnly:
+    """LV-2 amendment, section D -- `break_floor_agl_m` (50.0, shipped
+    `flight_profile.lua`) replaces `limits.floor_agl_m` (40.0, unchanged)
+    only in the break-floor clamp `law_update` already computed (U11
+    answered, 2026-11-27, verbatim: "only breaks"). A break entered at
+    120 m AGL with `break_max_height_loss_m` (100, unchanged `LIMITS`)
+    would have floored at `max(40, 120-100) = 40` before this amendment;
+    it now floors at `max(50, 20) = 50` -- the new, higher, break-only
+    value, not the old one."""
+
+    def test_break_floor_converges_near_the_new_50m_floor_not_the_old_40m(
+        self,
+    ) -> None:
+        driver = """
+local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
+-- Force a far-below floor so the shaper would chase it if the break
+-- floor did not intervene (same technique as `TestBreakHeightFloor`).
+state.alt_goal_m = 0.0
+state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
+local dt = 0.05
+local min_h_ref = state.h_ref
+for i = 1, 400 do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    if state.h_ref < min_h_ref then min_h_ref = state.h_ref end
+end
+print(string.format("%.6f", min_h_ref))
+""".replace("{profile_path}", str(_FLIGHT_PROFILE_LUA)).replace(
+            "{measured}",
+            _measured(
+                ias_mps=150.0 / 3.6,
+                v_t_mps=150.0 / 3.6,
+                h_m=120.0,
+                asl_m=120.0,
+            ),
+        )
+        lines = _run(driver)
+        min_h_ref = float(lines[0])
+        # Converges close to the new 50 m floor -- a regression to the
+        # old `limits.floor_agl_m` (40) would settle near ~41, failing
+        # this bound.
+        assert min_h_ref >= 50.0 - 1e-6
+        assert min_h_ref < 55.0
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:
