@@ -343,20 +343,20 @@ rather than from this dump).
 | `SAU-B-SWITCH-PTR` | Autopilot Altitude Control | pilot (defaulted) | springloaded_3_pos_tumb | [3019, 3017] | [253] |  | -1/0/1 momentary |  |
 | `SAU-BRIGHT-DIM-PTR` | Buttons Lighting BRIGHT/DIM | pilot (defaulted) | default_2_position_tumb | [3070] | [267] |  | 0/1 |  |
 | `SAU-H-KNOB-PTR` | Autopilot H Channel Delta Correction | pilot (defaulted) | default_axis | [3023] | [234] |  | 0 to 1 continuous (gain 0.1) |  |
-| `SAU-H-OFF-PTR` | Autopilot H Channel OFF | pilot (defaulted) | default_square_button | [3007] | [236] |  | 0/1 momentary |  |
+| `SAU-H-OFF-PTR` | Autopilot H Channel OFF | pilot (defaulted) | default_square_button | [3007] | [236] |  | 0/1 momentary | `p_sau_h_channel_off` |
 | `SAU-H-ON-PTR` | Autopilot H Channel ON | pilot (defaulted) | default_square_button | [3005] | [237] |  | 0/1 momentary | `p_sau_h_channel_on` |
 | `SAU-HEIGHT-OFF-PTR` | Autopilot Altitude Mode OFF | pilot (defaulted) | default_square_button | [3034] | [257] |  | 0/1 momentary |  |
 | `SAU-HEIGHT-ON-PTR` | Autopilot Altitude Mode ON | pilot (defaulted) | default_square_button | [3032] | [258] |  | 0/1 momentary |  |
 | `SAU-HOVER-ON-PTR` | Autopilot Hover Mode ON | pilot (defaulted) | default_square_button | [3036] | [259] |  | 0/1 momentary |  |
 | `SAU-HOVER-ROUTE-OFF-PTR` | Autopilot Route and Hover Modes OFF | pilot (defaulted) | default_square_button | [3040] | [260] |  | 0/1 momentary |  |
 | `SAU-K-KNOB-PTR` | Autopilot K Channel Delta Correction | pilot (defaulted) | default_axis | [3021] | [240] |  | 0 to 1 continuous (gain 0.1) |  |
-| `SAU-K-OFF-PTR` | Autopilot K Channel OFF | pilot (defaulted) | default_button | [3003] | [242] |  | 0/1 momentary |  |
+| `SAU-K-OFF-PTR` | Autopilot K Channel OFF | pilot (defaulted) | default_button | [3003] | [242] |  | 0/1 momentary | `p_sau_k_channel_off` |
 | `SAU-K-ON-PTR` | Autopilot K Channel ON | pilot (defaulted) | default_button | [3001] | [243] |  | 0/1 momentary | `p_sau_k_channel_on` |
 | `SAU-ROUTE-ON-PTR` | Autopilot Route Mode ON | pilot (defaulted) | default_square_button | [3038] | [261] |  | 0/1 momentary |  |
 | `SAU-SPEED-OFF-PTR` | Autopilot Speed Stabilization OFF | pilot (defaulted) | default_button | [3044] | [269] |  | 0/1 momentary |  |
 | `SAU-SPEED-ON-PTR` | Autopilot Speed Stabilization ON | pilot (defaulted) | default_button | [3042] | [268] |  | 0/1 momentary |  |
 | `SAU-T-KNOB-PTR` | Autopilot T Channel Delta Correction | pilot (defaulted) | default_axis | [3025] | [246] |  | 0 to 1 continuous (gain 0.1) |  |
-| `SAU-T-OFF-PTR` | Autopilot T Channel OFF | pilot (defaulted) | default_square_button | [3011] | [248] |  | 0/1 momentary |  |
+| `SAU-T-OFF-PTR` | Autopilot T Channel OFF | pilot (defaulted) | default_square_button | [3011] | [248] |  | 0/1 momentary | `p_sau_t_channel_off` |
 | `SAU-T-ON-PTR` | Autopilot T Channel ON | pilot (defaulted) | default_square_button | [3009] | [249] |  | 0/1 momentary | `p_sau_t_channel_on` |
 | `STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3027] | [742] |  | 0/1 momentary |  |
 

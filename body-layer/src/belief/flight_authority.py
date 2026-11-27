@@ -263,6 +263,32 @@ def controls_to_player_edge(
     return prev.fd_mode in _HAS_CONTROLS_MODES and new.fd_mode == "off"
 
 
+def controls_to_petrovich_edge(
+    prev: FlightAuthorityState, new: FlightAuthorityState
+) -> bool:
+    """`True` exactly when this poll's `fd_mode` moved into `"m1"` from
+    anything else -- Petrovich taking the raw axes, whichever path got
+    him there: a voice take (`"off"`/`"taking"` -> `"m1"`) or the unpark
+    mode 2 -> mode 1 path (`"m2"` -> `"m1"`) alike
+    (`plans/flight-lift-vector/explore-notes.md`, "M4 SAU explore
+    (2026-11-28)" -- settled: "on entering mode 1 ... SAU H, K, T OFF,
+    B ON"). The twin of `controls_to_player_edge` above, read the other
+    direction.
+
+    Fires exactly once per entry: `new.fd_mode == "m1"` is false on every
+    poll `fd_mode` merely stays `"m1"`, so a re-take (m1 -> off -> taking
+    -> m1 again) fires once on the poll that lands back in `"m1"`, not
+    on every poll it holds there. Never assumes the channel state the
+    player left (same direction as the comment on `prev.fd_mode in
+    _HAS_CONTROLS_MODES` above): the engine's own implicit self-check
+    already makes a redundant write a no-op, not this function's job.
+
+    Compares `fd_mode` directly, same as `controls_to_player_edge`: the
+    default/no-sample-yet state is `"off"`, never `"m1"` itself, so
+    there is no "no edge to observe" case to guard against here either."""
+    return prev.fd_mode != "m1" and new.fd_mode == "m1"
+
+
 def _digit_readback(value: int) -> str:
     """Spells a non-negative integer digit by digit, space-separated --
     `CrewConsole._digit_readback`'s own algorithm, copied rather than

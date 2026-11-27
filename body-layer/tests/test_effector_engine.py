@@ -188,6 +188,7 @@ def _sequence(
     trigger: EffectorTrigger,
     rows: tuple[object, ...],
     registry: dict[str, EffectorDef] = _REGISTRY,
+    step_delay_s: float | None = None,
 ) -> SequenceFile:
     return SequenceFile(
         aircraft=AIRCRAFT,
@@ -196,6 +197,7 @@ def _sequence(
         rows=rows,  # type: ignore[arg-type]
         source_path=Path("fake.md"),
         read_args=_read_args_for(rows, registry),
+        step_delay_s=step_delay_s,
     )
 
 
@@ -333,6 +335,54 @@ def test_cold_takeoff_writes_four_switches_in_order_with_spacing() -> None:
     }
     # Exactly one read for the whole run (E1's own "no per-tick cost").
     assert client.read_calls == [[761, 773, 885, 955]]
+
+
+def test_step_delay_s_override_writes_every_row_the_same_poll() -> None:
+    """`[[BL-16]]` M4, user direction 2026-11-28: the SAU channel rows
+    must go out "right away," with no gap -- a file's own `step-delay-s`
+    header param (`SequenceFile.step_delay_s`) overrides `EFFECTOR_
+    SEQUENCE_STEP_DELAY_S` for every write in that file. Same four-switch
+    fixture as `test_cold_takeoff_writes_four_switches_in_order_with_
+    spacing` above, but `step_delay_s=0.0`: all four writes land from a
+    single `advance` call, not one per call."""
+    client = _FakeAircraftClient()
+    client.read_values = {773: 0.0, 761: 0.0, 885: 0.0, 955: 0.0}
+    no_gap_trigger = EffectorTrigger.OBSERV_ON
+    sequences = {
+        (AIRCRAFT, PETROVICH_ROLE, no_gap_trigger.value): _sequence(
+            no_gap_trigger, _TAKEOFF_ROWS, step_delay_s=0.0
+        )
+    }
+    state = fire_trigger(EffectorRunState(), no_gap_trigger, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), sequences, _REGISTRY)
+
+    assert client.writes == [
+        (6, 3028, 1.0),
+        (16, 3015, 1.0),
+        (7, 3001, 1.0),
+        (6, 3030, 1.0),
+    ]
+    assert no_gap_trigger not in state.runs
+
+
+def test_other_sequences_keep_the_default_spacing_unaffected() -> None:
+    """A file with no `step-delay-s` header param (`step_delay_s=None`,
+    every pre-existing sequence) keeps the engine's own default -- one
+    write per poll, exactly as `test_cold_takeoff_writes_four_switches_
+    in_order_with_spacing` already pins; this just confirms the override
+    added for the SAU rows did not change that default anywhere else."""
+    client = _FakeAircraftClient()
+    client.read_values = {773: 0.0, 761: 0.0, 885: 0.0, 955: 0.0}
+    state = fire_trigger(EffectorRunState(), EffectorTrigger.TAKEOFF, now_sim=0.0)
+
+    state = advance(state, 0.0, _client(client), _SEQUENCES, _REGISTRY)
+
+    # Only the first row's write landed this poll -- the other three are
+    # still spaced EFFECTOR_SEQUENCE_STEP_DELAY_S apart, unaffected by
+    # the override that exists for other files.
+    assert client.writes == [(6, 3028, 1.0)]
+    assert EffectorTrigger.TAKEOFF in state.runs
 
 
 # --- R12: implicit self-check -----------------------------------------------

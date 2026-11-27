@@ -148,7 +148,12 @@ PETROVICH_ROLE: Final[str] = "copilot"
 #: GUIDANCE_UNIT_SWITCH_DELAY_S` (D10); same value, same reasoning (the
 #: measured ~3-frame/~0.1s DCS switch-animation ramp plus margin). A
 #: `tuning.toml` still naming the old key gets this module's own "unknown
-#: key" warning, same as any other renamed/removed tunable.
+#: key" warning, same as any other renamed/removed tunable. A single
+#: sequence file may override this default for every write it makes via
+#: its own optional `step-delay-s` header param (`SequenceFile.
+#: step_delay_s`, `effector_sequences._OPTIONAL_HEADER_KEYS`) -- added
+#: 2026-11-28 for the SAU channel rows (`[[BL-16]]` M4), which the user
+#: wants written back-to-back, not spaced by this default.
 EFFECTOR_SEQUENCE_STEP_DELAY_S: Final[float] = tuning.real(
     "belief.effector_engine.EFFECTOR_SEQUENCE_STEP_DELAY_S",
     1.0,
@@ -680,11 +685,16 @@ def advance(
                 break
             if outcome.spoken:
                 spoken.append(outcome.spoken)
+            step_delay_s = (
+                sequence.step_delay_s
+                if sequence.step_delay_s is not None
+                else EFFECTOR_SEQUENCE_STEP_DELAY_S
+            )
             cursor = replace(
                 cursor,
                 row_index=cursor.row_index + 1,
                 next_due_sim=(
-                    now_sim + EFFECTOR_SEQUENCE_STEP_DELAY_S
+                    now_sim + step_delay_s
                     if outcome.result == "written"
                     else cursor.next_due_sim
                 ),

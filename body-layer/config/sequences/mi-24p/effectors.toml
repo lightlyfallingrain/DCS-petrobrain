@@ -117,3 +117,22 @@ values = { on = 1.0, off = 0.0 }
 # Same momentary shape and same unverified repeat-press question as
 # p_sau_h_channel_on above.
 
+[effectors.p_sau_h_channel_off]
+source_element = "SAU-H-OFF-PTR"    # arg 236
+values = { on = 1.0, off = 0.0 }
+# The H channel's own OFF button (`[[BL-16]]` M4, 2026-11-28) -- a
+# separate momentary button from p_sau_h_channel_on above, not the
+# same switch's "off" position; pressing it is what actually turns the
+# H channel off. Same momentary shape and same unverified repeat-press
+# question as p_sau_h_channel_on.
+
+[effectors.p_sau_k_channel_off]
+source_element = "SAU-K-OFF-PTR"    # arg 242
+values = { on = 1.0, off = 0.0 }
+# Same OFF-button shape as p_sau_h_channel_off above.
+
+[effectors.p_sau_t_channel_off]
+source_element = "SAU-T-OFF-PTR"    # arg 248
+values = { on = 1.0, off = 0.0 }
+# Same OFF-button shape as p_sau_h_channel_off above.
+

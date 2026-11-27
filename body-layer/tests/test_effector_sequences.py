@@ -286,6 +286,103 @@ def test_read_args_exactly_64_distinct_args_loads(tmp_path: Path) -> None:
     assert len(sequences[key].read_args) == 64
 
 
+def test_file_without_step_delay_s_header_defaults_to_none(tmp_path: Path) -> None:
+    """Every pre-existing file omits `step-delay-s` -- `SequenceFile.
+    step_delay_s` stays `None`, meaning "use the engine's own default,"
+    unaffected by `[[BL-16]]` M4's new optional header param."""
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER + "\n" + _DATA_HEADER + "| | observ | on | | OBSERV |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert errors == []
+    key = ("Mi-24P", "copilot", "takeoff")
+    assert sequences[key].step_delay_s is None
+
+
+def test_step_delay_s_header_is_parsed_and_applied(tmp_path: Path) -> None:
+    """`[[BL-16]]` M4, user direction 2026-11-28: a file may set
+    `step-delay-s` in its header to override `belief.effector_engine.
+    EFFECTOR_SEQUENCE_STEP_DELAY_S` for every write it makes."""
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER.replace(
+            "| run-on-trigger | takeoff |\n",
+            "| run-on-trigger | takeoff |\n| step-delay-s | 0 |\n",
+        )
+        + "\n"
+        + _DATA_HEADER
+        + "| | observ | on | | OBSERV |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert errors == []
+    key = ("Mi-24P", "copilot", "takeoff")
+    assert sequences[key].step_delay_s == 0.0
+
+
+def test_step_delay_s_non_numeric_drops_the_file(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER.replace(
+            "| run-on-trigger | takeoff |\n",
+            "| run-on-trigger | takeoff |\n| step-delay-s | soon |\n",
+        )
+        + "\n"
+        + _DATA_HEADER
+        + "| | observ | on | | OBSERV |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert sequences == {}
+    assert len(errors) == 1
+    assert "step-delay-s must be a number" in errors[0].reason
+
+
+def test_step_delay_s_negative_drops_the_file(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER.replace(
+            "| run-on-trigger | takeoff |\n",
+            "| run-on-trigger | takeoff |\n| step-delay-s | -1 |\n",
+        )
+        + "\n"
+        + _DATA_HEADER
+        + "| | observ | on | | OBSERV |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert sequences == {}
+    assert len(errors) == 1
+    assert "finite number >= 0" in errors[0].reason
+
+
+def test_unknown_header_key_other_than_step_delay_s_still_rejected(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "mi-24p" / "t.md",
+        _TAKEOFF_HEADER.replace(
+            "| run-on-trigger | takeoff |\n",
+            "| run-on-trigger | takeoff |\n| bogus-param | 1 |\n",
+        )
+        + "\n"
+        + _DATA_HEADER
+        + "| | observ | on | | OBSERV |\n",
+    )
+
+    sequences, errors = load_sequences(tmp_path, _REGISTRIES)
+
+    assert sequences == {}
+    assert len(errors) == 1
+    assert "extra=['bogus-param']" in errors[0].reason
+
+
 def test_unknown_trigger_drops_the_file(tmp_path: Path) -> None:
     # `bogus-trigger` -- not `mission-start`, which `EffectorTrigger` now
     # knows (`plans/effector-sequences/explore-notes.md`, "Two new

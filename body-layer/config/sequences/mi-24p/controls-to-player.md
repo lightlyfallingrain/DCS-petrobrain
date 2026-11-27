@@ -3,6 +3,7 @@
 | aircraft | Mi-24P |
 | petrovich-role | copilot |
 | run-on-trigger | controls-to-player |
+| step-delay-s | 0 |
 
 | condition | effector | value | petrovich-says | comment |
 | --- | --- | --- | --- | --- |

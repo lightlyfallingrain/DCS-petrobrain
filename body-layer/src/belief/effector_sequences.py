@@ -19,9 +19,10 @@ the sequences that live under that one directory.
 
 Two tables per file (plan): a 2-column header table naming exactly
 `aircraft` / `petrovich-role` / `run-on-trigger` (the key for duplicate
-detection, not the filename), and a 5-column data table
-`condition | effector | value | petrovich-says | comment`. Each data
-row is one of:
+detection, not the filename) plus, optionally, `step-delay-s`
+(`_OPTIONAL_HEADER_KEYS`'s own docstring has why), and a 5-column data
+table `condition | effector | value | petrovich-says | comment`. Each
+data row is one of:
 
 - a **switch row** -- `effector`/`value` name a registry entry and one
   of its `values`; `condition`, if present, is `<effector> = <value>`
@@ -46,6 +47,7 @@ out a second time."""
 
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping
@@ -120,6 +122,16 @@ class EffectorTrigger(Enum):
     #: urgent line, since the SAU channels need to be on for the player
     #: regardless of why he got the controls back.
     CONTROLS_TO_PLAYER = "controls-to-player"
+    #: Added 2026-11-28 (`plans/flight-lift-vector/explore-notes.md`, "M4
+    #: SAU explore (2026-11-28)" -- settled: "yes, drop SAU usage from
+    #: BL-16, build that handover SAU channels on/off as suggested" --
+    #: "on entering mode 1 ... SAU H, K, T OFF, B ON"). Fired from
+    #: `body.py`'s own `belief.flight_authority` neighbourhood, on
+    #: `controls_to_petrovich_edge` -- `fd_mode` moving into `"m1"` from
+    #: anything else, whichever path got him there (a voice take or the
+    #: unpark mode 2 -> mode 1 path). The twin of `CONTROLS_TO_PLAYER`
+    #: above, read the other direction; never fires on entering mode 2.
+    CONTROLS_TO_PETROVICH = "controls-to-petrovich"
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +270,14 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
         ),
         cardinality="every_time",
     ),
+    EffectorTrigger.CONTROLS_TO_PETROVICH: TriggerInfo(
+        description=(
+            "Petrovich takes the raw axes: fd_mode moves into m1 from "
+            "anything else, for any cause -- a voice take, or the unpark "
+            "mode 2 -> mode 1 path. Not fired on entering mode 2."
+        ),
+        cardinality="every_time",
+    ),
 }
 
 #: The trigger names a sequence file's `run-on-trigger` header cell may
@@ -269,6 +289,16 @@ _REQUIRED_HEADER_KEYS: Final[tuple[str, ...]] = (
     "petrovich-role",
     "run-on-trigger",
 )
+#: Optional header params a file may add beside the three required ones
+#: above -- present only when a file needs to say something the required
+#: three cannot. `step-delay-s` (added 2026-11-28, user direction on
+#: `[[BL-16]]` M4: "for the SAU channel on/off changes, do not wait
+#: between them, just turn all on right away ... this case is an
+#: exception") overrides `belief.effector_engine.
+#: EFFECTOR_SEQUENCE_STEP_DELAY_S` for every write in *this* file only --
+#: the global ~1s spacing stays the default for every other sequence.
+#: A file that omits it keeps the engine's own default unchanged.
+_OPTIONAL_HEADER_KEYS: Final[tuple[str, ...]] = ("step-delay-s",)
 _DATA_COLUMNS: Final[tuple[str, ...]] = (
     "condition",
     "effector",
@@ -347,6 +377,11 @@ class SequenceFile:
     #: condition that names another switch is included, deliberately --
     #: "yes, a condition that names another switch is included."
     read_args: frozenset[int]
+    #: The optional `step-delay-s` header param, parsed and range-checked
+    #: already (`_parse_header`) -- `None` when the file did not set it,
+    #: meaning "use `belief.effector_engine.
+    #: EFFECTOR_SEQUENCE_STEP_DELAY_S`, like every other file."
+    step_delay_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,18 +447,47 @@ def _parse_header(
         values[key] = value
 
     missing = [k for k in _REQUIRED_HEADER_KEYS if k not in values]
-    extra = [k for k in values if k not in _REQUIRED_HEADER_KEYS]
+    extra = [
+        k
+        for k in values
+        if k not in _REQUIRED_HEADER_KEYS and k not in _OPTIONAL_HEADER_KEYS
+    ]
     if missing or extra:
         return [
             SequenceError(
                 file=filename,
                 line=None,
                 reason=(
-                    f"header must have exactly {_REQUIRED_HEADER_KEYS}; "
+                    f"header must have exactly {_REQUIRED_HEADER_KEYS}, "
+                    f"optionally {_OPTIONAL_HEADER_KEYS}; "
                     f"missing={missing}, extra={extra}"
                 ),
             )
         ], {}
+
+    if "step-delay-s" in values:
+        raw_step_delay = values["step-delay-s"]
+        try:
+            step_delay_value = float(raw_step_delay)
+        except ValueError:
+            return [
+                SequenceError(
+                    file=filename,
+                    line=None,
+                    reason=f"step-delay-s must be a number, got {raw_step_delay!r}",
+                )
+            ], {}
+        if not math.isfinite(step_delay_value) or step_delay_value < 0:
+            return [
+                SequenceError(
+                    file=filename,
+                    line=None,
+                    reason=(
+                        "step-delay-s must be a finite number >= 0, got "
+                        f"{raw_step_delay!r}"
+                    ),
+                )
+            ], {}
 
     trigger = values["run-on-trigger"]
     if trigger not in KNOWN_TRIGGERS:
@@ -635,6 +699,8 @@ def _load_one_file(
             )
         ], None
 
+    step_delay_s = float(header["step-delay-s"]) if "step-delay-s" in header else None
+
     return [], SequenceFile(
         aircraft=header["aircraft"],
         petrovich_role=header["petrovich-role"],
@@ -642,6 +708,7 @@ def _load_one_file(
         rows=tuple(rows),
         source_path=path,
         read_args=read_args,
+        step_delay_s=step_delay_s,
     )
 
 

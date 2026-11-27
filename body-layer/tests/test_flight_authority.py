@@ -24,6 +24,7 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    controls_to_petrovich_edge,
     controls_to_player_edge,
     decide_carried_value_speech,
     decide_flight_speech,
@@ -295,6 +296,51 @@ class TestControlsToPlayerEdge:
             controls_to_player_edge(FlightAuthorityState(), FlightAuthorityState())
             is False
         )
+
+
+class TestControlsToPetrovichEdge:
+    """`controls_to_petrovich_edge` -- the twin of `TestControlsToPlayerEdge`
+    above, the other direction: fires on an `fd_mode` edge into `"m1"`
+    from anything else (`plans/flight-lift-vector/explore-notes.md`, "M4
+    SAU explore (2026-11-28)")."""
+
+    @pytest.mark.parametrize("prior_mode", ["off", "taking", "m2"])
+    def test_fires_entering_m1_from_any_other_mode(self, prior_mode: str) -> None:
+        prev = FlightAuthorityState(fd_mode=prior_mode)
+        new = FlightAuthorityState(fd_mode="m1")
+        assert controls_to_petrovich_edge(prev, new) is True
+
+    def test_does_not_fire_when_already_in_m1(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m1")
+        new = FlightAuthorityState(fd_mode="m1")
+        assert controls_to_petrovich_edge(prev, new) is False
+
+    def test_does_not_fire_on_an_edge_into_m2(self) -> None:
+        prev = FlightAuthorityState(fd_mode="off")
+        new = FlightAuthorityState(fd_mode="m2", mode_cause="park")
+        assert controls_to_petrovich_edge(prev, new) is False
+
+    def test_does_not_fire_on_an_edge_into_off(self) -> None:
+        prev = FlightAuthorityState(fd_mode="m1")
+        new = FlightAuthorityState(fd_mode="off", mode_cause="release")
+        assert controls_to_petrovich_edge(prev, new) is False
+
+    def test_does_not_fire_on_the_default_no_sample_state(self) -> None:
+        assert (
+            controls_to_petrovich_edge(FlightAuthorityState(), FlightAuthorityState())
+            is False
+        )
+
+    def test_fires_once_on_a_retake_cycle(self) -> None:
+        """m1 -> off -> taking -> m1 fires exactly once, on the poll
+        that lands back in m1 -- not on the intermediate edges."""
+        m1 = FlightAuthorityState(fd_mode="m1")
+        off = FlightAuthorityState(fd_mode="off", mode_cause="release")
+        taking = FlightAuthorityState(fd_mode="taking", mode_cause="take")
+        m1_again = FlightAuthorityState(fd_mode="m1")
+        assert controls_to_petrovich_edge(m1, off) is False
+        assert controls_to_petrovich_edge(off, taking) is False
+        assert controls_to_petrovich_edge(taking, m1_again) is True
 
 
 class TestDecideCarriedValueSpeech:

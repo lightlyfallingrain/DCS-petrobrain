@@ -9095,6 +9095,112 @@ def test_a_take_edge_does_not_fire_the_sau_handover(tmp_path: Path) -> None:
     assert aircraft_client.cockpit_switch_writes == []
 
 
+# -- Controls-to-petrovich trigger (`plans/flight-lift-vector/
+# explore-notes.md`, "M4 SAU explore (2026-11-28)") -- the twin of the
+# controls-to-player trigger above, through the real poll loop.
+# `controls_to_petrovich_edge` itself is tested directly in
+# `test_flight_authority.py`; this just confirms `body.py` fires
+# `EffectorTrigger.CONTROLS_TO_PETROVICH` off it. ---------------------------
+
+
+def _effector_config_with_controls_to_petrovich_sequence() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    sequences, registry = _fixture_effector_config()
+    merged = dict(sequences)
+    merged[(AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.CONTROLS_TO_PETROVICH.value)] = (
+        SequenceFile(
+            aircraft=AIRCRAFT,
+            petrovich_role=PETROVICH_ROLE,
+            trigger=EffectorTrigger.CONTROLS_TO_PETROVICH.value,
+            rows=(
+                SwitchRow(
+                    condition=None,
+                    effector="observ",
+                    value="on",
+                    petrovich_says="",
+                    comment="",
+                ),
+            ),
+            source_path=Path("fake-controls-to-petrovich.md"),
+            read_args=frozenset({886}),
+        )
+    )
+    return merged, registry
+
+
+_CONTROLS_TO_PETROVICH_WRITE = (7, 3002, 1.0)  # observ on
+
+
+def test_a_voice_take_into_m1_fires_controls_to_petrovich(tmp_path: Path) -> None:
+    aircraft_client, _runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "taking", 1, "take"
+        )
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "take")
+        assert _wait_for(
+            lambda: (
+                _CONTROLS_TO_PETROVICH_WRITE in aircraft_client.cockpit_switch_writes
+            )
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [_CONTROLS_TO_PETROVICH_WRITE]
+
+
+def test_an_unpark_into_m1_fires_controls_to_petrovich(tmp_path: Path) -> None:
+    """The unpark mode 2 -> mode 1 take fires the same trigger as a
+    voice take -- "whichever path got him there"."""
+    aircraft_client, _runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        aircraft_client.flight_desired_state = _flight_desired_sample("m2", 1, None)
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "unpark")
+        assert _wait_for(
+            lambda: (
+                _CONTROLS_TO_PETROVICH_WRITE in aircraft_client.cockpit_switch_writes
+            )
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [_CONTROLS_TO_PETROVICH_WRITE]
+
+
+def test_an_unpark_into_m2_does_not_fire_controls_to_petrovich(
+    tmp_path: Path,
+) -> None:
+    """Entering mode 2 (parked) must never fire the mode-1 trigger."""
+    aircraft_client, _runner, _console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        aircraft_client.flight_desired_state = _flight_desired_sample("m2", 1, "park")
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
+
+
 # -- Attack-run triggers (user, 2026-11-17: "add the attack-run-*
 # triggers"). The edge logic is a pure function; one test runs it through
 # the real poll loop. ------------------------------------------------------

@@ -202,6 +202,7 @@ from belief.flight_authority import (
     PendingFlightReadback,
     PendingTake,
     advance_flight_authority,
+    controls_to_petrovich_edge,
     controls_to_player_edge,
     decide_carried_value_speech,
     decide_flight_speech,
@@ -5944,6 +5945,19 @@ def _run_crew_text_poll_loop(
                             runner.effector_state = fire_effector_trigger(
                                 runner.effector_state,
                                 EffectorTrigger.CONTROLS_TO_PLAYER,
+                                runner.last_t_sim,
+                            )
+                        # The twin of the edge above, the other
+                        # direction: Petrovich taking the raw axes
+                        # (`controls_to_petrovich_edge`), whichever path
+                        # got him there -- sets SAU H/K/T off, B on.
+                        if controls_to_petrovich_edge(
+                            previous_flight_authority,
+                            crew_console.flight_authority_state,
+                        ):
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.CONTROLS_TO_PETROVICH,
                                 runner.last_t_sim,
                             )
                         # U2's carried-value lines (section 3a's own
