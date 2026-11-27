@@ -160,3 +160,40 @@ Amended diagrams (after U1–U8 and the slowing-down note) shown as a throwaway 
 verbatim: *"diagrams ok, proceed"*. U8 answered *"no floor"* (plan.md). On the SAU: *"The DCS mi-24
 PDF is the only source on the SAU we have. Not likely anything new there."* The user's own SAU
 description above is the reference.
+
+## LV-2 explore — breaks (2026-11-27)
+
+Inputs put to the user: the fourth re-fly's break note (*"Break turn starts fine, but then nose rises
+too much and bank smooths soon. Could fly breaks more agressively, it is an escape manouvre."*), the
+plan's E5 target (60–80° bank, ≤ 100 m height loss), and the G limits from
+`aircraft-layer/research/2026-11-27-mi24p-rotor-engine-limits.md` (1.8 G light / 1.5–1.6 G combat
+above 200 km/h). Shown: level-turn bank and 180° time by G (1.5 G → 48°, 1.8 G → 56°, 2.0 G → 60°,
+2.5 G → 66°; at 250 km/h a 180° takes 20 / 15 / 13 / 10 s), and that 70° bank at 1.8 G sinks
+~3.8 m/s² and spends 100 m in ~7 s. Questions: G pulled and for how long; what "more aggressive"
+means; what gives when it cannot be level; how a break ends.
+
+User, verbatim:
+
+> 1 - momentary overload accepted, I seem to go to about 2 G.
+>
+> 2 - with latest changes, roll-in is good, pull back is too much and causes too much nose up and
+> resulting violent correction oscillation. So, less and smoother pull back than currently. Should
+> not need much cyclic back, instead steep bank angle and some collective to get a fast turn rate.
+>
+> 3 - height gives first, as long as we're above 50 m AGL
+>
+> 4 - a break turn should be 90 degrees from the original heading. Or 180 in case of break away.
+> Therefore, just set desired heading as usual and fly to it. The difference of break turn is faster
+> turn rate, more aggressive manouvre to heading than normal turn.
+
+Reading, for the LV-2 amendment:
+
+- **G:** ~2 G momentarily in a break is accepted (above the 1.8 G reference); the reference limits
+  still bound ordinary flight.
+- **Shape:** roll-in already good. Less and smoother aft cyclic — the turn comes from steep bank plus
+  some collective, not from pulling the nose. The current pull drives nose-up and a violent
+  corrective oscillation.
+- **What gives:** height first, down to 50 m AGL. (Plan had "within 100 m of entry, never below 40 m
+  AGL" — the user's floor is 50 m and names no 100 m budget; the amendment must say which stands.)
+- **End:** a break is an ordinary heading goal — entry +90° (break), +180° (break away) — flown with
+  a faster turn rate and more aggressive capture than a normal turn. No separate end condition.
