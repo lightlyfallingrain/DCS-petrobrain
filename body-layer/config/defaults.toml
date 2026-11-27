@@ -298,9 +298,9 @@ MAX_IAS_KMH = 280.0
 MAX_TURN_BANK_DEG = 20.0
 
 # Decision 30 -- at or above this IAS, the same collective-rate guard caps a further increase, to stay clear of retreating blade stall.
-# status: agreed-guess | range: 100.0 .. 400.0
+# status: derived | range: 100.0 .. 400.0
 # source: belief/flight_control.py:RETREATING_BLADE_STALL_IAS_KMH
-RETREATING_BLADE_STALL_IAS_KMH = 250.0
+RETREATING_BLADE_STALL_IAS_KMH = 335.0
 
 # Mode-1 batch (`plans/flight-control/plan.md`, "Revised 2026-11-19", Decision 30) -- below this rotor RPM, `Export.lua`'s collective-rate guard caps any further increase.
 # status: agreed-guess | range: 50.0 .. 100.0

@@ -74,6 +74,13 @@ def _lua_executable() -> str | None:
 #: `floor_agl_m` is new to `law_update` this batch too (Decision 29's
 #: break floor) -- previously sent on the wire but never read inside
 #: the law itself.
+#: **`retreating_blade_stall_ias_kmh` corrected 2026-11-27 (round 3,
+#: `plans/flight-lift-vector/debug-2026-11-27.md`)** from 250.0 to
+#: 335.0, matching body-layer's own corrected production default
+#: (`belief.flight_control.RETREATING_BLADE_STALL_IAS_KMH`) -- the old
+#: test value was not "generous," it was the same too-low number the
+#: sixth re-fly's own feedback rejected ("that's well within operating
+#: range").
 _LIMITS = """
 local LIMITS = {
     takeover_level_bank_deg = 5.0,
@@ -87,7 +94,7 @@ local LIMITS = {
     turn_rate_band_frac = 0.10,
     floor_agl_m = 40.0,
     rotor_rpm_floor_pct = 85.0,
-    retreating_blade_stall_ias_kmh = 250.0,
+    retreating_blade_stall_ias_kmh = 335.0,
     break_max_height_loss_m = 100.0,
     vrs_ias_threshold_kmh = 50.0,
     vrs_max_descent_mps = 4.0,
@@ -902,7 +909,7 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 
     def test_near_retreating_blade_stall_caps_a_rising_collective(self) -> None:
         driver = f"""
-local measured = {_measured(h_m=100.0, w_mps=-5.0, ias_mps=235.0 / 3.6, v_t_mps=235.0 / 3.6)}
+local measured = {_measured(h_m=100.0, w_mps=-5.0, ias_mps=320.0 / 3.6, v_t_mps=320.0 / 3.6)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
 local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
@@ -910,7 +917,9 @@ print(string.format("%.6f", (next_state.u_c - state.u_c) / 0.05))
 """
         lines = _run(driver)
         # RETREATING_BLADE_STALL_MARGIN_KMH = 20.0 -- capped at or
-        # above 250.0 - 20.0 = 230.0 km/h; 235 km/h qualifies.
+        # above 335.0 - 20.0 = 315.0 km/h (round 3's V_NE-based
+        # threshold correction, was 230.0 km/h / 235 km/h against the
+        # old, too-low 250.0 km/h limit); 320 km/h qualifies.
         assert float(lines[0]) <= 1e-9
 
     def test_well_clear_of_both_guards_collective_rises_freely(self) -> None:
@@ -2593,32 +2602,29 @@ print(string.format("%.6f", measured.h_m - start_h))
     def test_shipped_gains_dip_is_bounded_by_the_blade_stall_guard_not_the_old_bug(
         self,
     ) -> None:
-        """review-debug-1127.md's own measurement, proved here rather
-        than only in a debug report: against the shipped
-        `flight_profile.lua` gains, the same 273->108 km/h decel loses
-        -19.3 m, not the stale-profile test's -9.3 m. Round 2 traced this
-        residual to a *different* mechanism than Round 1's bug: Decision
-        30's retreating-blade-stall guard
-        (`plans/flight-control/plan.md`) sets `collective_rate_cap_near_
-        blade_stall = 0.0` -- a hard freeze on every collective INCREASE
-        while IAS sits at/above `retreating_blade_stall_ias_kmh - margin`
-        (230 km/h here, since the scenario starts at 273 km/h, well above
-        it). For as long as IAS stays above that line the vertical loop's
-        own climb demand cannot act at all, by the law's own stated
-        philosophy (same plan: "the aircraft may still, worst case, lose
-        more than 100 m ... not a defect to engineer away" -- said of
-        this exact guard class). Confirmed causally, not just by
-        correlation: relaxing `collective_rate_cap_near_blade_stall` to
-        10.0/s for this scenario alone (diagnostic only, never committed)
-        cuts the loss to -3.3 m -- the guard, not the speed-give nudge
-        Round 1 fixed, is what the remaining loss is made of. The bound
-        below is the honest shipped-gain number with a small margin, not
-        a tightened target -- see the debug report's Round 2 section for
-        the open question this leaves for the user (whether that
-        guard's existing "not a defect" judgement, made for the rotor-RPM
-        floor case, is accepted for this blade-stall case too)."""
+        """Round 3 (`plans/flight-lift-vector/debug-2026-11-27.md`,
+        "Round 3"): Round 2 traced the residual -19.3 m dip to Decision
+        30's retreating-blade-stall guard (`plans/flight-control/
+        plan.md`), which sets `collective_rate_cap_near_blade_stall =
+        0.0` -- a hard freeze on every collective INCREASE while IAS
+        sits at/above `retreating_blade_stall_ias_kmh - margin` -- and
+        found the guard's own threshold (250 km/h, margin to 230) was
+        itself the defect the user flagged
+        (`docs/acceptance/2026-11-27-sortie-feedback.md`: "Above 230
+        km/h it forbids any collective increase -> no, that's well
+        within operating range"). The threshold is now re-based on the
+        DCS V_NE table (335 km/h, margin to 315 -- see body-layer's
+        `RETREATING_BLADE_STALL_IAS_KMH` docstring), so this scenario's
+        273 km/h start never crosses the freeze line at all: the dip
+        drops from -19.3 m to -3.3 m, matching Round 2's own mutation
+        check (relaxing the rate cap to 10.0/s for this scenario cut the
+        loss to the same -3.3 m) -- confirming the guard, not a
+        remaining law defect, was the whole residual. The name is kept
+        (the guard still exists and this scenario still exercises it
+        being *inactive* at this speed) rather than renamed, since a
+        decel starting above 315 km/h would still hit it."""
         min_dev, max_dev, final_kmh, _ = self._run_decel_scenario_shipped(n_frames=400)
-        assert min_dev > -22.0
+        assert min_dev > -5.0
         assert max_dev < 15.0
         # The decel still actually happens under the (brisk) shipped
         # speed-loop gains too.
@@ -2628,17 +2634,20 @@ print(string.format("%.6f", measured.h_m - start_h))
         self,
     ) -> None:
         """Same scenario, run out to 120 s (review-debug-1127.md's own
-        extension) -- confirms there is a real `alt_goal_m` position
-        reference behind the dip, not just a rate reference: once IAS
-        drops below the blade-stall margin and the vertical integrator
-        can act freely again, altitude overshoots back up (a real
-        recovery, not a flat/stuck line) before settling to (near) zero
-        deviation at the new, lower cruise speed."""
+        extension, retained after round 3's threshold fix) -- confirms
+        there is a real `alt_goal_m` position reference behind the dip,
+        not just a rate reference: altitude overshoots slightly above
+        the start (a real recovery, not a flat/stuck line) before
+        settling to (near) zero deviation at the new, lower cruise
+        speed. The overshoot itself shrank with the threshold fix (now
+        the guard barely engages, if at all, for this 273 km/h start) --
+        1.56 m, not Round 2's 4.85 m -- so the bound is tightened to
+        match, not left at the old, now-dishonest figure."""
         min_dev, max_dev, final_kmh, final_dev = self._run_decel_scenario_shipped(
             n_frames=2400
         )
-        assert min_dev > -22.0
-        assert max_dev > 2.0
+        assert min_dev > -5.0
+        assert max_dev > 1.0
         assert abs(final_dev) < 1.0
         assert abs(final_kmh - 108.0) < 5.0
 

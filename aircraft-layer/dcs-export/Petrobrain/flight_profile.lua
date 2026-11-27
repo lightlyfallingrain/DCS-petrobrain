@@ -274,17 +274,24 @@ M.PROFILES["Mi-24P"] = {
     -- 273->108 km/h decel still loses ~19 m in the toy plant with
     -- Round 1's fix and the shipped gains both active -- not the speed-
     -- give nudge Round 1 bounded. While IAS sits at/above `retreating_
-    -- blade_stall_ias_kmh - retreating_blade_stall_margin_kmh` (230 km/h
-    -- here), no collective increase is allowed at all, so the vertical
-    -- loop's own climb demand cannot act until IAS drops below that
-    -- line -- Decision 30's own stated posture for this guard class
-    -- (`plans/flight-control/plan.md`): "the aircraft may still, worst
-    -- case, lose more than 100 m ... not a defect to engineer away."
-    -- Left at 0.0, not widened -- see `aircraft-layer/research/2026-11-
-    -- 27-mi24p-rotor-engine-limits.md`: raising collective near
-    -- retreating blade stall is exactly the wrong direction; this guard
-    -- and the altitude-hold fix both want LESS collective reduction at
-    -- that envelope edge, not more.
+    -- blade_stall_ias_kmh - retreating_blade_stall_margin_kmh` (315 km/h
+    -- as of round 3's V_NE-based threshold correction, was 230 km/h
+    -- against the old, too-low 250 km/h limit), no collective increase
+    -- is allowed at all, so the vertical loop's own climb demand cannot
+    -- act until IAS drops below that line -- Decision 30's own stated
+    -- posture for this guard class (`plans/flight-control/plan.md`):
+    -- "the aircraft may still, worst case, lose more than 100 m ... not
+    -- a defect to engineer away." Left at 0.0, not widened. **Citation
+    -- corrected, round 3**: `aircraft-layer/research/2026-11-27-mi24p-
+    -- rotor-engine-limits.md`'s "High side, new" paragraph says the
+    -- opposite of what this comment used to claim -- raising collective
+    -- near this envelope edge LOWERS rotor RPM (helps the overspeed
+    -- case), the SAME direction the altitude-hold fix already pulls;
+    -- the note never says raising collective is "the wrong direction."
+    -- No high-side rotor-overspeed guard is built from this (out of
+    -- scope for round 3, noted for LV-2) -- this field stays 0.0 purely
+    -- on Decision 30's own accepted-loss posture above, not on a claim
+    -- about which direction collective should move.
     collective_rate_cap_near_blade_stall = 0.0,
 
     -- LV-1 amendment (2026-11-25, rotor-RPM warning, superseding the

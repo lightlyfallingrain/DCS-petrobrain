@@ -547,7 +547,13 @@ SAU H, K and T off itself before each new take.
    speed near entry, height loss ≤ 100 m, roll-out on the break heading), break away, one break
    started at about 120 m AGL (the 40 m floor holds), one break with a lowered
    `ROTOR_RPM_DUMMY_PCT` (the aircraft does less, silently, E8), one break entered at about 100 km/h
-   (gentler, no hand-back).
+   (gentler, no hand-back). **Routed here from round 3's blade-stall-threshold debug**
+   (`plans/flight-lift-vector/debug-2026-11-27.md`, "Round 3",
+   `aircraft-layer/research/2026-11-27-mi24p-rotor-engine-limits.md`): a G-load cap above
+   200 km/h (1.8 G light load, 1.5–1.6 G combat load, tighter still above 2 000 m or in turbulence)
+   and keeping rotor RPM ≥ 92% at high speed (low RPM lowers the retreating-blade-stall onset) are
+   both unbuilt — noted only, not designed, same "recorded only" posture section F already gives
+   the break chain. A natural fit for this stage's own break/turn card, not built as part of round 3.
 4. **LV-3 — low speed and hover regime.** `λ` blend (C, F), ground-speed reference (U2), gentlest
    schedule, the pedal yaw loop, the drift hold. (`MIN_IAS_KMH` and the commanded-speed floor are
    already gone — removed in LV-1, U8 — so there is nothing left to remove here.) Hover hold and

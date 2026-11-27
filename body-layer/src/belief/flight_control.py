@@ -257,13 +257,32 @@ ROTOR_RPM_FLOOR_PCT: Final[float] = tuning.real(
 
 #: Decision 30 -- at or above this IAS, the same collective-rate guard
 #: caps a further increase, to stay clear of retreating blade stall.
-#: The user's own number: "near or over 250 km/h."
+#: Originally the user's own agreed-guess number ("near or over
+#: 250 km/h"); **corrected 2026-11-27** after the sixth re-fly ("Above
+#: 230 km/h it forbids any collective increase" -> "no, that's well
+#: within operating range", `docs/acceptance/2026-11-27-sortie-
+#: feedback.md`). Re-based on the DCS Mi-24P V_NE table the user
+#: supplied (`aircraft-layer/research/2026-11-27-mi24p-rotor-engine-
+#: limits.md`): V_NE is altitude- and weight-dependent, but this field
+#: is a single number sent once as part of `flight_control_limits()`,
+#: with no altitude/weight channel of its own. Set flat to 335 km/h --
+#: the normal-weight (<= 11 200 kg) V_NE up to 1 000 m barometric --
+#: rather than plumbing altitude through this wire field: Petrovich's
+#: operating band is 50-800 m AGL normal, 1-2 km rare
+#: (`project_operating_altitude_envelope` memory), which the 335 figure
+#: covers exactly at the low end and still only overstates by 15 km/h
+#: at the top of the "rare" band (320 km/h at 1 000-2 000 m) -- a
+#: smaller error than the guard's own 20 km/h margin already carries.
+#: Weight is unknown to this module, so the normal-weight column is
+#: used unconditionally (a heavier aircraft's true V_NE is lower; this
+#: guard would not catch that case, same posture as every other
+#: feedback-only guard in this Decision-30 batch).
 RETREATING_BLADE_STALL_IAS_KMH: Final[float] = tuning.real(
     "belief.flight_control.RETREATING_BLADE_STALL_IAS_KMH",
-    250.0,
+    335.0,
     lo=100.0,
     hi=400.0,
-    status="agreed-guess",
+    status="derived",
 )
 
 #: Decision 29 -- the break's own absolute height-loss budget above the

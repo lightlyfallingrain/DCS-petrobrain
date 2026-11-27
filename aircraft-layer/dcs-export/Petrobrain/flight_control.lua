@@ -270,7 +270,13 @@ local fc_limits = {
     -- `tuning.py` carries the real value" posture as the M2 additions
     -- above.
     rotor_rpm_floor_pct = 85.0,
-    retreating_blade_stall_ias_kmh = 250.0,
+    -- Corrected 2026-11-27 -- was 250.0, the user's original agreed-
+    -- guess; re-based on the DCS V_NE table after the sixth re-fly's
+    -- "that's well within operating range" finding (`plans/flight-
+    -- lift-vector/debug-2026-11-27.md`, round 3) -- see body-layer
+    -- `belief.flight_control.RETREATING_BLADE_STALL_IAS_KMH`'s own
+    -- docstring for the altitude/weight reasoning behind 335.0.
+    retreating_blade_stall_ias_kmh = 335.0,
     break_max_height_loss_m = 100.0,
     vrs_ias_threshold_kmh = 50.0,
     vrs_max_descent_mps = 4.0,
