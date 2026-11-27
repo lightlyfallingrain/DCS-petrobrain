@@ -331,3 +331,17 @@ Reading (main loop):
   is linked to the SAU device (`aircraft-layer/research/2026-10-31-mi24p-park-controls-ai-pilot.md`
   §2/§4, path (a) unresolved). The switch-off must apply to a **mode-1 take only**, including the
   unpark mode 2 → mode 1 take, and never while ED's AI is flying.
+
+**Settled (user, verbatim, 2026-11-28):**
+
+> M4 SAU
+> 1 - yes, drop SAU usage from BL-16, build that handover SAU channels on/off as suggested.
+> 2 - ED AI does *not* use SAU. Let ED AI do whatever it does with SAU, it may or may not flip
+> switches. We're only concerned about Mode 1 and handing controls back to player from any mode.
+
+So M4 is: **on entering mode 1** (voice take or unpark m2 → m1), SAU **H, K, T OFF**, B ON; **on
+controls to the player from any mode**, H, K, T, B ON — already built (`controls-to-player.md`,
+`controls_to_player_edge` covers `taking`/`m1`/`m2` → `off`). No SAU action on mode 2 entry; the law
+never uses the SAU (no trim, no stage 2). The main loop's mode-2 concern above is answered: ED's AI
+does not use the SAU.
+
