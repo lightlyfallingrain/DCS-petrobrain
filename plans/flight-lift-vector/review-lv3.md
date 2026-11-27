@@ -79,7 +79,7 @@ probe rather than left as a readback of the implementer's own disclosure.
    interpolated-λ take). The first three ("Stop"/"Accelerate"/ground-effect) need a toy plant with
    vertical/altitude dynamics the current one does not model at all (it is horizontal-only, by
    construction, per the module docstring above `_LV3_RUNAWAY_DRIVER`) — building that is a
-   materially bigger effort, and is reasonably left to the live card's rows 3, 5 and 6, **provided
+   materially bigger effort, and is reasonably left to the live card's rows 3, 6 and 7 (corrected 2026-11-28 per review-lv3-r2.md; row 5 is hover in wind), **provided
    it is written down as left to the card rather than silently absent.** The implementation note's
    "Checks" section currently reads as if the plan's Tests list was satisfied; it was not, and DoD
    and the card author need this gap in writing to know what the unit/toy-plant layer has and has
