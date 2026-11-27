@@ -66,3 +66,21 @@ Mission clock ↔ probe time: probe t ≈ mission time − 8:00:00 (all five sho
     **every unit in the blast**, not only the aimed one (first 9M120: 5 units, a Grad-URAL and
     Ural-375 damaged, others killed). A hit does not say which unit was aimed at.
 - One S-8KOM press dropped station 4 by 3 (20 → 17): a rocket burst, not a single round.
+
+## Re-probe, same day — knob writes on device 6 (WEAP_SYS)
+
+Log: `logs-2026-11-27-b67/aircraft_layer_probe_weapons_reprobe.log` (second run in the file, t 0–127).
+
+- **Q3 — the knob can be turned from Export.lua.** `GetDevice(6):performClickableAction(3038, n*0.1)`
+  is an **absolute set**: each sweep write moved arg 963 to exactly n × 0.1 within ~0.03 s
+  (0.1 … 0.8), and the park write set 0.3. One stray reading: after step 5, arg 963 read 0.000 once
+  (t 9.02) before step 6 set 0.6 — not explained, worth watching.
+- **Step → station:** one data point. The user turned the knob by hand to 0.1 and fired a 9M120 at
+  t 113.2; **station 1** dropped 2 → 1. Consistent with step n = `Stations[n]`, not proven for the
+  other steps.
+- **`CurrentStation` does not follow the knob:** 0 throughout the run, with the knob at 0.1–0.8. So
+  Petrovich's own knowledge of the selected station has to come from arg 963 (which reads back
+  reliably) and his own writes, not from `LoGetPayloadInfo`.
+- Not observed: the auto-advance ~25 s after a count drop (the run ended 14 s after the shot, and the
+  shot was off the parked station 3). The probe parked on 3, not 1, because its first sweep write
+  happens before the first payload poll — a probe quirk, not a DCS finding.
