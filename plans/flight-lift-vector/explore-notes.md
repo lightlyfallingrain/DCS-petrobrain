@@ -195,5 +195,9 @@ Reading, for the LV-2 amendment:
   corrective oscillation.
 - **What gives:** height first, down to 50 m AGL. (Plan had "within 100 m of entry, never below 40 m
   AGL" — the user's floor is 50 m and names no 100 m budget; the amendment must say which stands.)
+- **Height budget, settled (user, verbatim, 2026-11-27):** *"In a break turn, we should not lose
+  more than 100 m of altitude. The 50 m AGL is the safety floor below which we must not descend in a
+  break."* Both stand: ≤ 100 m loss from entry, and never below 50 m AGL (replaces the plan's 40 m).
+  The main loop's earlier reading ("50 m replaces both") was wrong.
 - **End:** a break is an ordinary heading goal — entry +90° (break), +180° (break away) — flown with
   a faster turn rate and more aggressive capture than a normal turn. No separate end condition.
