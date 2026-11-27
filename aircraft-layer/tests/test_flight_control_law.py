@@ -3356,6 +3356,73 @@ class TestLv3AboveBlendTopUnchanged:
         assert int(crossings) == 0
 
 
+class TestLv3TurnModeLambdaBlend:
+    """LV-3 fix pass (review-lv3.md, turn_mode gap, treated as a
+    required fix) -- a continuous "turn left/right" command's own rate
+    ceiling blends toward `hover_yaw_rate_max_deg_s` the same way the
+    ordinary heading branch's `rate_limit` is blended (C): `turn_goal_
+    deg_s` comes from `law_turn_rate_at_bank(max_turn_bank_deg, v_t)`,
+    speed-inverse and ~102 deg/s at 2 m/s with nothing else to scale it
+    down before this fix -- at hover the rule ("do not bank to turn to
+    heading, use pedals... move calmly... softer is better") applies to
+    a continuous turn exactly as it does to every other heading-type
+    command. At `lambda = 1` the blend is a no-op, bit-exact with LV-2."""
+
+    @staticmethod
+    def _settle(
+        v_t_mps: float, lambda_value: float, n_steps: int = 400
+    ) -> tuple[float, float]:
+        """Runs a continuous "turn right" command to steady state at a
+        fixed `v_t_mps`/`lambda`; returns `(final |r_ref|, raw
+        |turn_goal_deg_s|)`."""
+        driver = f"""
+local PROFILE = dofile("{_FLIGHT_PROFILE_LUA}").PROFILES["Mi-24P"]
+local measured = {_measured(v_t_mps=v_t_mps, ias_mps=v_t_mps)}
+measured.lambda = {lambda_value}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.3 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ turn = 1 }}, LIMITS, PROFILE)
+local r_goal = state.turn_goal_deg_s
+for i = 1, {n_steps} do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+end
+print(string.format("%.9f %.9f", math.abs(state.r_ref), math.abs(r_goal)))
+"""
+        lines = _run(driver)
+        final_r_ref, raw_r_goal = lines[0].split()
+        return float(final_r_ref), float(raw_r_goal)
+
+    def test_hover_turn_settles_within_the_hover_rate_cap(self) -> None:
+        """At lambda = 0 (hover) the raw `law_turn_rate_at_bank` figure
+        must never reach the pedal -- the commanded turn settles at
+        `hover_yaw_rate_max_deg_s` (8 deg/s), a calm pedal yaw, not the
+        unscaled figure."""
+        final_r_ref, raw_r_goal = self._settle(v_t_mps=2.0, lambda_value=0.0)
+        # Confirms the scenario actually exercises the blow-up the
+        # review's own probe found (~102 deg/s at 2 m/s).
+        assert raw_r_goal > 50.0
+        assert (
+            final_r_ref <= 8.0 + 0.5
+        )  # hover_yaw_rate_max_deg_s, with shaper settle slack
+
+    def test_mid_blend_turn_settles_at_the_linearly_blended_cap(self) -> None:
+        """25-80 km/h: the commanded rate is capped between the raw
+        figure and the hover cap, linearly in lambda -- the same
+        blended-caps treatment every other heading-type command gets
+        in this band (C)."""
+        v_t_mps = 52.5 / 3.6
+        final_r_ref, raw_r_goal = self._settle(v_t_mps=v_t_mps, lambda_value=0.5)
+        expected_cap = 0.5 * raw_r_goal + 0.5 * 8.0
+        assert abs(final_r_ref - expected_cap) < 0.5
+
+    def test_above_80_kmh_unchanged_bit_exact_with_lv2(self) -> None:
+        """At lambda = 1 the blend is a no-op (`rate_cap = |r_goal|`
+        exactly): the continuous turn settles at the raw commanded
+        rate, bit-exact with the pre-fix/LV-2 behaviour."""
+        v_t_mps = 150.0 / 3.6
+        final_r_ref, raw_r_goal = self._settle(v_t_mps=v_t_mps, lambda_value=1.0)
+        assert abs(final_r_ref - raw_r_goal) < 1e-6
+
+
 class TestLv3HoverPedalBand:
     """Section E (corrected 2026-11-28): the +-0.3 hover pedal band
     binds only while a commanded heading change runs; holding heading,
@@ -3421,6 +3488,74 @@ print(string.format("%.6f", max_excess))
         lines = _run(driver)
         assert float(lines[0]) <= 1e-6
 
+    @pytest.mark.parametrize("heading_goal", [90.0, -90.0])
+    def test_a_90_degree_heading_change_at_hover_stays_inside_the_band(
+        self, heading_goal: float
+    ) -> None:
+        """LV-3 fix pass (review-lv3.md required fix 4) -- the plan's
+        own Tests list names 90 deg, both directions, not just the 45
+        deg case the pre-fix suite covered (`TestLv3HoverPedalBand`'s
+        own sibling test above)."""
+        driver = f"""
+local PROFILE = dofile("{_FLIGHT_PROFILE_LUA}").PROFILES["Mi-24P"]
+local measured = {_measured(ias_mps=1.0, v_t_mps=1.0)}
+measured.lambda = 0.0
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.3 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = {heading_goal} }}, LIMITS, PROFILE)
+local max_excess = 0.0
+for i = 1, 400 do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    if state.heading_change_active then
+        local excess = math.abs(outputs.pedals - state.pedal_hover_ref) - PROFILE.hover_pedal_band
+        if excess > max_excess then max_excess = excess end
+    end
+    measured.psi_deg = state.psi_ref
+    measured.psi_dot_deg_s = state.r_ref
+    measured.bank_deg = 0.0
+end
+print(string.format("%.6f", max_excess))
+"""
+        lines = _run(driver)
+        assert float(lines[0]) <= 1e-6
+
+    def test_collective_lead_moves_the_pedal_past_the_static_band(
+        self,
+    ) -> None:
+        """LV-3 fix pass (review-lv3.md required fix 4, "band does not
+        cut the lead") -- section E: `pedal_hover_ref` keeps moving with
+        the torque feed-forward lead even while frozen by a commanded
+        heading change, so a sustained collective demand's own pedal
+        lead is never cut by the static +-`hover_pedal_band` window --
+        the output tracks the moving reference, past the band's own
+        width measured against the pedal value at the instant the
+        heading change started."""
+        driver = f"""
+local PROFILE = dofile("{_FLIGHT_PROFILE_LUA}").PROFILES["Mi-24P"]
+local measured = {_measured(ias_mps=1.0, v_t_mps=1.0, collective_enabled=True)}
+measured.lambda = 0.0
+measured.a_u = 0.0
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.0 }}, nil, PROFILE)
+-- A large altitude step drives a sustained collective-rate demand
+-- (`u_c_rate`) for as long as the vertical loop is still chasing it.
+state = flight_control.law_apply_goal(
+    state, {{ heading_deg = 45.0, alt_m = measured.h_m + 100.0 }}, LIMITS, PROFILE)
+local ref_at_start, pedal_at_start, last_pedal = nil, nil, nil
+for i = 1, 60 do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    if state.heading_change_active and ref_at_start == nil then
+        ref_at_start = state.pedal_hover_ref
+        pedal_at_start = outputs.pedals
+    end
+    last_pedal = outputs.pedals
+end
+print(string.format("%.6f %.6f", math.abs(last_pedal - pedal_at_start), PROFILE.hover_pedal_band))
+"""
+        lines = _run(driver)
+        moved, band = (float(v) for v in lines[0].split())
+        assert moved > band
+
 
 class TestLv3TakeRuleAtHover:
     """Section F (U15): at lambda = 0 a banked take holds heading, not
@@ -3451,6 +3586,42 @@ print(tostring(state.bank_hold_deg))
 """
         lines = _run(driver)
         assert abs(float(lines[0]) - 10.0) < 1e-6
+
+    def test_take_at_an_interpolated_lambda_is_bit_exact_and_seeds_v_m(
+        self,
+    ) -> None:
+        """LV-3 fix pass (review-lv3.md required fix 4, "take at 20
+        km/h") -- every pre-fix LV-3 take test used only the lambda = 0
+        / lambda = 1 boundary cases; this is the first against a
+        strictly-interpolated lambda (0.5). `ias_mps` and `v_g_f` are
+        deliberately different numbers so a bare-IAS seed and the
+        blended `V_m` seed would disagree if the wrong one landed in
+        `speed_goal_mps`/`v_ref`. Bit-exact at take (section D's own
+        pattern) holds at every lambda, not just the two boundaries."""
+        driver = f"""
+local PROFILE = dofile("{_FLIGHT_PROFILE_LUA}").PROFILES["Mi-24P"]
+local measured = {_measured(pitch_deg=2.0, bank_deg=-3.0, q_deg_s=1.5, p_deg_s=-0.8, ias_mps=20.0, v_t_mps=20.0, psi_dot_deg_s=1.0)}
+measured.lambda = 0.5
+measured.v_g_f = 10.0
+measured.ball = 0.4
+local command = {{ pitch = 0.321, roll = -0.154, pedals = 0.05, collective = 0.2 }}
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+local outputs = flight_control.law_outputs(state, measured, PROFILE)
+print(string.format("%.9f", outputs.pitch))
+print(string.format("%.9f", outputs.roll))
+print(string.format("%.9f", outputs.pedals))
+print(string.format("%.9f", outputs.collective))
+print(string.format("%.9f", state.speed_goal_mps))
+print(string.format("%.9f", state.v_ref))
+"""
+        lines = _run(driver)
+        assert abs(float(lines[0]) - 0.321) < 1e-6
+        assert abs(float(lines[1]) - (-0.154)) < 1e-6
+        assert abs(float(lines[2]) - 0.05) < 1e-6
+        assert abs(float(lines[3]) - 0.2) < 1e-6
+        # V_m = lambda * ias_mps + (1 - lambda) * v_g_f = 0.5*20 + 0.5*10 = 15.0
+        assert abs(float(lines[4]) - 15.0) < 1e-6
+        assert abs(float(lines[5]) - 15.0) < 1e-6
 
 
 class TestLv3HeldBankEndsAtHover:
@@ -3534,6 +3705,107 @@ print(tostring(state.in_band_speed))
 """
         lines = _run(driver)
         assert lines[0] == "true"
+
+
+class TestLv3DriftHoldToyPlant:
+    """LV-3 fix pass (review-lv3.md required fix 3) -- the plan's own
+    Tests-list scenario by name: "Speed 0 in a 5 m/s crosswind: ground
+    speed settles under 1 m/s; heading held by pedal; bank carries the
+    drift hold." Same world-frame point-mass/yaw-dynamics plant as
+    `TestLv3RunawayToyPlant`'s `_LV3_RUNAWAY_DRIVER` (bank -> lateral
+    acceleration rotated by the current nose heading; a separate nose
+    yaw loop driven by the pedal, a weathervane term, and plant-side
+    rate damping), started at hover with a 5 m/s sideways ground-
+    velocity offset standing in for the crosswind -- B's own drift-hold
+    term (`a_r_d`'s `-k_drift_hold * v_g_r` share at `lambda = 0`) is
+    the only thing in this closed loop that can kill a sideways ground
+    velocity the speed goal's own forward-only error term never reads."""
+
+    def test_crosswind_drift_damps_toward_zero_heading_held_by_pedal(
+        self,
+    ) -> None:
+        driver = f"""
+local PROFILE = dofile("{_FLIGHT_PROFILE_LUA}").PROFILES["Mi-24P"]
+local g = 9.81
+local dt = 0.05
+local v_n, v_e = 0.0, 5.0
+local psi, phi, yaw_rate, pitch = 0.0, 0.0, 0.0, 0.0
+
+local measured = {{
+    pitch_deg = 0.0, bank_deg = 0.0, psi_deg = 0.0,
+    ias_mps = 5.0, v_t_mps = 5.0,
+    w_mps = 0.0, h_m = 50.0, asl_m = 50.0,
+    p_deg_s = 0.0, q_deg_s = 0.0, r_deg_s = 0.0,
+    rotor_rpm_pct = 100.0, engine_rpm_pct = 100.0,
+    collective_enabled = false, ball = 0.0,
+    a_f = 0.0, a_r = 0.0, a_u = 0.0, phi_bar = 0.0,
+    v_g = 5.0, v_g_f = 0.0, v_g_r = 5.0, lambda = 0.0,
+}}
+local state = flight_control.law_init_at_take(
+    measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.3 }}, nil, PROFILE)
+state = flight_control.law_apply_goal(state, {{ heading_deg = 0.0 }}, LIMITS, PROFILE)
+state = flight_control.law_apply_goal(state, {{ ias_kmh = 0.0 }}, LIMITS, PROFILE)
+
+local tau_phi, tau_pitch = 1.5, 1.5
+local k_pitch_accel = 0.2
+local k_weathervane = 0.00006
+local k_yaw_damp_plant = 0.3
+local k_pedal_yaw = 60.0
+local k_ball = 0.000004
+
+local max_psi_dev, max_abs_phi = 0.0, 0.0
+for i = 1, 300 do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+
+    phi = phi + (state.phi_d - phi) * (dt / tau_phi)
+    local a_r_body = g * math.tan(math.rad(phi))
+    pitch = pitch + (state.theta_d - pitch) * (dt / tau_pitch)
+    local a_f_body = k_pitch_accel * (0.0 - pitch)
+
+    local psi_rad = math.rad(psi)
+    local sin_p, cos_p = math.sin(psi_rad), math.cos(psi_rad)
+    v_n = v_n + (a_f_body * cos_p - a_r_body * sin_p) * dt
+    v_e = v_e + (a_f_body * sin_p + a_r_body * cos_p) * dt
+
+    local ias = math.sqrt(v_n * v_n + v_e * v_e)
+    local v_f = v_n * cos_p + v_e * sin_p
+    local v_r = -v_n * sin_p + v_e * cos_p
+    local aoss_deg = math.deg(math.atan2(v_r, v_f))
+
+    local pedal_cmd = outputs.pedals
+    local yaw_accel = k_pedal_yaw * pedal_cmd
+        + k_weathervane * ias * ias * aoss_deg
+        - k_yaw_damp_plant * yaw_rate
+    yaw_rate = yaw_rate + yaw_accel * dt
+    psi = (psi + yaw_rate * dt) % 360.0
+    local ball = k_ball * ias * ias * aoss_deg
+
+    measured.pitch_deg, measured.bank_deg, measured.psi_deg = pitch, phi, psi
+    measured.ias_mps, measured.v_t_mps = ias, ias
+    measured.r_deg_s, measured.psi_dot_deg_s = yaw_rate, yaw_rate
+    measured.ball, measured.a_r, measured.phi_bar = ball, a_r_body, phi
+    measured.v_g = math.sqrt(v_n * v_n + v_e * v_e)
+    measured.v_g_f, measured.v_g_r = v_f, v_r
+    measured.lambda = flight_control.law_lambda(measured.v_g, PROFILE)
+
+    local psi_dev = psi
+    if psi_dev > 180.0 then psi_dev = psi_dev - 360.0 end
+    if math.abs(psi_dev) > max_psi_dev then max_psi_dev = math.abs(psi_dev) end
+    if math.abs(phi) > max_abs_phi then max_abs_phi = math.abs(phi) end
+end
+print(string.format("%.6f %.6f %.6f", measured.v_g, max_psi_dev, max_abs_phi))
+"""
+        lines = _run(driver)
+        final_v_g, max_psi_dev, max_abs_phi = (float(v) for v in lines[0].split())
+        # "ground speed settles under 1 m/s".
+        assert final_v_g < 1.0
+        # "heading held by pedal" -- the yaw loop, not the bank, keeps
+        # the nose near the commanded 0 deg throughout.
+        assert max_psi_dev < 5.0
+        # "bank carries the drift hold" -- a real, nonzero bank actually
+        # ran during the recovery (not a no-op drift-hold term).
+        assert max_abs_phi > 1.0
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

@@ -369,6 +369,11 @@ local desired = {
     hdg_mode = nil, heading_deg = nil, turn_dir = nil, turn_rate_deg_s = nil,
     turn_style = "normal", alt_m = nil, alt_ref = nil, ias_kmh = nil,
     stamp_hdg = nil, stamp_alt = nil, stamp_spd = nil,
+    -- LV-3 fix pass (review-lv3.md required fix 2) -- this mock lacked
+    -- `bank_hold_deg` entirely, so `write_internal`'s own clear below
+    -- had nothing to clear and no test here could ever catch a
+    -- regression in it.
+    bank_hold_deg = nil,
 }
 
 -- `LoGetMagneticYaw` backs the heading-reference conversion's own live
@@ -413,6 +418,11 @@ flight_desired = {
             desired.hdg_mode = "heading"
             desired.heading_deg = parts.heading_deg
             desired.turn_dir = nil
+            -- LV-3 fix pass (review-lv3.md required fix 2) -- mirrors
+            -- the real `flight_desired.lua`'s own heading-branch clear
+            -- (finding 6): a settle write-back to heading must also
+            -- clear a standing `bank_hold_deg`.
+            desired.bank_hold_deg = nil
         end
         if parts.clear_turn_rate then
             desired.turn_rate_deg_s = nil
@@ -2336,6 +2346,50 @@ print(prev_est)
         # would-be collision nudges a tick later by construction.
         assert 20 <= law_calls <= 34, law_calls
         assert 25 <= estimator_calls <= 34, estimator_calls
+
+
+class TestLv3HeldBankEndWriteBack:
+    """LV-3 fix pass (review-lv3.md required fix 2) -- `run_active_
+    frame`'s own held-bank-end write-back branch
+    (`prev_bank_hold ~= nil and fc_law.bank_hold_deg == nil`), exercised
+    through the real `flight_control.lua` orchestration (`request_take`/
+    `run_flight_control`), not just `law_update` in isolation
+    (`TestLv3HeldBankEndsAtHover`, `test_flight_control_law.py`, only
+    ever reaches the law's own internal state)."""
+
+    def test_held_bank_end_clears_bank_hold_in_flight_desired(self) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+bank_rad = math.rad(15.0)
+ias_mps = 150.0 / 3.6
+ap_seat = "pilot"
+ap_parked = false
+flight_control.run_flight_control(0.0)
+flight_control.request_take(1, 0.1)
+flight_control.run_flight_control(0.1)
+-- Simulate the stale mirror a real session would already carry (`flight_
+-- desired.lua`'s own reseed sets `bank_hold_deg` at this same take,
+-- `test_flight_desired_lua.py`'s own `TestEdgeSeeding` coverage) -- this
+-- harness's mock `desired` is never auto-populated by a take.
+desired.bank_hold_deg = 99.0
+desired.hdg_mode = "bank"
+local before = desired.bank_hold_deg
+-- Decelerate to hover (lambda -> 0): the held bank ends, writing the
+-- settled heading back -- `write_internal`'s heading branch also clears
+-- `bank_hold_deg` (finding 6).
+ias_mps = 5.0 / 3.6
+for i = 1, 200 do
+    local t = 0.1 + i * 0.05
+    flight_control.run_flight_control(t)
+end
+print(tostring(before))
+print(tostring(desired.bank_hold_deg))
+print(tostring(desired.hdg_mode))
+"""
+        lines = _run(driver)
+        assert lines[0] == "99"
+        assert lines[1] == "nil"
+        assert lines[2] == "heading"
 
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:

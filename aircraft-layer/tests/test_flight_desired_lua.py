@@ -95,6 +95,12 @@ local fc_refuse_cause = nil
 local fc_phi_bar = nil
 local fc_takeover_threshold = nil
 
+-- LV-3 fix pass (review-lv3.md required fix 1) -- backs the
+-- `flight_control` mock's `get_lambda`/`get_take_speed_kmh` below. `nil`
+-- by default (not primed yet), same posture as `fc_phi_bar` above.
+local fc_lambda = nil
+local fc_take_speed_kmh = nil
+
 local ap_parked = false
 local ap_held = nil
 
@@ -134,6 +140,13 @@ flight_control = {
     -- exercising the "always heading" fallback unchanged.
     get_phi_bar = function() return fc_phi_bar end,
     takeover_level_bank_deg = function() return fc_takeover_threshold end,
+    -- LV-3 fix pass (review-lv3.md required fix 1) -- these two were
+    -- entirely missing from this stub: `safe_call` on a missing field
+    -- returns `nil` unconditionally, so `reseed_from_measured`'s new
+    -- hover take-rule mirror and its `V_m` speed seed were both
+    -- permanently dead code as far as this test file could tell.
+    get_lambda = function() return fc_lambda end,
+    get_take_speed_kmh = function() return fc_take_speed_kmh end,
 }
 
 ai_pilot_wheel = {
@@ -329,6 +342,53 @@ print(sent_lines[#sent_lines])
         # Height and speed are still captured exactly as today (E13).
         assert _field(line, "fd_alt") == "123.00000"
         assert _field(line, "fd_ias") == "200.00000"
+
+    def test_off_to_m1_at_hover_holds_heading_not_bank(self) -> None:
+        """LV-3 fix pass (review-lv3.md required fix 1) -- `flight_
+        control.get_lambda` at `lambda = 0` overrides the sibling test
+        above: a bank at or past the takeover threshold still holds
+        heading, never the bank, near hover (a bank in a hover is a
+        sideways slide, not a turn)."""
+        driver = """
+heading_rad = math.rad(90.0)
+agl_m = 123.0
+ias_mps = 200.0 / 3.6
+fc_phi_bar = 12.0
+fc_takeover_threshold = 5.0
+fc_lambda = 0.0
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.push_flight_desired_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_hdg_mode") == "heading"
+        assert _field(line, "fd_heading") == "90.00000"
+        assert _field(line, "fd_bank_hold") is None
+
+    def test_off_to_m1_at_a_blended_speed_seeds_from_v_m_not_bare_ias(
+        self,
+    ) -> None:
+        """LV-3 fix pass (review-lv3.md required fix 1) -- `flight_
+        control.get_take_speed_kmh` (`V_m`) replaces bare IAS in the
+        reseed's `fd_ias` whenever the getter is available and primed,
+        even when it reads a different number than `ias_mps` -- the
+        `V_m`-blended figure must actually land in `desired.ias_kmh`,
+        not merely be preferred in principle."""
+        driver = """
+heading_rad = math.rad(90.0)
+agl_m = 123.0
+ias_mps = 200.0 / 3.6
+fc_take_speed_kmh = 55.0
+fc_mode_value = "active"
+flight_desired.tick(0.0)
+flight_desired.push_flight_desired_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        lines = _run(driver)
+        line = lines[0]
+        assert _field(line, "fd_ias") == "55.00000"
 
     def test_off_to_m1_with_no_phi_bar_falls_back_to_heading(self) -> None:
         """A mission-start-instant take (the estimator has not primed)

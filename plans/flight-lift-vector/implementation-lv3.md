@@ -110,6 +110,9 @@ All in `aircraft-layer/tests/test_flight_control_law.py` unless noted:
 - `pytest tests -q -n auto -p no:cacheprovider`: **1254 passed**, full suite (not just the touched
   files), run twice (once mid-work, once at the end) to confirm no regressions survived the mock-
   harness fix below.
+- **Fix pass (review-lv3.md, 2026-11-28) re-run**: same full-suite command, **1265 passed** (the 11
+  new tests from "Fix pass" below, zero regressions). `ruff format --check`/`ruff check src tests`/
+  `mypy src` (0 issues, 29 files)/`luac5.1 -p` on all three touched Lua files all re-run clean.
 
 Toy-plant numbers (own measured figures, from `TestLv3RunawayToyPlant`, 700 steps of 0.05 s = 35 s,
 decelerating 108 → 60 km/h on heading hold, no wind):
@@ -164,14 +167,98 @@ plan's own "What reading the code and the trace turned up" section 3 already com
    0.0` returns 1.0, same "degenerate data → forward" posture as every other division guard in this
    module) but not asserted anywhere as an invariant on the profile table itself. Worth noting for
    whoever next edits those two fields.
-5. **The heading-shaper's `turn_mode` branch (a commanded continuous "turn left/right") is not
-   lambda-blended**, only the ordinary heading-tracking branch and the break's own rate limit are,
-   per the plan's literal text ("the heading shaper's bandwidth, rate cap... blend with lambda" is
-   stated once, in context of the ordinary/break cases; `turn_mode` is not mentioned either in C or
-   in any diagram). Left unmodified — a continuous-turn command at hover is an edge case the plan
-   does not discuss, and no test exercises it at low lambda.
+5. **Fixed in the review-lv3.md pass**: the heading-shaper's `turn_mode` branch (a commanded
+   continuous "turn left/right") was not lambda-blended, only the ordinary heading-tracking branch
+   and the break's own rate limit were — see "Fix pass (review-lv3.md)" below.
 6. **U13's absolute pedal range is now the only bound on `t_y`'s integrator** — the near-right-stop
    collective-rate guard (`pedal_near_limit_margin`/`collective_rate_cap_near_pedal_limit`) is
    unchanged in code, now measured against the real stop (1.0) rather than the old 0.5, exactly as
    the plan's U13 answer specifies; no other call site reads `pedal_limit_positive`/`pedal_limit_
    negative` (grepped, two sites in `law_update`, matching the plan's own enumeration).
+
+## Fix pass (review-lv3.md, 2026-11-28)
+
+Four required fixes; `turn_mode` (the review's one Optional Refinement) treated as a fifth
+required fix per the main loop's own direction, since the review's own probe found it reaching the
+pedal-commanding yaw loop at hover.
+
+**Required fix 1 — `flight_desired.lua`'s two LV-3 changes were completely untested.**
+`test_flight_desired_lua.py`'s `flight_control` mock stub had no `get_lambda`/`get_take_speed_kmh`
+entries, so `reseed_from_measured`'s hover take-rule mirror and its `V_m` speed seed were dead code
+to this test file. Fixed: added both getters to the stub (`fc_lambda`/`fc_take_speed_kmh` backing
+globals, `nil` default) and two tests —
+`test_off_to_m1_at_hover_holds_heading_not_bank` (a banked take at `lambda = 0` reseeds to heading,
+not bank) and `test_off_to_m1_at_a_blended_speed_seeds_from_v_m_not_bare_ias` (a `V_m` reading that
+disagrees with bare IAS lands in `fd_ias`). Confirmed red without the stub fix (both new tests fail
+against the un-fixed mock): `test_off_to_m1_at_hover_holds_heading_not_bank` reads `"bank"` instead
+of `"heading"`; `test_off_to_m1_at_a_blended_speed_seeds_from_v_m_not_bare_ias` reads `200.0`
+(bare IAS) instead of `55.0` (`V_m`).
+
+**Required fix 2 — the held-bank-end write-back and `write_internal`'s `bank_hold_deg` clear had no
+test against real code.** `test_flight_control_lua.py`'s own hand-written `flight_desired` mock
+(a second, drifting copy of `flight_desired.lua`'s logic, per the review) had no `bank_hold_deg`
+field in its `desired` table at all and did not clear one in its `write_internal`. Fixed: added the
+field and the clear to the mock (mirroring the real module's finding-6 fix verbatim), and added
+`TestLv3HeldBankEndWriteBack.test_held_bank_end_clears_bank_hold_in_flight_desired`, which drives
+the real `flight_control.lua` orchestration end to end (`request_take`/`run_flight_control`, a
+banked take decelerated to hover) and asserts the mock's `bank_hold_deg` is cleared and `hdg_mode`
+becomes `"heading"` — not `law_update` in isolation (`TestLv3HeldBankEndsAtHover`, which only ever
+reaches the law's own internal state, as the review noted). Confirmed red without the mock fix
+(`bank_hold_deg` stays at its stale sentinel `99` instead of clearing to `nil`).
+
+**Required fix 3 — no closed-loop test for the drift-hold mechanism.** Added
+`TestLv3DriftHoldToyPlant.test_crosswind_drift_damps_toward_zero_heading_held_by_pedal`: the plan's
+own named scenario ("speed 0 in a 5 m/s crosswind"), using the same world-frame point-mass/yaw toy
+plant as `TestLv3RunawayToyPlant`, started with a 5 m/s sideways ground-velocity offset standing in
+for the crosswind. Measured: final ground speed 0.041 m/s (plan: "under 1 m/s"), max heading
+deviation 0.042° (heading held by the pedal/yaw loop, not the bank), max bank 5.79° (bank actively
+carried the drift hold, not a no-op). Confirmed red with `k_drift_hold` zeroed in the shipped
+profile (final ground speed stays at 5.0 m/s, the uncorrected crosswind) and restored afterwards.
+
+**Required fix 4 (main loop direction) — the `turn_mode` gap.** A continuous "turn left/right"
+command's own rate ceiling (`turn_goal_deg_s`, from `law_turn_rate_at_bank(max_turn_bank_deg, v_t)`,
+speed-inverse and ~102°/s at 2 m/s per the review's own probe) was not blended with lambda the way
+every other heading-type command's rate/accel caps are (C). Fixed in `flight_control.lua`'s
+`law_update`, `turn_mode` branch: the commanded rate is now clamped to
+`lambda * |turn_goal_deg_s| + (1 - lambda) * hover_yaw_rate_max_deg_s` before the existing
+roll-in-limited ramp runs — a no-op at `lambda = 1` (`rate_cap = |turn_goal_deg_s|` exactly, so the
+branch stays bit-exact with LV-2 above `lambda_forward_kmh`). Added
+`TestLv3TurnModeLambdaBlend` (hover: settles at ≤ `hover_yaw_rate_max_deg_s`, confirming the raw
+figure really does exceed 50°/s first; mid-blend at `lambda = 0.5`: settles within 0.5°/s of the
+linear blend; above 80 km/h: settles bit-exact with the raw commanded rate, < 1e-6 difference).
+Confirmed red on the two blend-sensitive cases with the fix reverted (hover case settled at 40.0°/s,
+not ≤ 8.5°/s; mid-blend case settled 3.0°/s off the expected blended cap) and restored afterwards.
+
+**Required fix 4 (the plan's own Tests-list disclosure) — honest accounting of what this and the
+original LV-3 pass built, against the plan's own Tests section.** The original `implementation-
+lv3.md` "Checks" section read as if the plan's Tests list was fully satisfied; it was not. Full
+accounting, by plan Tests-list item:
+
+| plan Tests-list item | status |
+|---|---|
+| `λ` helper (breakpoints, non-finite → 1.0) | built (`TestLv3LambdaHelper`) |
+| Runaway reproduced, then fixed | built (`TestLv3RunawayToyPlant`) |
+| Damper sign | built (`TestLv3RunawayToyPlant`) |
+| Above 80 km/h, unchanged | built (`TestLv3AboveBlendTopUnchanged`) |
+| **Stop 150 → 0** | **deferred to the LV-3 card, row 3** — needs vertical-dynamics toy-plant machinery (a stop-through-hover power curve) the current plant does not model at all (horizontal-only, by the module docstring above `_LV3_RUNAWAY_DRIVER`); building it is a materially bigger effort than this fix pass's scope |
+| **Accelerate 0 → 150** | **deferred to the LV-3 card, row 7** — same vertical-dynamics gap as "Stop 150 → 0" |
+| Hover heading change 45° and 90°, both ways | built this pass — the pre-existing suite only had 45°/one direction (`TestLv3HoverPedalBand.test_a_commanded_heading_change_at_hover_stays_inside_the_band`); added `test_a_90_degree_heading_change_at_hover_stays_inside_the_band` (parametrized ±90°) |
+| Band does not cut the lead | built this pass (`TestLv3HoverPedalBand.test_collective_lead_moves_the_pedal_past_the_static_band`) |
+| Speed 0 in a 5 m/s crosswind | built this pass (required fix 3, above) |
+| **Ground effect and transitional lift** | **deferred to the LV-3 card, row 6** — no model exists anywhere in the law (per the plan: left to the vertical-loop integrator and telemetry feedback with no ground-effect/power-curve term to test against); the current toy plant has neither |
+| Take at 20 km/h (interpolated λ, bit-exact, `speed_goal_mps = V_m`) | built this pass — the pre-existing suite only covered the λ=0/λ=1 boundaries (`TestLv3TakeRuleAtHover`); added `test_take_at_an_interpolated_lambda_is_bit_exact_and_seeds_v_m` (λ = 0.5) |
+| Held bank slowing through 25 km/h, write-back check | built this pass (required fix 2, above) — the law-internal half (`TestLv3HeldBankEndsAtHover`) already existed; the write-back half is new |
+| Low-speed slew | built (`TestLv3LowSpeedGoalSlew`) |
+| Harness hygiene | built (the existing extraction-tuple/parity tests, unaffected by this pass) |
+
+So three plan Tests-list items remain genuinely unbuilt after this pass — "Stop 150 → 0",
+"Accelerate 0 → 150", and "Ground effect and transitional lift" — all three needing
+vertical-dynamics toy-plant machinery (a stop-through-hover power curve, ground-effect/
+transitional-lift terms) this file's horizontal-only plant has never modelled. Deferred to the
+LV-3 live card's rows 3, 7 and 6 respectively, in writing, per the review's own required split —
+not silently absent.
+
+**Not addressed (review's own text, left as the review's judgment)**: the review's Optional
+Refinements on the toy plant's sideslip figure and the interpolation test (the latter is now built
+above, as part of required fix 4's Tests-list item) are otherwise unchanged from the original
+pass's own Notable Discoveries.

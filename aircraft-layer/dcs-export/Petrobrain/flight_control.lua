@@ -972,7 +972,18 @@ local function law_update(state, dt, measured, limits, profile)
         if r_max > 0.0 then
             accel_limit = math.min(heading_accel_cap, r_max / profile.t_roll)
         end
-        local dr = law_clamp(r_goal - state.r_ref, -accel_limit * dt, accel_limit * dt)
+        -- LV-3 fix pass (review-lv3.md, turn_mode gap): a continuous
+        -- "turn left/right" command's own rate is blended toward
+        -- `hover_yaw_rate_max_deg_s` the same way the ordinary heading
+        -- branch's `rate_limit` is blended (C) -- `r_goal` comes from
+        -- `law_turn_rate_at_bank(max_turn_bank_deg, v_t)`, which is
+        -- speed-inverse and returns ~102 deg/s at 2 m/s with nothing
+        -- else to scale it down; at `lambda = 1` this is a no-op
+        -- (`rate_cap = |r_goal|`, bit-exact with LV-2).
+        local rate_cap = lambda * math.abs(r_goal)
+            + (1.0 - lambda) * profile.hover_yaw_rate_max_deg_s
+        local r_goal_capped = law_clamp(r_goal, -rate_cap, rate_cap)
+        local dr = law_clamp(r_goal_capped - state.r_ref, -accel_limit * dt, accel_limit * dt)
         next_state.r_ref = state.r_ref + dr
         next_state.psi_ref = law_wrap360(state.psi_ref + next_state.r_ref * dt)
         -- "level_off goes through turn mode at 0. When r_ref reaches 0,
