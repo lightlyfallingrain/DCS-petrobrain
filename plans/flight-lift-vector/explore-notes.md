@@ -266,3 +266,10 @@ Reading, for the LV-3 amendment (main loop; each point to be confirmed where mar
   and yaw, from telemetry (consistent with "feedback, not a model", 2026-10-26).
 - **Drift at speed 0 accepted** for this stage; fixed-spot hold stays in BL-16 "Later — mode 1
   hover".
+
+**Reading confirmed (user, verbatim, 2026-11-27):** *"looks good, go ahead. +-0.3 for the pedals,
+we'll refine after testing if necessary"* — so: λ blend 80 → 25 km/h; a yaw-rate damper on
+unexplained yaw at all speeds alongside the ball loop; pedal lead from the existing collective-rate
+feed-forward, low-speed pedal need left to feedback; hover pedal bounded to **±0.3 in the command
+domain (−1…+1) around the learnt hover-stable pedal value** (the existing absolute limits, right
++0.5, still apply on top); first cut, to be refined from the card.
