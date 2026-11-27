@@ -52,7 +52,7 @@ to the new block.
 - `aircraft-layer/tests/test_ai_pilot_wheel_lua.py` — widened `_run_on_stop`'s harness with seven
   new optional preset/assert fields (default to `on_stop`'s own reset values, so every pre-existing
   caller is unaffected); added one new test.
-- `body-layer/ROADMAP/BL-B141.md`, `body-layer/ROADMAP/BL-B117.md` — marked done.
+- `body-layer/ROADMAP/BL-B141.md`, `body-layer/ROADMAP/BL-B117.md` — marked done here; reverted to in-progress by the main loop after review (required fix 1).
 
 ### Tests Added
 
