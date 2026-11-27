@@ -1,0 +1,66 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Mode 2 Fixes Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{--bg:#0c1210;--bg-panel:#141c19;--fg:#e9efe9;--fg-dim:#9fb0a8;--accent:#e8a33d;--accent-dim:#7a5a23;--record:#4fa3c4;--record-dim:#1c3038;--rule:#263430;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--accent-dim:#e9cda0;--record:#1f6e8c;--record-dim:#dceef4;--rule:#dcd6c4;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--accent-dim:#e9cda0;--record:#1f6e8c;--record-dim:#dceef4;--rule:#dcd6c4;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;font:17px/1.5 "Source Sans 3",system-ui,sans-serif;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+h1,h2{font-family:"Barlow Condensed",system-ui,sans-serif;margin:0}
+code{font-family:"JetBrains Mono",monospace;font-size:.88em}
+.wrap{max-width:740px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:2.1rem;text-transform:uppercase;color:var(--accent);letter-spacing:.02em}
+header p{margin:0;color:var(--fg-dim)}
+.branch{background:var(--bg-panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.branch .tag{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.branch code{color:var(--accent)}
+.card{background:var(--bg-panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.card.prize{border-color:var(--accent)}
+.card h2{font-size:1.35rem}
+.prizetag{font-size:.75rem;background:var(--accent);color:var(--bg);padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.record{background:var(--record-dim);border-left:3px solid var(--record);padding:10px 12px;border-radius:0 6px 6px 0}
+.chk{display:flex;gap:10px;align-items:center}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+</style>
+<div class="wrap">
+  <header>
+    <h1>Mode 2 Fixes</h1>
+    <p>"Speed 250" and recovery from align for launch &mdash; BL-B140, BL-B139 &mdash; 2026-11-27</p>
+  </header>
+  <div class="branch"><span class="tag">Branch</span><code>feature/bl16-lift-vector-law</code><span class="tag">both machines: <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, usual redeploy and restarts. No new deploy step.</span></div>
+
+  <div class="card">
+    <h2>1 &middot; &ldquo;Speed 2 5 0&rdquo;</h2>
+    <div><span class="label">Do</span><br>In mode 2: &ldquo;speed 2 5 0&rdquo;. Then &ldquo;speed down&rdquo; once.</div>
+    <div><span class="label">Expect</span><br>Readback and overlay <strong>250</strong>, not MAX. &ldquo;Speed down&rdquo; from 250 goes to <strong>200</strong>.</div>
+    <div class="record"><span class="label">Record</span><br>What did he read back? What did the overlay show?</div>
+    <label class="chk"><input type="checkbox" data-k="m1">Flown</label>
+  </div>
+
+  <div class="card prize">
+    <h2>2 &middot; Recovery, values unchanged<span class="prizetag">The prize</span></h2>
+    <div><span class="label">Do</span><br>Note set altitude and speed. &ldquo;Align for launch&rdquo;, let it align, then let recovery trigger <strong>without</strong> touching set altitude or speed.</div>
+    <div><span class="label">Expect</span><br>Altitude first: set altitude dips a few metres (DOWN held &le; 1.5&nbsp;s), then back to exactly the pre-align value. Then speed: one DOWN tap, one UP tap, back to pre-align. DCS&rsquo;s AI reacts to each. Heading untouched.</div>
+    <div class="record"><span class="label">Record</span><br>Did the AI react to altitude, then speed? Did the overlay end exactly on the pre-align values? Was anything pressed more than once?</div>
+    <label class="chk"><input type="checkbox" data-k="m2">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>3 &middot; Recovery, speed changed during align</h2>
+    <div><span class="label">Do</span><br>Same, but change set speed while aligned.</div>
+    <div><span class="label">Expect</span><br>Speed goes straight back to pre-align, no extra down-and-back step.</div>
+    <label class="chk"><input type="checkbox" data-k="m3">Flown</label>
+  </div>
+
+  <div class="record"><span class="label">Bring back</span><br>The three answers above. Anything that surprises you is worth more than anything on this list.</div>
+</div>
+<script>
+const KEY='mode2-fixes-2026-11-27';
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{try{const s=JSON.parse(localStorage.getItem(KEY)||'{}');s[b.dataset.k]=b.checked;localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}});
+});
+</script>
