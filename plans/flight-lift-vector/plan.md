@@ -1399,3 +1399,9 @@ pass/fail, more than any single number.
 **Answered (user, 2026-11-27, verbatim):** *"U11, only breaks"* — `break_floor_agl_m` (50 m) is
 break-only; ordinary flight and the unpark seed keep `floor_agl_m` (40 m). Diagrams (throwaway
 artifact): *"diagrams approved"*.
+
+**Plan-check CONCERNS resolved (main loop, 2026-11-27):** `alignment.md` Finding 1 — 65° binds at
+every card speed, so a break sits at ~2.37 G for seconds, above the user's own *"about 2 G"*.
+**`break_max_bank_deg` first cut is 60° (2.0 G)**, not 65°, matching the user's figure; still a
+`flight_profile.lua` tunable the card measures. Steady rate at 60°: ~32 / 21 / 15°/s at 120 / 180 /
+250 km/h. Where this section says 65°, read 60°.
