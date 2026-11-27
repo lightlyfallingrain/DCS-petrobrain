@@ -88,7 +88,19 @@ def aircraft_dir_name(aircraft: str) -> str:
 #: multiposition, axes) is not absolute until a later research note
 #: confirms it live and widens this tuple. Widening is a one-line change
 #: here, each widening with its own `aircraft-layer/research/` note.
-_ABSOLUTE_WRITE_SHAPES: Final[frozenset[str]] = frozenset({"default_2_position_tumb"})
+#: **`multiposition_switch` added `[[BL-B67]]` Stage 6** (`plans/
+#: bl-b67-atgm-run/plan.md`, Q3) -- `aircraft-layer/research/
+#: 2026-11-27-bl-b67-shscho-knob-command.md` confirms, live and
+#: reproduced across two sessions, that `SHSCHO-KNOB-PTR` (device
+#: `WEAP_SYS`, cmd 3038) is an absolute set: a scripted write of `0.1`
+#: moved arg 963 from `0` to `0.1` regardless of its prior position.
+#: Widened at the shape level, not the element, per this same tuple's
+#: own stated mechanism -- every other `multiposition_switch` effector in
+#: this registry shares `performClickableAction`'s same underlying
+#: convention, not a property unique to one knob.
+_ABSOLUTE_WRITE_SHAPES: Final[frozenset[str]] = frozenset(
+    {"default_2_position_tumb", "multiposition_switch"}
+)
 
 
 @dataclass(frozen=True, slots=True)

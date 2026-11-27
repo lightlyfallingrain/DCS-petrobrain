@@ -267,7 +267,7 @@ rather than from this dump).
 | Element | Label | Seat | Shape | Cmds | Args | Arg values | Values | Curated as |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `L166V-SWITCH-PTR` | Lamps Check | operator (explicit) | default_3_position_tumb | [3011] | [870] |  | -1/0/1 |  |
-| `OP-AIM-RESET-RAD-PTR` | Radiation Reset | operator (explicit) | default_button | [3029] | [882] |  | 0/1 momentary |  |
+| `OP-AIM-RESET-RAD-PTR` | Radiation Reset | operator (explicit) | default_button | [3029] | [882] |  | 0/1 momentary | `radiation_reset` |
 | `OP-SIGHT-ANTILASER-PTR` | Laser Filter | operator (explicit) | default_2_position_tumb | [3023] | [873] |  | 0/1 |  |
 | `OP-SIGHT-ORANGE-PTR` | Orange Filter | operator (explicit) | default_2_position_tumb | [3022] | [872] |  | 0/1 |  |
 | `OP-SIGHT-SCOPE-PTR` | Zoom In-Out | operator (explicit) | default_2_position_tumb | [3021] | [871] |  | 0/1 |  |

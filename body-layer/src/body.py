@@ -159,7 +159,11 @@ from belief.altimeter_qnh_sync import (
     advance_altimeter_qnh_sync,
     start_altimeter_qnh_sync,
 )
-from belief.atgm_run import AtgmRunState
+from belief.atgm_config import default_atgm_config_path, load_atgm_config
+from belief.atgm_run import AtgmInputs, AtgmPhase, AtgmRunState
+from belief.atgm_run import Fire as AtgmFire
+from belief.atgm_run import SelectStation as AtgmSelectStation
+from belief.atgm_run import decide as decide_atgm_run
 from belief.attack_run import AttackRunState, remembered_target_alt_m
 from belief.attention import (
     _SECTOR_CENTER_DEG,
@@ -287,12 +291,14 @@ from perception.geometry import (
     alignment_direction,
     heading_relative_to_body_relative,
     open_world_model,
+    range_m,
     sector_runs_for_legs,
 )
 from perception.hybrid_source import HybridPerceptionSource
 from perception.light_level import MISSION_CLOCK_MAX_AGE_S, SIGHT_FULL_DARK_SUN_ELEV_DEG
 from perception.light_level import light_factor as _optic_light_factor
 from perception.light_level import sun_elevation_deg as _compute_sun_elevation_deg
+from perception.naked_eye_source import FIRING_MAX_AGE_S as ATGM_OWN_FEED_MAX_AGE_S
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import (
@@ -303,6 +309,7 @@ from perception.optics import (
     Optic,
     within_field_of_regard,
 )
+from perception.own_weapons import OwnWeaponTracker
 from perception.source import Observation, OwnshipState, PerceptionSource
 from perception.visibility import tier_ranges
 from pov_view import DEFAULT_MAX_LINES as POV_DEFAULT_MAX_LINES
@@ -3264,6 +3271,7 @@ def _build_sources(
     emit_mode: Literal["on_change", "every_poll"],
     trace_sink: DetectionTraceCollector | None = None,
     forest_occlusion: bool = False,
+    own_weapon_object_names: frozenset[str] = frozenset(),
 ) -> list[PerceptionSource]:
     """Construct both concrete tiers at a given `emit_mode` --
     `main()`'s crew-text poll loop always builds at `"every_poll"`
@@ -3281,7 +3289,12 @@ def _build_sources(
     `ForestOcclusion` against `world_model_conn`/`theatre` and wires it
     into `NakedEyePerceptionSource` only, for the same reason `trace_sink`
     is naked-eye-only: the scope/hybrid channel has no geometric gate
-    chain for a forest gate to join."""
+    chain for a forest gate to join.
+
+    `own_weapon_object_names` (`[[BL-B67]]` Stage 5) defaults to `frozenset()`
+    (a true no-op) and is wired into `NakedEyePerceptionSource` only, same
+    reasoning -- own missiles are a naked-eye-channel world-object, never
+    something the scope/hybrid channel's own detection feed reports."""
     forest = (
         ForestOcclusion(conn=world_model_conn, theatre=theatre)
         if forest_occlusion
@@ -3298,6 +3311,7 @@ def _build_sources(
             emit_mode=emit_mode,
             trace_sink=trace_sink,
             forest=forest,
+            own_weapon_object_names=own_weapon_object_names,
         ),
     ]
 
@@ -3446,6 +3460,7 @@ def _reset_mission_state(
     fired_on_tracker: FiredOnTracker | None = None,
     lost_contact_tracker: LostContactTracker | None = None,
     speech_worker: SpeechWorker | None = None,
+    own_weapon_tracker: OwnWeaponTracker | None = None,
 ) -> None:
     """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
     piece of belief/mission-memory state a clean slate on a genuine DCS
@@ -3492,7 +3507,10 @@ def _reset_mission_state(
     mission` preserves `speech_worker` as the same object across a
     restart (it is not rebuilt), so this call site, not that one, is
     where a stuck `held=True` cached PTT sample from the mission that
-    just ended gets cleared."""
+    just ended gets cleared. `own_weapon_tracker` (`[[BL-B67]]` Stage 5/7)
+    is the same shape again -- `perception.own_weapons.OwnWeaponTracker`
+    is a standalone object, not a field on `runner`, same construction
+    pattern as `fired_on_tracker`/`lost_contact_tracker`."""
     runner.store.reset_for_new_mission()  # shared with crew_console.store
     runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
     for source in runner.sources:
@@ -3507,6 +3525,8 @@ def _reset_mission_state(
         lost_contact_tracker.reset_for_new_mission()
     if speech_worker is not None:
         speech_worker.reset_for_new_mission()
+    if own_weapon_tracker is not None:
+        own_weapon_tracker.reset_for_new_mission()
 
 
 def _enter_refusal_mode(
@@ -3599,6 +3619,7 @@ def _maybe_switch_theatre(
     world_model_dir: Path | None,
     trace_sink: DetectionTraceCollector | None,
     forest_occlusion: bool,
+    own_weapon_object_names: frozenset[str] = frozenset(),
 ) -> None:
     """`BL-15` Stage 3 -- re-resolve `runner.theatre`/`runner.world_model_conn`/
     `runner.sources` against the live mission's own theatre, called by
@@ -3722,6 +3743,7 @@ def _maybe_switch_theatre(
         emit_mode="every_poll",
         trace_sink=trace_sink,
         forest_occlusion=forest_occlusion,
+        own_weapon_object_names=own_weapon_object_names,
     )
     runner.world_model_conn = new_conn
     runner.theatre = event_theatre
@@ -4336,6 +4358,8 @@ def _check_for_new_mission(
     rule_runtime: RuleRuntime | None = None,
     audio_client: AudioAdapterClient | None = None,
     speech_worker: SpeechWorker | None = None,
+    own_weapon_object_names: frozenset[str] = frozenset(),
+    own_weapon_tracker: OwnWeaponTracker | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -4443,6 +4467,7 @@ def _check_for_new_mission(
             world_model_dir,
             trace_sink=trace_sink,
             forest_occlusion=forest_occlusion,
+            own_weapon_object_names=own_weapon_object_names,
         )
         # `[[BL-B118]]` -- same reasoning as the theatre adoption just
         # above: QNH is the live mission's own fact too, learned at this
@@ -4473,6 +4498,7 @@ def _check_for_new_mission(
         fired_on_tracker,
         lost_contact_tracker,
         speech_worker,
+        own_weapon_tracker,
     )
     _maybe_switch_theatre(
         runner,
@@ -4481,6 +4507,7 @@ def _check_for_new_mission(
         world_model_dir,
         trace_sink=trace_sink,
         forest_occlusion=forest_occlusion,
+        own_weapon_object_names=own_weapon_object_names,
     )
     # `[[BL-B118]]` -- same reasoning as the theatre switch just above:
     # QNH is the live mission's own fact too, learned at this same
@@ -5422,6 +5449,26 @@ def _run_crew_text_poll_loop(
     crew_console.lookup_memory_entry_fn = _lookup_memory_entry_fn(mission_memory)
     fired_on_tracker = FiredOnTracker()
     lost_contact_tracker = LostContactTracker()
+    # `[[BL-B67]]` Stage 5/6/7 -- loaded once at startup, next to every
+    # other per-aircraft config this loop already loads read-only
+    # (`effector_sequences`/`effector_registry`/`polled_args`, all
+    # `main()`'s own doing). A bad/missing `atgm.toml` is never fatal
+    # (`load_atgm_config`'s own docstring) -- `atgm_config` is always a
+    # usable `AtgmConfig`, falling back to its own code defaults.
+    atgm_config, atgm_config_errors = load_atgm_config(
+        default_atgm_config_path(aircraft_dir_name(EFFECTOR_AIRCRAFT))
+    )
+    for atgm_config_error in atgm_config_errors:
+        logger.warning("atgm.toml: %s", atgm_config_error)
+    own_weapon_tracker = OwnWeaponTracker(
+        guided_category=atgm_config.guided_category,
+        guided_guidance=atgm_config.guided_guidance,
+    )
+    #: Mints a fresh ad hoc write id per `SelectStation` action, mirroring
+    #: `main()`'s own `_next_ad_hoc_request_id` -- a plain counter, not a
+    #: random id, since nothing here needs unguessability, only
+    #: uniqueness within this process's lifetime.
+    _next_atgm_request_id = itertools.count()
     try:
         if theatre is not None and world_model_db is not None:
             world_model_conn = open_world_model(world_model_db)
@@ -5432,6 +5479,7 @@ def _run_crew_text_poll_loop(
                 emit_mode="every_poll",
                 trace_sink=trace_collector,
                 forest_occlusion=forest_occlusion,
+                own_weapon_object_names=atgm_config.own_weapon_object_names,
             )
             runner.world_model_conn = world_model_conn
             runner.theatre = theatre
@@ -5497,6 +5545,8 @@ def _run_crew_text_poll_loop(
                     rule_runtime=rule_runtime,
                     audio_client=speech_client,
                     speech_worker=crew_console.speech_worker,
+                    own_weapon_object_names=atgm_config.own_weapon_object_names,
+                    own_weapon_tracker=own_weapon_tracker,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -6007,6 +6057,17 @@ def _run_crew_text_poll_loop(
                         # `attack_run_trigger_edges` turns the three into
                         # start/stop edges.
                         run_active_before = runner.attack_run_state is not None
+                        # `[[BL-B67]]` Stage 7 -- captured before this
+                        # poll's engage/disengage apply block, so the
+                        # `atgm-run-end` trigger below can detect every
+                        # way the ATGM run ends this poll, including an
+                        # `engage <target>` that drops the `missiles`
+                        # weapon mid-run (the one edge `attack_run_
+                        # trigger_edges`'s own `ATTACK_RUN_STOP` does not
+                        # catch, since the overall attack run never stops
+                        # in that case -- `EffectorTrigger.ATGM_RUN_END`'s
+                        # own docstring).
+                        atgm_active_before_poll = runner.atgm_run_state is not None
                         engaged_missiles: bool | None = None
                         if crew_console.attack_run_transition == "engage":
                             runner.attack_run_state = AttackRunState()
@@ -6026,11 +6087,37 @@ def _run_crew_text_poll_loop(
                                     runner.optic_state.home_phase is OpticPhase.SIGHTING
                                 ),
                             )
-                            runner.atgm_run_state = (
-                                AtgmRunState(contact_id=atgm_contact_id)
-                                if atgm_contact_id is not None
-                                else None
-                            )
+                            # `[[BL-B67]]` batch B hard precondition
+                            # (`body-layer/ROADMAP/BL-B67.md`'s own
+                            # "carried forward as a hard precondition on
+                            # Stage 7's dispatch"): a re-point while the
+                            # ATGM run is already active must `replace()`
+                            # the standing `AtgmRunState`, not rebuild a
+                            # fresh one -- the plan's own Co-moving Fields
+                            # table, "engage missiles, ATGM run active,
+                            # new target": `phase`/in-flight/`selected_
+                            # step` all survive; only `contact_id` and the
+                            # range-call latches reset. Building a fresh
+                            # `AtgmRunState()` here (every poll before this
+                            # fix did) would silently forget a missile is
+                            # in flight the moment a re-point lands mid-run
+                            # -- the recurring stale-state-on-transition
+                            # defect shape.
+                            if atgm_contact_id is not None:
+                                if runner.atgm_run_state is not None:
+                                    runner.atgm_run_state = replace(
+                                        runner.atgm_run_state,
+                                        contact_id=atgm_contact_id,
+                                        range_out_called=False,
+                                        in_range_call_pending=False,
+                                        range_calls_done=False,
+                                    )
+                                else:
+                                    runner.atgm_run_state = AtgmRunState(
+                                        contact_id=atgm_contact_id
+                                    )
+                            else:
+                                runner.atgm_run_state = None
                             engaged_missiles = atgm_contact_id is not None
                         elif crew_console.attack_run_transition == "disengage":
                             runner.attack_run_state = None
@@ -6311,6 +6398,164 @@ def _run_crew_text_poll_loop(
                                 attack_run_trigger,
                                 runner.last_t_sim,
                             )
+                        # `[[BL-B67]]` Stage 6/7 -- "every exit except
+                        # mission restart fires atgm-run-end" (plan's own
+                        # stateDiagram note). Edge-detected against the
+                        # `atgm_active_before_poll` snapshot taken before
+                        # this poll's engage/disengage apply block, so it
+                        # catches every way `runner.atgm_run_state` just
+                        # became `None` this poll -- disengage, drop
+                        # target, cancel, lost contact (all already
+                        # folded into `attack_run_state is None` above),
+                        # and an engage that dropped the `missiles` weapon
+                        # mid-run (handled by the engage-apply block's own
+                        # `else: runner.atgm_run_state = None` branch).
+                        if atgm_active_before_poll and runner.atgm_run_state is None:
+                            runner.effector_state = fire_effector_trigger(
+                                runner.effector_state,
+                                EffectorTrigger.ATGM_RUN_END,
+                                runner.last_t_sim,
+                            )
+                        # `[[BL-B67]]` Stage 5/7 -- the own-weapon
+                        # channel's own per-poll tick: diffed against
+                        # `GET /firing/latest`'s own `"own_weapons"` key
+                        # unconditionally (not gated on an ATGM run being
+                        # active), so the tracker's seen-set baseline is
+                        # never stale the moment a run actually starts.
+                        # Same independently-degradable-feed posture as
+                        # every other aircraft-layer poll in this loop.
+                        try:
+                            firing_latest_for_atgm = aircraft_client.get_firing_latest()
+                        except AircraftLayerError:
+                            firing_latest_for_atgm = None
+                        own_weapon_events = own_weapon_tracker.poll(
+                            firing_latest_for_atgm,
+                            runner.last_t_sim,
+                            ATGM_OWN_FEED_MAX_AGE_S,
+                        )
+                        if own_weapon_events.failed_launch is not None:
+                            logger.warning(
+                                "ATGM failed launch (round 7 decision 4: "
+                                "treated as not launched): %r",
+                                own_weapon_events.failed_launch,
+                            )
+                        if runner.atgm_run_state is not None:
+                            try:
+                                payload_latest = aircraft_client.get_payload_latest()
+                            except AircraftLayerError:
+                                payload_latest = None
+                            index_counts: dict[int, int] = {}
+                            index_names: dict[int, str] = {}
+                            if payload_latest is not None:
+                                for station_raw in payload_latest.get("stations", []):
+                                    if not isinstance(station_raw, dict):
+                                        continue
+                                    index = station_raw.get("index")
+                                    count = station_raw.get("count")
+                                    name = station_raw.get("name")
+                                    if (
+                                        isinstance(index, int)
+                                        and not isinstance(index, bool)
+                                        and isinstance(count, int)
+                                        and not isinstance(count, bool)
+                                    ):
+                                        index_counts[index] = count
+                                        if isinstance(name, str):
+                                            index_names[index] = name
+                            station_counts = {
+                                step: index_counts.get(
+                                    atgm_config.station_for_step(step), 0
+                                )
+                                for step in range(1, 9)
+                            }
+                            selected_station_type_name = None
+                            if runner.atgm_run_state.selected_step is not None:
+                                selected_station_type_name = index_names.get(
+                                    atgm_config.station_for_step(
+                                        runner.atgm_run_state.selected_step
+                                    )
+                                )
+                            contact_for_atgm = runner.store.contact(
+                                runner.atgm_run_state.contact_id
+                            )
+                            belief_range_m_for_atgm: float | None = None
+                            if contact_for_atgm is not None:
+                                observer_for_atgm = GeoPosition(
+                                    x=runner.last_ownship_state.x,
+                                    z=runner.last_ownship_state.z,
+                                    alt_m=runner.last_ownship_state.alt_m,
+                                )
+                                belief_range_m_for_atgm = range_m(
+                                    observer_for_atgm,
+                                    contact_for_atgm.last_position,
+                                )
+                            atgm_run_state_before = runner.atgm_run_state
+                            new_atgm_run_state, atgm_speech, atgm_actions = (
+                                decide_atgm_run(
+                                    runner.atgm_run_state,
+                                    AtgmInputs(
+                                        now_sim=runner.last_t_sim,
+                                        observ_observed=(
+                                            runner.optic_state.home_phase
+                                            is OpticPhase.SIGHTING
+                                        ),
+                                        belief_range_m=belief_range_m_for_atgm,
+                                        station_counts=station_counts,
+                                        selected_station_type_name=(
+                                            selected_station_type_name
+                                        ),
+                                        launch=own_weapon_events.launch,
+                                        failed_launch=(own_weapon_events.failed_launch),
+                                        missile_gone=(own_weapon_events.missile_gone),
+                                        own_feed_fresh=(
+                                            own_weapon_events.own_feed_fresh
+                                        ),
+                                        impact_sequence_running=(
+                                            EffectorTrigger.ATGM_IMPACT
+                                            in runner.effector_state.runs
+                                        ),
+                                    ),
+                                )
+                            )
+                            runner.atgm_run_state = new_atgm_run_state
+                            if (
+                                atgm_run_state_before.phase is AtgmPhase.IN_FLIGHT
+                                and new_atgm_run_state.phase is AtgmPhase.RESETTING
+                                and not own_weapon_events.missile_gone
+                            ):
+                                # Decision N1's own backstop -- a confirmed
+                                # launch whose "gone" never arrived within
+                                # `ATGM_MAX_FLIGHT_S`. No speech (round 8's
+                                # own wording), ERROR logged only.
+                                logger.error(
+                                    "ATGM backstop: InFlight -> Resetting "
+                                    "with no confirmed missile_gone "
+                                    "(ATGM_MAX_FLIGHT_S elapsed)"
+                                )
+                            crew_console.drain_atgm_run_speech(
+                                atgm_speech,
+                                runner.last_t_sim,
+                                contact_id=atgm_run_state_before.contact_id,
+                            )
+                            for atgm_action in atgm_actions:
+                                if isinstance(atgm_action, AtgmFire):
+                                    runner.effector_state = fire_effector_trigger(
+                                        runner.effector_state,
+                                        EffectorTrigger(atgm_action.trigger),
+                                        runner.last_t_sim,
+                                    )
+                                elif isinstance(atgm_action, AtgmSelectStation):
+                                    station_index = atgm_config.station_for_step(
+                                        atgm_action.step
+                                    )
+                                    runner.effector_state = request_effector_write(
+                                        runner.effector_state,
+                                        f"atgm-select-station-{next(_next_atgm_request_id)}",
+                                        "o_missile_pylon",
+                                        f"pylon_{station_index}",
+                                        None,
+                                        runner.last_t_sim,
+                                    )
                         # `plans/atgm-run-sight-tracking/plan.md` -- "say
                         # 'Tracking.' when on target": fires exactly on
                         # the False->True edge of `_sight_lock_seen`

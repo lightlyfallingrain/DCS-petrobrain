@@ -109,6 +109,25 @@ class EffectorTrigger(Enum):
     ATTACK_RUN_START = "attack-run-start"
     ATTACK_RUN_START_MISSILES = "attack-run-start-missiles"
     ATTACK_RUN_STOP = "attack-run-stop"
+    #: Added `[[BL-B67]]` (`plans/bl-b67-atgm-run/plan.md` Stage 6,
+    #: "2026-11-17 -- missile launch/impact triggers are this entry's
+    #: atgm-* ones"). Fired from `body.py` on the ATGM run's own
+    #: InFlight -> Resetting transition (the tracked missile's own
+    #: flight ending, confirmed or backstop) -- "the missile's flight
+    #: ended... the code cannot tell hit from miss" (user, 2026-11-17,
+    #: confirming this is the same moment a once-planned separate
+    #: `missile-hit` trigger would have fired, so no second trigger was
+    #: added).
+    ATGM_IMPACT = "atgm-impact"
+    #: Fired on the ATGM run's own end, by any exit except a mission
+    #: (re)start (which drops every running sequence anyway, D11) --
+    #: disengage, drop target, cancel, lost contact (the same edges
+    #: `ATTACK_RUN_STOP` fires on, while an ATGM run is the one that
+    #: ends), **and** an `engage <target>` that switches weapon away
+    #: from missiles mid-run, which `ATTACK_RUN_STOP` alone does not
+    #: catch (the overall attack run never stops in that case, only the
+    #: ATGM half of it does).
+    ATGM_RUN_END = "atgm-run-end"
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +253,23 @@ TRIGGER_INFO: Final[Mapping[EffectorTrigger, TriggerInfo]] = {
             '"disengage", drops the target or cancels, or the contact is '
             "lost. Not on a mission (re)start, which drops every running "
             "sequence anyway."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.ATGM_IMPACT: TriggerInfo(
+        description=(
+            "The ATGM run's tracked missile flight ends -- confirmed gone, "
+            "or the backstop timer, whichever comes first. The code cannot "
+            "tell a hit from a miss, so this fires either way."
+        ),
+        cardinality="every_time",
+    ),
+    EffectorTrigger.ATGM_RUN_END: TriggerInfo(
+        description=(
+            "The ATGM run ends, however it ends: disengage, drop target, "
+            "cancel, lost contact, or an engage that switches weapon away "
+            "from missiles mid-run. Not on a mission (re)start, which drops "
+            "every running sequence anyway."
         ),
         cardinality="every_time",
     ),

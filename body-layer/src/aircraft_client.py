@@ -317,8 +317,10 @@ class AircraftLayerClient:
     def get_firing_latest(self) -> dict[str, Any]:
         """`GET /firing/latest` -> the most recent `EmitterTracker.
         snapshot()` as a dict (`{"dcs_model_time_s", "received_wall_
-        clock_s", "active", "mission_clock"}`, see `aircraft-layer/src/
-        collector/firing_receiver.py`). Never `None` -- see the module
+        clock_s", "active", "mission_clock", "own_weapons"}` --
+        `"own_weapons"` added by `[[BL-B67]]` Stage 5, see
+        `aircraft-layer/src/collector/firing_receiver.py`'s
+        `OwnWeaponLedger.snapshot`). Never `None` -- see the module
         docstring."""
         result = self._get_json("/firing/latest")
         if not isinstance(result, dict):

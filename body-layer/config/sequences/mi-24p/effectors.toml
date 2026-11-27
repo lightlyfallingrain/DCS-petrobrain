@@ -93,3 +93,13 @@ values = { open = 1.0, closed = 0.0 }
 source_element = "SAU-B-ON-PTR"    # arg 255
 values = { on = 1.0, off = 0.0 }
 
+[effectors.radiation_reset]
+source_element = "OP-AIM-RESET-RAD-PTR"   # arg 882 -- `[[BL-B67]]` Stage 6
+# (`plans/bl-b67-atgm-run/plan.md`). Momentary `default_button` --
+# sequenced as a press row (value 1.0) then a release row (value 0.0),
+# the "Three departures, named" item 2 shape: a known readback (882) is
+# all the existing engine needs, no `absolute_write` widening required.
+# Q5 (Stage 0 sortie, `docs/acceptance/2026-11-27-bl-b67-stage0-probe-
+# feedback.md`) confirms 3029 presses/releases it.
+values = { pressed = 1.0, released = 0.0 }
+
