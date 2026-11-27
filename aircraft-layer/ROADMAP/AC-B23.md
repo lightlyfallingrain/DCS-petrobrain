@@ -1,6 +1,9 @@
-# AC-B23 — `POST /command/reset` is unauthenticated and forces an uncommanded control release
+# AC-B23 — `POST /command/reset` is unauthenticated and forces an uncommanded control release — REJECTED
 
-- [ ] **AC-B23 — Consider a sender check (or at least rate-limit/log) on `/command/reset`.** #status/open
+- [x] **AC-B23 — REJECTED 2026-11-27 by the user: *"reject AC-B23, non issue"*. The original
+  text is kept below as the record of what was weighed.** #status/done
+
+- **AC-B23 (original text) — Consider a sender check (or at least rate-limit/log) on `/command/reset`.**
 
 Filed from the BL-16 sortie-1120 deep security analysis (`plans/flight-control/security-sortie-1120.md`,
 2026-11-20).

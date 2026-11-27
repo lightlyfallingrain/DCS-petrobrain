@@ -1,7 +1,8 @@
 # AC-B22 — `ai_pilot_cbtm_last_sent_seq` has no reconciliation against Lua's echoed `apw_cbtm_seq`
 
 - [ ] **body-layer's CBTM dedup counter is not reconciled against `Export.lua`'s own echoed
-  `apw_cbtm_seq` on startup/restart.** #status/open Filed 2026-11-19 at the BL-16 mode 2 Stage
+  `apw_cbtm_seq` on startup/restart.** #status/in-progress — folded into `[[BL-B141]]` 2026-11-27
+  (the single running number replaces this channel's own seq), on `feature/bl16-lift-vector-law`. Filed 2026-11-19 at the BL-16 mode 2 Stage
   P3+P4 security deep analysis (`plans/flight-control/security-p3p4.md`). `ai_pilot_cbtm.seq`
   persists in the long-lived Lua VM across a body-layer process restart; `body.py`'s
   `ai_pilot_cbtm_last_sent_seq` resets to `None` (next real send is `1`), with no read of
