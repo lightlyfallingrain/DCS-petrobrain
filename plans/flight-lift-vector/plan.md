@@ -2053,3 +2053,36 @@ yaw too: the SAU plan must decide which of the two owns yaw damping when H is on
   of LV-3 and record it as an open BL-16 item; why: today's rotor-RPM warning already eases
   collective, a deliberate forward acceleration out of a low hover needs its own look at obstacles
   and height, and nothing on the LV-3 card can exercise it safely.
+
+**Answered 2026-11-28 (user, verbatim):**
+
+> U12 - ground speed (also sideways component)
+> U13 - why is there a limit? We should allow full range.
+> U14 - yes
+> U15 - yes with notes about when bank is required
+> U16 - start LV-3 anyway
+> U17 - make it it's own item inside BL-16
+>
+> OK to build LV-3
+
+- **U12:** `λ` from horizontal ground speed, the full vector length including the sideways
+  component (as recommended).
+- **U13: full pedal range.** The +0.5 right limit was a software cap the main loop and architect
+  derived from the user's 2026-10-26 remark that at slow speed *"there's not much right rudder left
+  for additional right yaw"* — a description of the aircraft's own margin, never a request to cap
+  the command. It removed half the travel the aircraft has. So `pedal_limit_positive = 1.0` and
+  `pedal_limit_negative = −1.0` (full axis), applied to the pedal output; the near-right-stop
+  collective-rate guard (`pedal_near_limit_margin`, `collective_rate_cap_near_pedal_limit`) stays,
+  now measured against the real stop. The ±0.3 hover band (E, corrected 2026-11-28) still applies
+  during a commanded heading change only. Where the plan above says "existing absolute limits stay
+  where they are" or "+0.5", read full range.
+- **U14:** yes — the deceleration collective nudge fades with `λ`.
+- **U15:** yes — and per the 2026-11-28 correction to C, the held bank that ends at 25 km/h is the
+  bank used **to turn**. Bank needed to counter crosswind drift (the drift hold, B) or, later, for
+  sideways translate is not ended or limited by this; a take at 25 km/h or slower holds heading
+  with pedal, and the drift hold keeps whatever bank the wind needs.
+- **U16:** build LV-3 now, without waiting for the LV-2 card. The card's break rows can fly with
+  `k_yaw_damp = 0` as a comparison if needed.
+- **U17:** the low-slow-RPM "accelerate" class leaves LV-3 and becomes its own open item inside
+  `[[BL-16]]` (the entry's "Open, within BL-16" list).
+
