@@ -499,6 +499,29 @@ local function law_sign(v)
     return 0.0
 end
 
+-- BL-16 lift-vector law, Stage LV-3 (`plans/flight-lift-vector/
+-- plan.md`, "LV-3 amendment (2026-11-27)", section A): the hover/
+-- forward blend, from horizontal ground speed `v_g_mps` (U12: the full
+-- vector length, sideways component included) -- 0 at/below `profile.
+-- lambda_hover_kmh`, 1 at/above `profile.lambda_forward_kmh`, linear
+-- between. A non-finite or missing input returns 1.0 -- the forward
+-- law, today's behaviour, never a plausible-looking hover (the
+-- project's standing non-finite-at-the-boundary rule).
+local function law_lambda(v_g_mps, profile)
+    if type(v_g_mps) ~= "number" or v_g_mps ~= v_g_mps
+        or v_g_mps == math.huge or v_g_mps == -math.huge
+    then
+        return 1.0
+    end
+    local span = profile.lambda_forward_kmh - profile.lambda_hover_kmh
+    if span <= 0.0 then
+        return 1.0
+    end
+    local v_g_kmh = v_g_mps * 3.6
+    local frac = (v_g_kmh - profile.lambda_hover_kmh) / span
+    return law_clamp(frac, 0.0, 1.0)
+end
+
 -- Turn rate (deg/s) for a coordinated turn at `bank_deg`, at true
 -- airspeed `v_t_mps` -- `g*tan(bank)/V`, converted from rad/s to deg/s.
 -- Guards a near-zero/absent airspeed (returns 0 -- "no rate" is the
@@ -676,10 +699,18 @@ local function law_init_at_take(measured, limits, command, seed, profile)
     -- confirmed by the user's own 2026-11-24 answer (U3/Decision 3), so
     -- a second wire-independent threshold would only duplicate it.
     local bank_for_take = measured.phi_bar or measured.bank_deg
+    local lambda_at_take = measured.lambda or 1.0
     local heading_mode = math.abs(bank_for_take) < limits.takeover_level_bank_deg
     local bank_hold_deg = nil
     if not heading_mode then
         bank_hold_deg = bank_for_take
+    end
+    -- LV-3 amendment, section F (U15): at hover (lambda = 0) a bank is
+    -- a sideways slide, not a turn -- a banked take holds heading, not
+    -- the bank, even past `takeover_level_bank_deg`.
+    if lambda_at_take <= 0.0 and bank_hold_deg ~= nil then
+        heading_mode = true
+        bank_hold_deg = nil
     end
     local heading_goal_deg = measured.psi_deg
     if type(seed.heading_deg) == "number" then
@@ -707,7 +738,15 @@ local function law_init_at_take(measured, limits, command, seed, profile)
             alt_goal_ref = "baro"
         end
     end
-    local speed_goal_mps = measured.ias_mps
+    -- LV-3 amendment, section B (U12): the blended measured speed --
+    -- IAS in forward flight, ground speed along the nose near hover
+    -- (so "speed 0" means stopped over the ground, in wind too). Seeds
+    -- both `v_ref` (the tracking reference) and the default `speed_
+    -- goal_mps` (no seed given) -- an explicit `seed.speed_kmh` is
+    -- still taken verbatim, the deliberately commanded value.
+    local v_m_at_take = lambda_at_take * measured.ias_mps
+        + (1.0 - lambda_at_take) * (measured.v_g_f or measured.ias_mps)
+    local speed_goal_mps = v_m_at_take
     if type(seed.speed_kmh) == "number" then
         speed_goal_mps = seed.speed_kmh / 3.6
     end
@@ -740,8 +779,11 @@ local function law_init_at_take(measured, limits, command, seed, profile)
     -- value is subtracted out of the seed here, so `law_outputs` adding
     -- it straight back (against the same `measured.ball`, same frame)
     -- reproduces `command.pedals` exactly.
+    -- LV-3 amendment, section D -- the ball's share of the proportional
+    -- pedal term is lambda-weighted (it reads nothing near hover,
+    -- finding 1).
     local ball_at_take = measured.ball or profile.ball_centre
-    local t_y_p_at_take = profile.k_ball_pedal_p * (ball_at_take - profile.ball_centre)
+    local t_y_p_at_take = lambda_at_take * profile.k_ball_pedal_p * (ball_at_take - profile.ball_centre)
     -- "psi replaces -ang.y as the turn rate the shapers ... read"
     -- (section A) -- seeds the turn-rate reference from the Euler yaw
     -- rate when the estimator has it, falling back to the body rate
@@ -758,6 +800,19 @@ local function law_init_at_take(measured, limits, command, seed, profile)
     else
         turn_rate_at_take = measured.psi_dot_deg_s or measured.r_deg_s
     end
+    -- LV-3 amendment, section D ("Bit-exact at take"): the yaw damper's
+    -- own take-instant value, computed from the same measured frame and
+    -- backed out of `t_y`'s seed alongside the (now lambda-weighted)
+    -- ball P term above, so `law_outputs` adding both straight back
+    -- reproduces `command.pedals` exactly.
+    local v_t_for_yaw_at_take = math.max(measured.v_t_mps or 0.0, profile.yaw_damp_v_floor_mps)
+    local psi_dot_exp_at_take = lambda_at_take
+            * law_turn_rate_at_bank(measured.bank_deg, v_t_for_yaw_at_take)
+        + (1.0 - lambda_at_take) * (turn_rate_at_take or 0.0)
+    local psi_dot_at_take = measured.psi_dot_deg_s or measured.r_deg_s or 0.0
+    local yaw_e_at_take = psi_dot_at_take - psi_dot_exp_at_take
+    local yaw_damp_at_take = law_clamp(
+        -profile.k_yaw_damp * yaw_e_at_take, -profile.yaw_damp_max, profile.yaw_damp_max)
     return {
         -- `turn_mode` (the old commanded-continuous-turn/measured-rate-
         -- hold mechanism) is never set true by a take any more --
@@ -775,7 +830,7 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         h_ref = measured.h_m,
         w_ref = measured.w_mps,
         speed_goal_mps = speed_goal_mps,
-        v_ref = measured.ias_mps,
+        v_ref = v_m_at_take,
         dv_ref = 0.0,
         phi_i = phi_i,
         theta_i = theta_i,
@@ -783,7 +838,7 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         theta_d = measured.pitch_deg,
         t_p = command.pitch + profile.k_q * (measured.theta_dot_deg_s or measured.q_deg_s),
         t_r = command.roll + profile.k_p * (measured.phi_dot_deg_s or measured.p_deg_s),
-        t_y = command.pedals - t_y_p_at_take,
+        t_y = command.pedals - t_y_p_at_take - yaw_damp_at_take,
         u_c = command.collective,
         u_c_i = command.collective - u_c_ff_at_take,
         measured_v_t_mps = measured.v_t_mps,
@@ -799,6 +854,20 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         -- take" reasoning as every other field above: nothing is added
         -- to `t_y` before the first `law_update` frame.
         turn_coord_pedal = 0.0,
+        -- LV-3 amendment, section D -- the yaw damper's own take-
+        -- instant value (backed out of `t_y` above), so `law_outputs`
+        -- adding it straight back is bit-exact.
+        yaw_damp_pedal = yaw_damp_at_take,
+        -- LV-3 amendment, section E -- the take frame is inside the
+        -- hover pedal band by construction (the band is not applied at
+        -- all while no heading change is running).
+        pedal_hover_ref = command.pedals,
+        heading_change_active = false,
+        -- LV-3 amendment, section G -- no goal-driven acceleration has
+        -- been commanded yet; both start at zero so the first `law_
+        -- update` frame's slew begins from rest, never a step.
+        a_f_goal_s = 0.0,
+        a_u_goal_s = 0.0,
         -- Debug-2026-11-24 diagnostic-only fields (same posture as
         -- `turn_coord_pedal` above): zero at take, nothing has run yet.
         dbg_r_d = 0.0,
@@ -841,6 +910,17 @@ local function law_update(state, dt, measured, limits, profile)
     local next_state = {}
     for k, v in pairs(state) do next_state[k] = v end
 
+    -- LV-3 amendment, section A: the hover/forward blend, derived once
+    -- per step and read by every regime-aware term below. `measured.
+    -- lambda` is nil only before the estimator primes; `1.0` (pure
+    -- forward) is the same "unknown -> safe default" posture `law_
+    -- lambda` itself uses for a non-finite ground speed.
+    local lambda = measured.lambda or 1.0
+    -- LV-3 amendment, section B (U12): the blended measured speed --
+    -- replaces `measured.ias_mps` in the speed-error term and `in_
+    -- band_speed` below.
+    local v_m = lambda * measured.ias_mps + (1.0 - lambda) * (measured.v_g_f or measured.ias_mps)
+
     -- Section B: the gain schedule G(V) -- "about 0.3 at hover, 1.0
     -- from 150 km/h" (first cut). Scales every shaper's own accel cap
     -- so a slow command (or a sag) is flown gently -- with no
@@ -876,6 +956,16 @@ local function law_update(state, dt, measured, limits, profile)
         next_state.psi_ref = law_wrap360(state.psi_ref + next_state.r_ref * dt)
         next_state.turn_mode = false
         r_d = next_state.r_ref
+        -- LV-3 amendment, section F (U15): a held bank ends once lambda
+        -- reaches 0 (25 km/h and below) -- heading holds on the heading
+        -- reached, no snap (the next frame's "else" branch decays `r_
+        -- ref` to zero through the shaper, already blended to the hover
+        -- bandwidth/rate cap by then).
+        if lambda <= 0.0 then
+            next_state.bank_hold_deg = nil
+            next_state.heading_goal_deg = next_state.psi_ref
+            next_state.turn_mode = false
+        end
     elseif state.turn_mode then
         local r_goal = state.turn_goal_deg_s
         local accel_limit = heading_accel_cap
@@ -934,6 +1024,13 @@ local function law_update(state, dt, measured, limits, profile)
             rate_limit = math.min(
                 math.abs(state.rate_override_deg_s),
                 law_turn_rate_at_bank(profile.break_max_bank_deg, measured.v_t_mps))
+            -- LV-3 amendment, section C ("A break keeps LV-2's own
+            -- bandwidth and caps; below 80 km/h its rate_limit is
+            -- blended the same way") -- the break's own bandwidth is
+            -- unchanged, only the rate ceiling blends toward the hover
+            -- rate cap as lambda falls, so a break entered slow at
+            -- hover-ish speed becomes a calm pedal turn.
+            rate_limit = lambda * rate_limit + (1.0 - lambda) * profile.hover_yaw_rate_max_deg_s
             accel_limit = rate_limit / profile.t_roll
         else
             -- LV-1 amendment, section A, E12 -- an inherited rate from
@@ -955,6 +1052,12 @@ local function law_update(state, dt, measured, limits, profile)
             -- ceiling (every ordinary frame, by construction of this
             -- same clamp one step earlier).
             rate_limit = math.max(rate_limit, math.abs(state.r_ref))
+            -- LV-3 amendment, section C: "the heading shaper's
+            -- bandwidth, rate cap... blend with lambda" -- the ordinary
+            -- (non-break) case only; a break keeps its own bandwidth
+            -- (above).
+            omega_heading = lambda * profile.omega_heading + (1.0 - lambda) * profile.hover_omega_heading
+            rate_limit = lambda * rate_limit + (1.0 - lambda) * profile.hover_yaw_rate_max_deg_s
         end
         local err = law_wrap180(state.heading_goal_deg - state.psi_ref)
         local a_ref = omega_heading * omega_heading * err
@@ -965,6 +1068,22 @@ local function law_update(state, dt, measured, limits, profile)
         r_d = next_state.r_ref
             + profile.k_heading_track * law_wrap180(next_state.psi_ref - measured.psi_deg)
     end
+
+    -- LV-3 amendment, section D: the unexplained yaw -- the all-speed
+    -- yaw damper's own input, and the hover yaw-rate loop's own
+    -- reference. `psi_dot_exp` is the rate the bank implies in forward
+    -- flight (lambda-weighted) blended with the commanded rate `r_d`
+    -- near hover -- the yaw damper has no heading reference of its own
+    -- and no rate goal, so it reads zero in any coordinated turn
+    -- (finding 2's own reason for "never a heading loop in forward
+    -- flight" still holds).
+    local v_t_for_yaw = math.max(measured.v_t_mps or 0.0, profile.yaw_damp_v_floor_mps)
+    local psi_dot_exp = lambda * law_turn_rate_at_bank(measured.bank_deg, v_t_for_yaw)
+        + (1.0 - lambda) * r_d
+    local psi_dot = measured.psi_dot_deg_s or measured.r_deg_s or 0.0
+    local yaw_e = psi_dot - psi_dot_exp
+    next_state.yaw_damp_pedal = law_clamp(
+        -profile.k_yaw_damp * yaw_e, -profile.yaw_damp_max, profile.yaw_damp_max)
 
     -- Step 1 (altitude, section B, kept): position+rate shaper towards
     -- the AGL-equivalent goal. A barometric goal is converted every
@@ -1036,14 +1155,48 @@ local function law_update(state, dt, measured, limits, profile)
     next_state.dv_ref = law_clamp(state.dv_ref + a_ref_v * dt, -dv_cap, dv_cap)
     next_state.v_ref = state.v_ref + next_state.dv_ref * dt
 
-    -- Section C: desired acceleration, in the heading frame. LV-1 flies
-    -- forward flight only (lambda = 1 throughout -- LV-3 adds the hover
-    -- blend): IAS for the speed channel, V_t*r_d for the centripetal
-    -- term, no ground-speed reference yet.
-    local a_u_d = a_ref_h + profile.k_vs_error * (next_state.w_ref - measured.w_mps)
+    -- LV-3 amendment, section G: low-speed gentleness -- "it's not the
+    -- pitch/bank angles themselves but how fast they change" (user).
+    -- Only the shapers' own GOAL-DRIVEN accelerations are slewed, below
+    -- `lambda_forward_kmh`; the feedback below (`k_speed_error`/`k_vs_
+    -- error`/`k_alt_error`) is added after the slew, untouched. At
+    -- lambda = 1 `a_*_goal_s` equals the raw shaper acceleration
+    -- exactly -- LV-2 is bit-identical above `lambda_forward_kmh`.
+    local goal_jerk = profile.goal_jerk_hover_mps3
+        + lambda * (profile.goal_jerk_edge_mps3 - profile.goal_jerk_hover_mps3)
+    local a_f_goal_s
+    if lambda >= 1.0 then
+        a_f_goal_s = a_ref_v
+    else
+        local prev_a_f_goal_s = state.a_f_goal_s or 0.0
+        a_f_goal_s = prev_a_f_goal_s
+            + law_clamp(a_ref_v - prev_a_f_goal_s, -goal_jerk * dt, goal_jerk * dt)
+    end
+    next_state.a_f_goal_s = a_f_goal_s
+    local a_u_goal_s
+    if lambda >= 1.0 then
+        a_u_goal_s = a_ref_h
+    else
+        local prev_a_u_goal_s = state.a_u_goal_s or 0.0
+        a_u_goal_s = prev_a_u_goal_s
+            + law_clamp(a_ref_h - prev_a_u_goal_s, -goal_jerk * dt, goal_jerk * dt)
+    end
+    next_state.a_u_goal_s = a_u_goal_s
+
+    -- Section C: desired acceleration, in the heading frame. The speed
+    -- term reads the blended measured speed `v_m` (B), never bare IAS,
+    -- so "speed 0" means stopped over the ground near hover too.
+    local a_u_d = a_u_goal_s + profile.k_vs_error * (next_state.w_ref - measured.w_mps)
         + profile.k_alt_error * (next_state.h_ref - measured.h_m)
-    local a_f_d = a_ref_v + profile.k_speed_error * (next_state.v_ref - measured.ias_mps)
-    local a_r_d = measured.v_t_mps * math.rad(r_d)
+    local a_f_d = a_f_goal_s + profile.k_speed_error * (next_state.v_ref - v_m)
+    -- LV-3 amendment, section B: the drift hold -- lateral cyclic
+    -- against sideways ground speed near hover (crosswind countering,
+    -- U15's own note: "bank needed to counter crosswind drift... is not
+    -- ended or limited by this"), blended against the ordinary
+    -- centripetal term `a_r,turn` the same way every other channel is.
+    local a_r_turn = measured.v_t_mps * math.rad(r_d)
+    local v_g_r = measured.v_g_r or 0.0
+    local a_r_d = lambda * a_r_turn + (1.0 - lambda) * (-profile.k_drift_hold * v_g_r)
 
     -- Debug-2026-11-24 (`plans/flight-lift-vector/debug-2026-11-24.md`):
     -- `r_d`/`a_f_d`/`a_r_d`/`a_u_d` are locals, never persisted, so a
@@ -1103,10 +1256,15 @@ local function law_update(state, dt, measured, limits, profile)
     -- the vertical loop's `e_u` integrator (`u_c_i`) still fully holds
     -- altitude by adding on top of this nudge, exactly the way it
     -- already overrides `u_c_ff`.
+    -- LV-3 amendment, U14: below the minimum-power speed, slowing
+    -- further needs MORE power, not less, so this nudge fades with
+    -- lambda (full at/above `lambda_forward_kmh`, gone at/below `lambda_
+    -- hover_kmh`) -- the vertical loop's `e_u` integrator is what
+    -- supplies the growing collective need near hover instead.
     local u_c_speed_give_ff = 0.0
     if a_f_d < 0.0 then
         local capped_decel = math.min(math.abs(a_f_d), profile.collective_speed_give_max_a_f_d_mps2)
-        u_c_speed_give_ff = -profile.k_collective_speed_give * capped_decel
+        u_c_speed_give_ff = -profile.k_collective_speed_give * capped_decel * lambda
     end
     local u_c_ff_total = u_c_ff + u_c_speed_give_ff
     local u_c_candidate = u_c_ff_total + state.u_c_i + c_dot_nominal * dt
@@ -1324,8 +1482,13 @@ local function law_update(state, dt, measured, limits, profile)
     -- coord_pedal` carry the command-domain sign: positive pedal
     -- command = RIGHT pedal (`plans/flight-lift-vector/debug-2026-11-
     -- 24b.md`, which reverted the first 2026-11-24 pass's flip).
+    -- LV-3 amendment, section D: the ball's share is lambda-weighted
+    -- (it reads nothing near hover, finding 1); the hover yaw-rate
+    -- integral (`k_yaw_rate_i`) takes over the rest, learning the
+    -- anti-torque pedal and the extra pedal a steady yaw rate needs.
     local ball = measured.ball or profile.ball_centre
-    local d_t_y = profile.k_ball_pedal * (ball - profile.ball_centre)
+    local d_t_y = lambda * profile.k_ball_pedal * (ball - profile.ball_centre)
+        + (1.0 - lambda) * profile.k_yaw_rate_i * (-yaw_e)
     -- Torque feed-forward: only meaningful while the collective axis is
     -- actually written to the aircraft (`measured.collective_enabled`,
     -- same guard the old coupling term already needed -- see `read_
@@ -1355,6 +1518,26 @@ local function law_update(state, dt, measured, limits, profile)
         next_state.turn_coord_pedal = 0.0
     end
 
+    -- LV-3 amendment, section E (corrected 2026-11-28: binds only
+    -- during a commanded heading change) -- `pedal_hover_ref` tracks
+    -- the would-be pedal output while holding heading, so it is "the
+    -- value where hover is stable"; it freezes once a heading change
+    -- starts, moved only by the torque feed-forward lead, so the band
+    -- never cuts the pedal lead on collective.
+    local t_y_p_now = lambda * profile.k_ball_pedal_p * (ball - profile.ball_centre)
+    local pedal_output_now = next_state.t_y + t_y_p_now
+        + next_state.turn_coord_pedal + next_state.yaw_damp_pedal
+    next_state.heading_change_active = math.abs(r_d) >= profile.turn_settle_deg_s
+    if next_state.heading_change_active then
+        local ref_nudge = 0.0
+        if measured.collective_enabled then
+            ref_nudge = profile.k_pedal_from_collective_rate * u_c_rate * profile.rotor_dir * dt
+        end
+        next_state.pedal_hover_ref = (state.pedal_hover_ref or 0.0) + ref_nudge
+    else
+        next_state.pedal_hover_ref = pedal_output_now
+    end
+
     next_state.measured_v_t_mps = measured.v_t_mps
 
     -- Status-feed `in_band_*` (A9's only consumers this stage: the
@@ -1366,8 +1549,10 @@ local function law_update(state, dt, measured, limits, profile)
         and math.abs(law_wrap180(measured.psi_deg - next_state.heading_goal_deg)) <= limits.heading_band_deg
     local alt_band = math.max(limits.alt_band_frac * math.abs(alt_goal_agl), limits.alt_band_min_m)
     next_state.in_band_altitude = math.abs(measured.h_m - alt_goal_agl) <= alt_band
-    local speed_band = limits.speed_band_frac * state.speed_goal_mps
-    next_state.in_band_speed = math.abs(measured.ias_mps - state.speed_goal_mps) <= speed_band
+    -- LV-3 amendment, section B: `v_m` (blended) replaces bare IAS, and
+    -- a floor (finding 7) lets a "speed 0" goal be in band.
+    local speed_band = math.max(limits.speed_band_frac * state.speed_goal_mps, profile.speed_band_min_mps)
+    next_state.in_band_speed = math.abs(v_m - state.speed_goal_mps) <= speed_band
 
     -- Decision 27 -- "settling clears it." Once the heading goal is
     -- actually reached while a break's rate override is still set,
@@ -1426,6 +1611,7 @@ end
 -- own confirmation: "the axis write itself may have to stay every
 -- frame -> this is true").
 local function law_outputs(state, measured, profile)
+    local lambda = measured.lambda or 1.0
     local theta_rate = measured.theta_dot_deg_s or measured.q_deg_s
     local phi_rate = measured.phi_dot_deg_s or measured.p_deg_s
     local u_pitch = state.t_p + profile.k_theta * (state.theta_d - measured.pitch_deg)
@@ -1437,12 +1623,27 @@ local function law_outputs(state, measured, profile)
     -- `turn_coord_pedal` below. `law_init_at_take` backs this same
     -- quantity out of `t_y`'s own seed, so calling this on a take state
     -- (same `measured.ball`, same frame) adds exactly zero net change.
+    -- LV-3 amendment, section D -- lambda-weighted, same as `law_
+    -- update`'s own `d_t_y` ball share.
     local ball = measured.ball or profile.ball_centre
-    local t_y_p = profile.k_ball_pedal_p * (ball - profile.ball_centre)
+    local t_y_p = lambda * profile.k_ball_pedal_p * (ball - profile.ball_centre)
+    local pedal_sum = state.t_y + t_y_p + (state.turn_coord_pedal or 0.0) + (state.yaw_damp_pedal or 0.0)
+    -- LV-3 amendment, section E (corrected 2026-11-28) -- the hover
+    -- pedal band binds only while a commanded heading change is
+    -- running (`state.heading_change_active`); holding heading, any
+    -- pedal is allowed (the absolute limits, U13, still apply via the
+    -- final clamp below).
+    local pedal = pedal_sum
+    if state.heading_change_active then
+        local w = profile.hover_pedal_band
+            + lambda * (profile.hover_pedal_band_forward - profile.hover_pedal_band)
+        local ref = state.pedal_hover_ref or 0.0
+        pedal = law_clamp(pedal_sum, ref - w, ref + w)
+    end
     return {
         pitch = law_clamp(u_pitch, -1.0, 1.0),
         roll = law_clamp(u_roll, -1.0, 1.0),
-        pedals = law_clamp(state.t_y + t_y_p + (state.turn_coord_pedal or 0.0), -1.0, 1.0),
+        pedals = law_clamp(pedal, -1.0, 1.0),
         collective = law_clamp(state.u_c, -1.0, 1.0),
     }
 end
@@ -2198,7 +2399,11 @@ local function est_reset(est)
     est.v_g = 0.0
     est.v_g_f = 0.0
     est.v_g_r = 0.0
-    est.lambda = 0.0
+    -- LV-3 amendment, section A -- `nil` (never a fabricated `0.0`,
+    -- which used to read as "hover" the instant the estimator reset).
+    -- Every `law_*` function reads `measured.lambda or 1.0` (the
+    -- forward law) until the estimator primes and this is overwritten.
+    est.lambda = nil
     est.primed = false
 end
 
@@ -2541,21 +2746,11 @@ local function est_sample(est, t, raw, profile)
 
     est.ball = est_ring_update_mean(est.rings.ball, t, raw.ball_raw or profile.ball_centre, profile.w_b)
 
-    -- `lambda` -- a trivial first-cut curve (0 at/below 25 km/h, 1
-    -- at/above 50 km/h, linear between), reported for the status/card
-    -- even though nothing reads it yet (LV-3's own job, which is also
-    -- where the blend breakpoints join the profile -- see `flight_
-    -- profile.lua`'s header on why they are not there yet). Hard-coded
-    -- here rather than in the profile for exactly that reason: this is
-    -- a placeholder, not the real schedule.
-    local v_g_kmh = est.v_g * 3.6
-    if v_g_kmh <= 25.0 then
-        est.lambda = 0.0
-    elseif v_g_kmh >= 50.0 then
-        est.lambda = 1.0
-    else
-        est.lambda = (v_g_kmh - 25.0) / (50.0 - 25.0)
-    end
+    -- LV-3 amendment, section A -- the real hover/forward blend, from
+    -- the profile's own `lambda_hover_kmh`/`lambda_forward_kmh`
+    -- breakpoints (replacing this function's own former placeholder
+    -- curve, hard-coded 25/50 km/h, which nothing read).
+    est.lambda = law_lambda(est.v_g, profile)
 
     return true
 end
@@ -2967,6 +3162,14 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
         -- (E11's own "the 5 deg rule's input" answer): a raw single
         -- frame can flip a wobbly 5-6 deg bank across the line.
         measured.phi_bar = fc_est.phi_bar
+        -- LV-3 amendment, section A/B -- the hover/forward blend and
+        -- the ground-speed components every regime-aware `law_*`
+        -- function reads (`measured.lambda or 1.0` is each one's own
+        -- "not primed yet" fallback).
+        measured.lambda = fc_est.lambda
+        measured.v_g = fc_est.v_g
+        measured.v_g_f = fc_est.v_g_f
+        measured.v_g_r = fc_est.v_g_r
     end
     local ok, reason = check_envelope(t, measured)
     if not ok then
@@ -3121,6 +3324,7 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
         end
         local prev_turn_mode = fc_law.turn_mode
         local prev_rate_override = fc_law.rate_override_deg_s
+        local prev_bank_hold = fc_law.bank_hold_deg
         fc_law = law_update(fc_law, law_dt, measured, fc_limits, flight_profile.ACTIVE)
         fc_law_last_update_t = t
         fc_debug_law_update_count = fc_debug_law_update_count + 1
@@ -3144,6 +3348,17 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
                     flight_desired.write_internal({
                         heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
                         clear_turn_rate = true,
+                    })
+                end)
+            -- LV-3 amendment, section F -- a held bank ending at lambda
+            -- = 0 writes the settled heading back the same way, so a
+            -- later unpark (or the status line) sees "heading", never
+            -- a stale "bank" mode (`write_internal`'s own heading
+            -- branch also clears `bank_hold_deg`, finding 6).
+            elseif prev_bank_hold ~= nil and fc_law.bank_hold_deg == nil then
+                safe_call(function()
+                    flight_desired.write_internal({
+                        heading_deg = heading_ref_from_true(fc_law.heading_goal_deg, measured.psi_deg),
                     })
                 end)
             end
@@ -3601,6 +3816,33 @@ M.takeover_level_bank_deg = function()
     return fc_limits.takeover_level_bank_deg
 end
 
+-- LV-3 amendment, section F -- `flight_desired.lua`'s own `reseed_
+-- from_measured` mirrors the take rule's own lambda = 0 override (a
+-- banked take holds heading, not the bank, at hover); `nil` only
+-- before the estimator primes, same posture as `get_phi_bar`.
+M.get_lambda = function()
+    return fc_est.lambda
+end
+
+-- LV-3 amendment, section B -- the blended measured speed `V_m`, for
+-- `flight_desired.lua`'s own `reseed_from_measured` (so a reseed's
+-- `desired.ias_kmh` means "ground speed along the nose" near hover too,
+-- not bare IAS). `nil` whenever either input is unavailable (not
+-- primed yet, or `LoGetIndicatedAirSpeed` itself failed this poll) --
+-- the caller's own existing IAS fallback covers that case.
+M.get_take_speed_kmh = function()
+    if not fc_est.primed then
+        return nil
+    end
+    local ias_mps = safe_call(LoGetIndicatedAirSpeed)
+    if type(ias_mps) ~= "number" then
+        return nil
+    end
+    local lambda = fc_est.lambda or 1.0
+    local v_g_f_kmh = (fc_est.v_g_f or 0.0) * 3.6
+    return lambda * (ias_mps * 3.6) + (1.0 - lambda) * v_g_f_kmh
+end
+
 -- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix
 -- 1) -- diagnostic-only, never on any wire (see the counters' own
 -- declaration comment). `test_flight_control_lua.py`'s own scheduling
@@ -3623,6 +3865,10 @@ M.law_apply_goal = law_apply_goal
 M.law_update = law_update
 M.law_outputs = law_outputs
 M.law_turn_rate_at_bank = law_turn_rate_at_bank
+-- LV-3 amendment, section A -- exported for the toy-plant suite's own
+-- unit test on the helper itself (`lambda_hover_kmh`/`lambda_forward_
+-- kmh` breakpoints, non-finite input).
+M.law_lambda = law_lambda
 
 -- Decision 28's rotor RPM seam, exported for the same reason -- a
 -- dedicated unit test (`tests/test_flight_control_lua.py`'s own

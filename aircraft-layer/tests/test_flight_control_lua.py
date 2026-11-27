@@ -194,9 +194,34 @@ function LoGetRadarAltimeter()
     return radar_dist, radar_valid
 end
 
+-- BL-16 lift-vector law, Stage LV-3 -- without a `Position`, `read_
+-- estimator_raw`'s own `pos_valid` is always `false`, so the real
+-- estimator's `v_g`/`v_g_f`/`v_g_r` (and therefore `lambda`) never
+-- move off their reset value regardless of the mocked `ias_mps` --
+-- every scenario in this file would silently run in "hover" (lambda
+-- = 0) once LV-3's regime blend existed, no matter what speed it set.
+-- `_mock_t`/`_mock_last_t`/`_mock_pos_n`/`_mock_pos_e` (set by the
+-- `run_flight_control` wrapper just below the module load, `_run`'s
+-- own assembly) make `Position` advance by `ias_mps` along the
+-- current `heading_rad` for whatever real sim-time elapsed since the
+-- last read -- the same "IAS is ground truth" assumption every
+-- pre-existing test here already makes for the IAS channel itself.
+_mock_t = 0.0
+local _mock_last_t = 0.0
+local _mock_pos_n, _mock_pos_e = 0.0, 0.0
+
 function LoGetSelfData()
     if not self_data_present then return nil end
-    return { Heading = heading_rad }
+    local dt = _mock_t - _mock_last_t
+    if dt > 0 then
+        _mock_pos_n = _mock_pos_n + ias_mps * math.cos(heading_rad) * dt
+        _mock_pos_e = _mock_pos_e + ias_mps * math.sin(heading_rad) * dt
+        _mock_last_t = _mock_t
+    end
+    return {
+        Heading = heading_rad,
+        Position = { x = _mock_pos_n, y = 0.0, z = _mock_pos_e },
+    }
 end
 
 local function debug_log(msg) end
@@ -258,7 +283,9 @@ flight_profile = {
         collective_rate_gentle_min_per_s = 0.2,
         rotor_dir = 1.0,
         k_turn_coord_pedal = 0.02,
-        pedal_limit_positive = 0.5,
+        -- LV-3 amendment, U13 -- full pedal range, mirrors `flight_
+        -- profile.lua`.
+        pedal_limit_positive = 1.0,
         pedal_limit_negative = -1.0,
         -- Write bias (debug-2026-11-24c, finding 1) -- mirrors
         -- `flight_profile.lua`.
@@ -282,6 +309,21 @@ flight_profile = {
         w_b = 0.2,
         ball_centre = 0.03,
         ball_usable_range = 0.5,
+        -- LV-3 amendment -- mirrors `flight_profile.lua`.
+        lambda_hover_kmh = 25.0,
+        lambda_forward_kmh = 80.0,
+        k_yaw_damp = 0.03,
+        yaw_damp_max = 0.25,
+        yaw_damp_v_floor_mps = 5.0,
+        k_yaw_rate_i = 0.03,
+        hover_omega_heading = 0.7,
+        hover_yaw_rate_max_deg_s = 8.0,
+        k_drift_hold = 0.3,
+        speed_band_min_mps = 1.0,
+        hover_pedal_band = 0.3,
+        hover_pedal_band_forward = 2.0,
+        goal_jerk_hover_mps3 = 0.5,
+        goal_jerk_edge_mps3 = 5.0,
     },
 }
 
@@ -468,6 +510,16 @@ def _run(
         + "\nlocal flight_control = (function()\n"
         + module_source
         + "\nend)()\n"
+        # LV-3 -- every driver calls `flight_control.run_flight_control(t)`
+        # directly with its own `t`; this one-time wrap (rather than
+        # threading `_mock_t` through every call site in this file) is
+        # what lets `LoGetSelfData`'s own `Position` mock (`_PREAMBLE`)
+        # advance by real elapsed sim time.
+        + "local _real_run_flight_control = flight_control.run_flight_control\n"
+        + "flight_control.run_flight_control = function(t)\n"
+        + "    _mock_t = t\n"
+        + "    return _real_run_flight_control(t)\n"
+        + "end\n"
         + driver
     )
 

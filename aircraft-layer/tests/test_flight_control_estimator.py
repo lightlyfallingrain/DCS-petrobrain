@@ -82,6 +82,12 @@ local PROFILE = {
     w_b = 0.2,
     ball_centre = 0.03,
     law_hz = 30.0,
+    -- BL-16 lift-vector law, Stage LV-3 -- `est_sample` now derives
+    -- `est.lambda` via `law_lambda`, which reads these two breakpoints.
+    -- Values picked only so the existing tests' own velocities (none
+    -- of them exercise the hover/forward blend) do not matter here.
+    lambda_hover_kmh = 25.0,
+    lambda_forward_kmh = 80.0,
 }
 """
 
@@ -659,6 +665,7 @@ local est = new_est()
 local vector_profile = {
     velocity_source = "vector", w_v_s = 0.1, w_a_s = 0.2, w_a2_s = 0.1,
     w_b = 0.2, ball_centre = 0.03, law_hz = 30.0,
+    lambda_hover_kmh = 25.0, lambda_forward_kmh = 80.0,
 }
 for i = 0, 20 do
     local t = i * (1.0 / 30.0)

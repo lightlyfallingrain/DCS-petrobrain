@@ -516,11 +516,74 @@ M.PROFILES["Mi-24P"] = {
     k_pedal_from_collective_rate = 0.6,
     rotor_dir = 1.0,
     k_turn_coord_pedal = 0.02,
-    -- Right pedal is the scarce side (user: "not much right rudder
-    -- left") -- the positive command side, so the tight bound is
-    -- `pedal_limit_positive`.
-    pedal_limit_positive = 0.5,
+    -- LV-3 amendment, U13 (2026-11-28, user, verbatim: "why is there a
+    -- limit? We should allow full range."): the old `+0.5` right cap
+    -- was a software limit the main loop and architect derived from
+    -- the user's 2026-10-26 remark that at slow speed "there's not much
+    -- right rudder left for additional right yaw" -- a description of
+    -- the AIRCRAFT's own margin, never a request to cap the command.
+    -- Full axis range now; the near-right-stop collective-rate guard
+    -- (`pedal_near_limit_margin`/`collective_rate_cap_near_pedal_limit`,
+    -- below) stays, now measured against the real stop.
+    pedal_limit_positive = 1.0,
     pedal_limit_negative = -1.0,
+
+    -- ---- LV-3 amendment (`plans/flight-lift-vector/plan.md`, "LV-3
+    -- amendment (2026-11-27)"): the hover/low-speed regime. `lambda`
+    -- (section A) blends every channel from the pure forward law
+    -- (lambda = 1, at/above `lambda_forward_kmh`) to the hover law
+    -- (lambda = 0, at/below `lambda_hover_kmh`), from horizontal ground
+    -- speed (U12: the full vector length, sideways component
+    -- included).
+    lambda_hover_kmh = 25.0,
+    lambda_forward_kmh = 80.0,
+
+    -- Section D: the all-speed yaw damper on unexplained yaw (`e =
+    -- psi_dot - psi_dot_exp`), plus the hover yaw-rate integral's own
+    -- gain. `k_yaw_damp` -- the runaway's own 2-4 deg/s of unexplained
+    -- yaw asks 0.06-0.12 right pedal where the ball gave zero; at hover
+    -- an 8 deg/s rate error asks 0.24, inside the cap and the band.
+    k_yaw_damp = 0.03,
+    -- Bounds the damper's own output -- a break roll-in's bank leading
+    -- yaw by ~10 deg/s would otherwise ask 0.3.
+    yaw_damp_max = 0.25,
+    -- Keeps `g*tan(phi)/V` finite near hover, where the damper's own
+    -- forward-flight weight (lambda) is ~0 anyway.
+    yaw_damp_v_floor_mps = 5.0,
+    -- Hover yaw-rate integral gain -- 1 deg/s of steady yaw-rate error
+    -- moves the trim 0.03/s, the same order as the ball integral.
+    k_yaw_rate_i = 0.03,
+
+    -- Section C: the hover heading shaper -- calm, no more than 10 s
+    -- for a 45 deg change (finding 3: 0.7 rad/s with an 8 deg/s rate cap
+    -- and the hover accel cap reaches within 2 deg in ~9.7 s, zero
+    -- overshoot).
+    hover_omega_heading = 0.7,
+    hover_yaw_rate_max_deg_s = 8.0,
+
+    -- Section B: the drift hold -- lateral cyclic against sideways
+    -- ground speed near hover (crosswind countering). 1 m/s sideways
+    -- asks 0.3 m/s^2, about 1.7 deg of bank.
+    k_drift_hold = 0.3,
+    -- Section B: the speed-band floor -- lets "speed 0" be in band
+    -- (finding 7: `in_band_speed` can never be true at a speed goal of
+    -- 0 with a pure fractional band).
+    speed_band_min_mps = 1.0,
+
+    -- Section E: the hover pedal band, in the command domain (-1..1),
+    -- binding only while a commanded heading change runs (corrected
+    -- 2026-11-28). `hover_pedal_band` at hover, widening to `hover_
+    -- pedal_band_forward` (never binds) at `lambda_forward_kmh`.
+    hover_pedal_band = 0.3,
+    hover_pedal_band_forward = 2.0,
+
+    -- Section G: low-speed gentleness -- the goal-driven acceleration
+    -- (never the feedback) is slewed below `lambda_forward_kmh`, jerk
+    -- `goal_jerk_hover_mps3` at hover widening to `goal_jerk_edge_mps3`
+    -- at the edge (no slew at lambda = 1). First cut: 0.5 m/s^3 at
+    -- hover is about 2.6 deg/s of goal-driven pitch change.
+    goal_jerk_hover_mps3 = 0.5,
+    goal_jerk_edge_mps3 = 5.0,
 
     -- ---- Write bias (output stage, `plans/flight-lift-vector/debug-
     -- 2026-11-24c.md`, finding 1): in flight the pedal write lands a

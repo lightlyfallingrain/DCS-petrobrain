@@ -255,9 +255,17 @@ local function reseed_from_measured()
     -- guessing.
     local phi_bar = nil
     local threshold = nil
+    local lambda = nil
     if flight_control ~= nil then
         phi_bar = safe_call(flight_control.get_phi_bar)
         threshold = safe_call(flight_control.takeover_level_bank_deg)
+        -- LV-3 amendment, section F -- mirrors `law_init_at_take`'s own
+        -- hover override: at lambda = 0 a banked take holds heading,
+        -- not the bank (in a hover a bank is a sideways slide, not a
+        -- turn). `flight_control.get_lambda` may be `nil` (not primed
+        -- yet, or a load-order/failure case) -- falls back to the
+        -- pre-LV-3 "always bank at/past the threshold" reading.
+        lambda = safe_call(flight_control.get_lambda)
     end
     if type(phi_bar) ~= "number" then
         phi_bar = nil
@@ -265,7 +273,12 @@ local function reseed_from_measured()
     if type(threshold) ~= "number" then
         threshold = nil
     end
-    if phi_bar ~= nil and threshold ~= nil and math.abs(phi_bar) >= threshold then
+    if type(lambda) ~= "number" then
+        lambda = nil
+    end
+    if phi_bar ~= nil and threshold ~= nil and math.abs(phi_bar) >= threshold
+        and not (lambda ~= nil and lambda <= 0.0)
+    then
         desired.hdg_mode = "bank"
         desired.bank_hold_deg = phi_bar
         desired.heading_deg = nil
@@ -282,7 +295,18 @@ local function reseed_from_measured()
     end
     desired.alt_m = agl
     desired.alt_ref = "agl"
-    if type(ias_mps) == "number" then
+    -- LV-3 amendment, section B -- `V_m` (the blended measured speed)
+    -- replaces bare IAS when the getter is available and primed, so a
+    -- reseed near hover mirrors "speed 0 means stopped over the
+    -- ground" rather than reporting an IAS that may read near zero
+    -- while the aircraft is still drifting.
+    local take_speed_kmh = nil
+    if flight_control ~= nil then
+        take_speed_kmh = safe_call(flight_control.get_take_speed_kmh)
+    end
+    if type(take_speed_kmh) == "number" then
+        desired.ias_kmh = take_speed_kmh
+    elseif type(ias_mps) == "number" then
         desired.ias_kmh = ias_mps * 3.6
     else
         desired.ias_kmh = nil
@@ -494,6 +518,13 @@ local function write_internal(parts)
         desired.hdg_mode = "heading"
         desired.heading_deg = parts.heading_deg
         desired.turn_dir = nil
+        -- LV-3 amendment, finding 6 -- a settle write-back to heading
+        -- must also clear a standing `bank_hold_deg`, same as every
+        -- other heading-type write in this module (`apply_set`'s own
+        -- wire branches, `convert_turn_to_heading_for_m2`) already do.
+        -- Harmless before LV-3's held-bank conversion (F) existed (no
+        -- settle path ran from a held bank); live now that one does.
+        desired.bank_hold_deg = nil
         fd_stamp_hdg = fd_last_seq
     end
     if parts.clear_turn_rate then
