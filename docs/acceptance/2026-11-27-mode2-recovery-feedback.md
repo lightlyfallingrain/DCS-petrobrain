@@ -21,3 +21,9 @@ Branch context: mode 2 (AI-pilot wheel) is on `main` (BL-16 P3+P4, merged `fefe8
 - When the target equals the displayed value: step **down** by the smallest amount that changes the
   displayed value (one press / one increment), then back to the target. No more than that.
 - Scope: recovery from align-for-launch only, as stated.
+
+## Second item — "speed 250" gives MAX (`[[BL-B140]]`)
+
+> Mode 2 bug:
+> - command "speed 2 5 0" gets me 'speed max', though it should get 'speed 250'. There is 250 speed
+>   option in AI overlay.

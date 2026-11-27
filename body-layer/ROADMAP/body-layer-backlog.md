@@ -172,6 +172,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B132]] — Readable cockpit args (lamps, gauges, rotor RPM) in the switch reference
 - [[BL-B133]] — Petrovich does not start talking while the player keys ICS or RADIO
 - [[BL-B139]] — Mode 2 recovery must change the set altitude/speed so DCS AI reacts (step down then back when already at target)
+- [[BL-B140]] — Mode 2 "speed 250" resolves to MAX instead of the 250 step
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,

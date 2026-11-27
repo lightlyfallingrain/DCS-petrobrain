@@ -427,9 +427,18 @@ class TestNearestSpeedStep:
         assert nearest_speed_step(140.0) == 150.0
         assert nearest_speed_step(100.0) == 120.0
 
-    def test_at_or_above_the_top_step_snaps_to_the_max_sentinel(self) -> None:
-        assert nearest_speed_step(250.0) == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+    def test_exactly_the_top_step_is_that_step_not_max(self) -> None:
+        # BL-B140: "speed 2 5 0" must give 250, not MAX -- the overlay has a 250 step.
+        assert nearest_speed_step(250.0) == 250.0
+
+    def test_above_the_top_step_snaps_to_the_max_sentinel(self) -> None:
+        assert nearest_speed_step(251.0) == AI_PILOT_SPEED_MAX_SENTINEL_KMH
         assert nearest_speed_step(999.0) == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
+    def test_a_spoken_250_resolves_to_250(self) -> None:
+        goal, resolved = set_parked_speed(AiPilotWheelGoal(), 1.0, 250.0)
+        assert resolved == 250.0
+        assert goal.speed_target_kmh == 250.0
 
 
 class TestSetParkedSpeed:

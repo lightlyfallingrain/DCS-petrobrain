@@ -681,8 +681,10 @@ def nearest_speed_step(value: float) -> float:
     KMH` itself, never to the highest *finite* step; `speed_step`'s own
     "+1 step" caller is what walks the finite ladder one rung at a time,
     this helper only ever answers "what single step is `value` closest
-    to.\""""
-    if value >= AI_PILOT_SPEED_STEPS_KMH[-1]:
+    to.\"" -- exactly the top step is that step, not MAX (BL-B140: "speed
+    2 5 0" read back as "speed max" while the overlay has a 250 step;
+    `ai_pilot_wheel.lua`'s own MAX test was already `>`)."""
+    if value > AI_PILOT_SPEED_STEPS_KMH[-1]:
         return AI_PILOT_SPEED_MAX_SENTINEL_KMH
     return float(min(AI_PILOT_SPEED_STEPS_KMH, key=lambda step: abs(step - value)))
 
