@@ -4,6 +4,21 @@
   the launch callout, impact, and resetting the guidance transmitter.** #status/in-progress
   #needs-flight
 
+  ## 2026-11-27 — Stage 0 sortie flown; knob re-probe owed
+
+  Answers in `docs/acceptance/2026-11-27-bl-b67-stage0-probe-feedback.md`. **Q1** payload feed works
+  (8 stations, counts, no names; count drops on the shot's own poll; `CurrentStation` did not follow
+  the hand-turned knob). **Q2** names `Ataka_9M120`, `AT_6`, `C_8CM`, `C_8`. **Q5** Radiation Reset
+  (3029, device 7) works. **Q6** `S_EVENT_SHOT` arrives for every own shot with `event.weapon`;
+  guided filter `category == 1 and guidance == 8`; `isExist()` false within ~0.2 s of the first
+  `S_EVENT_HIT`; HIT fires on every unit in the blast, so it does not name the aimed unit. **Q3**
+  unanswered: the probe wrote the knob to device 7 (I9K113) instead of 6 (WEAP_SYS) —
+  `aircraft-layer/research/2026-11-27-bl-b67-shscho-knob-command.md`; fixed, re-probe card section
+  added. **Re-probe flown same day: Q3 answered** — `GetDevice(6):performClickableAction(3038,
+  n*0.1)` sets arg 963 absolutely to n × 0.1; step n = `Stations[n]` (one shot, step 1 → station 1;
+  user confirmed: *"this is true"*); `CurrentStation` never follows the knob, so the selected station is read from arg 963.
+  Batch B Stage 6 (effectors) is unblocked on Q3.
+
   ## 2026-10-29 — DoD: batch A merged, batch B waiting on the Stage 0 sortie
 
   **Batch A (Stages 1-4, plus the Stage 0 probe files) passed DoD and merged to `main`

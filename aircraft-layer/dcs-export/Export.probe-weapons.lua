@@ -91,6 +91,11 @@ local POLL_INTERVAL_S = 1.0
 --: (`DEV_I9K113 = 7`) -- GetDevice(device):performClickableAction(cmd,
 --: value) is the one write mechanism this probe needs, no new API.
 local DEV_I9K113 = 7
+--: The SHSCHO knob (arg 963) is on WEAP_SYS, device 6, not the 9K113 unit
+--: (`aircraft-layer/research/2026-11-27-bl-b67-shscho-knob-command.md`):
+--: the 2026-11-27 sortie's writes to device 7 were silent no-ops.
+--: Radiation Reset (3029) stays on device 7 -- that write worked.
+local DEV_WEAP_SYS = 6
 local CMD_KNOB = 3038
 local ARG_KNOB = 963
 local CMD_RAD_RESET = 3029
@@ -168,8 +173,12 @@ local last_parked_count = nil
 local pending_advance_at = nil
 
 local function clickable(cmd, value)
+    local device = DEV_I9K113
+    if cmd == CMD_KNOB then
+        device = DEV_WEAP_SYS
+    end
     local ok, err = pcall(function()
-        GetDevice(DEV_I9K113):performClickableAction(cmd, value)
+        GetDevice(device):performClickableAction(cmd, value)
     end)
     if not ok then
         logline("performClickableAction failed cmd=" .. tostring(cmd)
