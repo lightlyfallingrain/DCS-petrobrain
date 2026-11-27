@@ -204,3 +204,65 @@ Reading, for the LV-2 amendment:
 - **Roll-out overshoot, settled (user, verbatim, 2026-11-27):** *"break turn: overshoot is
   acceptable"* — the fix pass's ~5° (90° break) / ~7–10° (break away) single overshoot-and-settle
   stands; the card still asks for hunting or more than one correction to be reported.
+
+## LV-3 explore (2026-11-27) — low speed and hover
+
+Questions asked (main loop): (1) slowing through 80 → 60 km/h, what do your feet react to — ball,
+nose movement, something else; lead or follow? Start the blend higher, or keep the ball loop and add
+a damper for yaw the bank does not explain? (2) heading change at speed 0 — how fast, how soft?
+(3) what a good stop from 150 to 0 looks like — nose-up, time, height? (4) drift at speed 0 with no
+fixed-spot hold — acceptable for this stage? Context given: the sixth re-fly's 60 km/h left-yaw
+runaway sits above the planned 25–50 km/h λ blend, where the plan keeps the pure forward law.
+
+Answers (user, verbatim, 2026-11-27):
+
+> 1 - nose moving sideways. Not the ball, but the yaw movement. I lead since I know more right pedal
+> will be required. Start the blend higher. Would be a good idea to have some of that yaw based
+> pedal in all flight, that's damped yaw oscillation that happens even when flying the ball.
+>
+> 2 - In hover, move calmly. Softer is better. But still not awfully slow, 45 degree turn can take
+> some seconds, but not more than 10 s. Let's start by offsetting the pedals no more than 30% of
+> pedal axis from the value where hover is stable.
+>
+> 3 - hold altitude, yes. Down to 80 km/h as implemented now. Below that, more gentle movements.
+> It's not the pitch/bank angles themselves but how fast they change. Same for collective and
+> pedals. While fast response may be needed to correct and stabilize, flight state changes should
+> be more gradual than in fast flight. When changing collective pedals must also lead at the same
+> time. In transitional lift and slower the need for collective and right pedal increases, but this
+> can be done with the control law from vertical speed and yaw. In ground effect, very low AGL,
+> rotor creates more lift, so less collective is needed. Again, control law can handle from
+> telemetry data.
+>
+> 4 - this is acceptable
+
+Reading, for the LV-3 amendment (main loop; each point to be confirmed where marked):
+
+- **Yaw cue is nose movement, not the ball.** The pilot's feet answer the yaw *rate*. So:
+  - **A yaw-rate damper in all flight**, on yaw the bank does not explain (`ψ̇` minus the
+    coordinated-turn rate), alongside the ball loop. It damps the yaw oscillation seen "even when
+    flying the ball". **Departs from plan F / finding 2** ("never a heading loop in forward
+    flight"): a rate damper holds no heading, so the finding's reason (bank owns heading in forward
+    flight) still stands; recorded as a deliberate change, not a reversal.
+  - **The blend starts higher.** The user's own boundary in answer 3 is 80 km/h ("down to 80 km/h
+    as implemented now"), so the reading is a λ blend from 80 down to 25 km/h (was 50 → 25). The
+    60 km/h runaway then falls inside the blend.
+  - **The pedal leads the collective, at the same moment** (answers 1 and 3). The existing
+    collective-rate → pedal feed-forward (`k_pedal_from_collective_rate`) is that lead; the
+    growing right-pedal need in transitional lift and below is left to the feedback loops (yaw rate,
+    ball), per *"this can be done with the control law from vertical speed and yaw"* — no
+    speed-scheduled pedal trim.
+- **Hover heading change:** calm and soft, a 45° turn in no more than 10 s (≥ 4.5 °/s on average;
+  a soft S-curve peaks higher). **Pedal authority: at most 30 % of the pedal axis away from the
+  pedal value where the hover is stable** — a deflection bound around the learnt hover trim, not an
+  absolute limit. *To confirm: 30 % of full stop-to-stop travel, or 30 % of centre-to-stop
+  (`±0.3` in the command domain, −1…+1)?*
+- **Below 80 km/h, slower rates of change, not smaller angles.** Above 80 km/h the current
+  behaviour stands. Below it, the rate at which pitch, bank, collective and pedal *targets* change
+  for a commanded change of flight state is lowered; the stabilising feedback may still act fast.
+  In the law's terms: the shapers' rate/accel caps (and output rate limits for goal-driven moves)
+  scale down below 80 km/h; the inner loops are not slowed. Height is held through the stop.
+- **Transitional lift and ground effect need no model.** More collective and right pedal at low
+  speed, less collective in ground effect — both left to the integrators on vertical acceleration
+  and yaw, from telemetry (consistent with "feedback, not a model", 2026-10-26).
+- **Drift at speed 0 accepted** for this stage; fixed-spot hold stays in BL-16 "Later — mode 1
+  hover".
