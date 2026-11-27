@@ -241,3 +241,9 @@ overlap line-for-line, so they can land in one Implementer pass without one bloc
   that need the other, and risks one channel's send being read as a duplicate of another's, since
   the three arrive on independent HTTP calls at independent times. If the literal reading is wanted
   anyway, say so and this plan's Lua-side section needs a second pass before implementation.
+
+  **Settled by the main loop, 2026-11-27: body-side only.** "Deduped against one sequence on the
+  Lua side" is the main loop's own wording in `BL-B141.md`, not the user's; the user's direction
+  (*"having individual channels and their numbers sounds error prone. I'd still prefer single
+  running number"*) is met by one minting counter. Local and reversible, so decided per `AGENTS.md`
+  escalation rules and reported to the user rather than asked.

@@ -60,7 +60,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 - [[AC-B19]] — Flight-control command channel jams at `fc_last_cmd_seq` = 2^31-1 for the DCS session
 - [[AC-B20]] — `arm_lease_s` 10 s ceiling is declared in three places with no parity test
 - [[AC-B21]] — `_FLIGHT_CONTROL_LIMITS_BOUNDS` silently drops unknown `limits` keys
-- [[AC-B22]] — `ai_pilot_cbtm_last_sent_seq` has no reconciliation against Lua's echoed `apw_cbtm_seq`
+- [[AC-B22]] — `ai_pilot_cbtm_last_sent_seq` has no reconciliation against Lua's echoed `apw_cbtm_seq` (closed 2026-11-27: already fixed by the body-layer-start reset)
 - [[AC-B23]] — `POST /command/reset` unauthenticated, forces an uncommanded control release (rejected 2026-11-27, non-issue)
 
 ## Keeping this current

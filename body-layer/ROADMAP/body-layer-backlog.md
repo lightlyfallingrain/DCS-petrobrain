@@ -178,7 +178,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B138]] — Weather (fog, precipitation, cloud, visibility) changes what Petrovich can perceive (split out of `BL-B124`, light level done, weather deferred by the user)
 - [[BL-B139]] — Mode 2 recovery must change the set altitude/speed so DCS AI reacts (step down then back when already at target)
 - [[BL-B140]] — Mode 2 "speed 250" resolves to MAX instead of the 250 step
-- [[BL-B141]] — One mission-wide running number for every command to the aircraft layer (BL-16 sub-item; absorbs AC-B22)
+- [[BL-B141]] — One mission-wide running number for every command to the aircraft layer (BL-16 sub-item)
 
 **Brain-layer backlog items moved out of this index on 2026-10-17** (user direction: *"Put brain
 milestone and backlog items under brain layer in folder. Same logic as other layers."*). `BR-B1`,
