@@ -1,0 +1,154 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>LV-3 Hover Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{--bg:#0c1210;--bg-panel:#141c19;--fg:#e9efe9;--fg-dim:#9fb0a8;--accent:#e8a33d;--record:#4fa3c4;--record-dim:#1c3038;--warn:#d9684b;--rule:#263430;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;font:17px/1.5 "Source Sans 3",system-ui,sans-serif;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+h1,h2{font-family:"Barlow Condensed",system-ui,sans-serif;margin:0}
+code{font-family:"JetBrains Mono",monospace;font-size:.88em}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:2.1rem;text-transform:uppercase;color:var(--accent);letter-spacing:.02em}
+header p{margin:0;color:var(--fg-dim)}
+.branch{background:var(--bg-panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.tag{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.branch code{color:var(--accent)}
+.note{background:var(--bg-panel);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 6px 6px 0}
+.note.warn{border-left-color:var(--warn)}
+.card{background:var(--bg-panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.card.prize{border-color:var(--accent)}
+.card h2{font-size:1.35rem}
+.prizetag{font-size:.75rem;background:var(--accent);color:var(--bg);padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.record{background:var(--record-dim);border-left:3px solid var(--record);padding:10px 12px;border-radius:0 6px 6px 0}
+.chk{display:flex;gap:10px;align-items:center}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--rule);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--fg-dim);font-weight:600}
+ul{margin:0;padding-left:1.2em}
+</style>
+<div class="wrap">
+  <header>
+    <h1>LV-3 Hover</h1>
+    <p>BL-16 lift-vector law &mdash; low speed and hover, yaw damper, full pedal range &mdash; plus M4 SAU handover &mdash; 2026-11-28</p>
+  </header>
+  <div class="branch"><span class="tag">Branch</span><code>feature/bl16-lift-vector-law</code><span class="tag">repo root: <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, usual redeploy and restarts. No new deploy step. Both debug flags on.</span></div>
+
+  <div class="note warn"><strong>SAU: don't switch it off before a take any more.</strong> Petrovich does it on entering mode 1 (H, K, T off, B on, all at once). Hand-back from any mode: all four on. Fly the SAU however you normally do.</div>
+
+  <div class="note"><strong>What changed.</strong> Below 80&nbsp;km/h the law blends into hover (25&nbsp;km/h and below is hover). In hover, &ldquo;speed&rdquo; is ground speed, the <strong>pedals turn the nose</strong>, bank only counters drift. A <strong>yaw damper</strong> at every speed catches yaw the bank doesn't explain &mdash; the fix for the 60&nbsp;km/h runaway. Hover heading changes are calm (~10&nbsp;s per 45°). Full pedal range. Commanded changes are gentler below 80&nbsp;km/h.</div>
+
+  <div class="card">
+    <span class="tag">Expected (simulation)</span>
+    <div class="tbl"><table>
+      <thead><tr><th>case</th><th>before</th><th>LV-3</th></tr></thead>
+      <tbody>
+        <tr><td>108&rarr;60 km/h, peak sideslip</td><td>31°</td><td>18°</td></tr>
+        <tr><td>45° hover heading change</td><td>~17 s</td><td>~9.7 s, max 8°/s</td></tr>
+        <tr><td>speed 0, 5 m/s crosswind</td><td>&mdash;</td><td>holds, ~6° bank into wind</td></tr>
+      </tbody>
+    </table></div>
+    <div><span class="tag">Not on this card</span><br>Fixed-spot hover hold and translate (later). Low-and-slow RPM accelerate (own item). The simulation has no vertical dynamics, so rows 3, 6 and 7 are tested here first.</div>
+  </div>
+
+  <div class="card">
+    <h2>0 · SAU handover (M4)</h2>
+    <div><span class="tag">Do</span><br>First voice take, then later &ldquo;I have controls&rdquo;. Watch the SAU panel.</div>
+    <div><span class="tag">Expect</span><br>Take: H, K, T off, B on, together. Hand-back: all four on, together.</div>
+    <div class="record"><span class="tag">Record</span><br>All four at once, both ways? Any stutter at the take?</div>
+    <label class="chk"><input type="checkbox" data-k="r0">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>1 · Ordinary flight, damper check</h2>
+    <div><span class="tag">Do</span><br>150&nbsp;km/h: heading hold, then a 30° turn each way.</div>
+    <div><span class="tag">Expect</span><br>As LV-2: ball centred, no new yaw or pedal oscillation.</div>
+    <div class="record"><span class="tag">Record</span><br>Anything in yaw or pedal different from LV-2?</div>
+    <label class="chk"><input type="checkbox" data-k="r1">Flown</label>
+  </div>
+
+  <div class="card prize">
+    <h2>2 · The runaway row<span class="prizetag">The prize</span></h2>
+    <div><span class="tag">Do</span><br>From 150&nbsp;km/h: &ldquo;speed 6 0&rdquo;, hold 30&nbsp;s.</div>
+    <div><span class="tag">Expect</span><br>Nose stays on the flight path. No left-yaw build, no runaway. Right pedal comes in as collective comes in.</div>
+    <div class="record"><span class="tag">Record</span><br>Did the nose stay with the flight path? Any left yaw &mdash; when? Pedal compared with the sixth re-fly?</div>
+    <label class="chk"><input type="checkbox" data-k="r2">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>3 · Stop</h2>
+    <div><span class="tag">Do</span><br>From 150&nbsp;km/h at &ge;&nbsp;100&nbsp;m AGL: &ldquo;speed 0&rdquo;.</div>
+    <div><span class="tag">Expect</span><br>No jerk. Gentle below 80. Altitude held. Settles over the ground, slow drift.</div>
+    <div class="record"><span class="tag">Record</span><br>How long 150 &rarr; stopped? Height lost or gained? Any phase abrupt or too slow?</div>
+    <label class="chk"><input type="checkbox" data-k="r3">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>4 · Hover heading</h2>
+    <div><span class="tag">Do</span><br>At speed 0: &ldquo;turn heading&rdquo; +45°, &minus;45°, +90°.</div>
+    <div><span class="tag">Expect</span><br>Calm, ~10&nbsp;s per 45°, wings level, no overshoot.</div>
+    <div class="record"><span class="tag">Record</span><br>Seconds per turn? Overshoot? Any turn that seemed held back?</div>
+    <label class="chk"><input type="checkbox" data-k="r4a">+45</label>
+    <label class="chk"><input type="checkbox" data-k="r4b">&minus;45</label>
+    <label class="chk"><input type="checkbox" data-k="r4c">+90</label>
+  </div>
+
+  <div class="card">
+    <h2>5 · Hover in wind</h2>
+    <div><span class="tag">Do</span><br>If the mission has wind: speed 0 facing into, across, with the wind.</div>
+    <div><span class="tag">Expect</span><br>Drift stopped with some bank into the wind; heading held by pedal.</div>
+    <div class="record"><span class="tag">Record</span><br>How much bank? Held position roughly?</div>
+    <label class="chk"><input type="checkbox" data-k="r5">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>6 · Low hover, ~15 m AGL</h2>
+    <div><span class="tag">Expect</span><br>Altitude held as ground effect lowers the collective need.</div>
+    <div class="record"><span class="tag">Record</span><br>Height wander? Any bounce?</div>
+    <label class="chk"><input type="checkbox" data-k="r6">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>7 · Away</h2>
+    <div><span class="tag">Do</span><br>From the hover: &ldquo;speed 1 5 0&rdquo;.</div>
+    <div><span class="tag">Expect</span><br>Smooth through 25&ndash;80&nbsp;km/h, no lurch at the handover.</div>
+    <div class="record"><span class="tag">Record</span><br>Any step or wobble in pitch, bank or pedal?</div>
+    <label class="chk"><input type="checkbox" data-k="r7">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>8 · Voice take at ~20 km/h</h2>
+    <div><span class="tag">Expect</span><br>Accepted. Holds ground speed and heading; a banked take holds heading.</div>
+    <div class="record"><span class="tag">Record</span><br>Smooth? What did it hold?</div>
+    <label class="chk"><input type="checkbox" data-k="r8">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>9 · Break at 180 km/h</h2>
+    <div><span class="tag">Expect</span><br>As LV-2. Damper adds pedal into the turn on roll-in, resists yaw on roll-out.</div>
+    <div class="record"><span class="tag">Record</span><br>Different from the LV-2 break &mdash; better or worse?</div>
+    <label class="chk"><input type="checkbox" data-k="r9">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>Mode 2 sanity (single command counter)</h2>
+    <div><span class="tag">Do</span><br>If you park the controls: set altitude / speed, align, break via the AI wheel.</div>
+    <div><span class="tag">Expect</span><br>Exactly as before.</div>
+    <div class="record"><span class="tag">Record</span><br>Anything that didn't respond, or responded twice?</div>
+    <label class="chk"><input type="checkbox" data-k="m2">Flown</label>
+  </div>
+
+  <div class="record"><span class="tag">Bring back</span><br>Answers above, both logs (<code>aircraft_layer_flight_trace.log</code>, <code>aircraft_layer_debug.log</code>) and the body-layer logs. Anything that surprises you is worth more than anything on this list.</div>
+</div>
+<script>
+const KEY='lv3-hover-2026-11-28';
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{try{const s=JSON.parse(localStorage.getItem(KEY)||'{}');s[b.dataset.k]=b.checked;localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}});
+});
+</script>
