@@ -201,3 +201,6 @@ Reading, for the LV-2 amendment:
   The main loop's earlier reading ("50 m replaces both") was wrong.
 - **End:** a break is an ordinary heading goal — entry +90° (break), +180° (break away) — flown with
   a faster turn rate and more aggressive capture than a normal turn. No separate end condition.
+- **Roll-out overshoot, settled (user, verbatim, 2026-11-27):** *"break turn: overshoot is
+  acceptable"* — the fix pass's ~5° (90° break) / ~7–10° (break away) single overshoot-and-settle
+  stands; the card still asks for hunting or more than one correction to be reported.
