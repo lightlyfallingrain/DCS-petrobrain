@@ -1230,8 +1230,9 @@ untouched:
   with a different bank argument, not a new formula. `accel_limit` (the roll-in rate) is derived
   from this same capped `rate_limit` exactly as today (`rate_limit / profile.t_roll`).
 - **Effect, by speed**: at 250 km/h, 40°/s would need ~75° bank (close to the cap, so the break
-  flies near 40°/s, close to today); at 120 km/h, 40°/s needs only ~50° bank (well under the cap,
-  unchanged from today); the cap only binds where the commanded rate would otherwise ask for more
+  flies near 40°/s, close to today); **main-loop correction:** `atan(ω·V/g)` gives 67° at 120,
+  74° at 180, 79° at 250 km/h, so the 65° cap binds at all three card speeds — steady rate at 65°
+  is ~36 / 24 / 17°/s (90° in ~2.5 / 3.7 / 5.2 s). The cap only binds where the commanded rate would otherwise ask for more
   bank than `break_max_bank_deg` allows — exactly "steep bank angle … to get a fast turn rate" (the
   turn rate is a *consequence* of flying to the bank/G cap, the same relationship ordinary turns
   already have with `max_turn_bank_deg`, not a second mechanism).
@@ -1340,8 +1341,8 @@ new row is owed because no new field exists to leak.
 ### Tests
 
 - Bank/rate cap: at 250 km/h a break commands bank approaching `break_max_bank_deg` (within the
-  toy plant's settle tolerance), not the kinematic bank a bare 40°/s would imply; at 120 km/h the
-  cap does not bind (bank stays below it, rate stays at 40°/s).
+  toy plant's settle tolerance), not the kinematic bank a bare 40°/s would imply; a speed low enough
+  that 40°/s needs less than 65° (below ~105 km/h) shows the cap not binding.
 - Height-gives-first: with the plant's collective rate artificially capped low (simulating a
   roll-in collective lag), a break entered with height to spare shows altitude sinking and
   `theta_i`/`phi_scale` essentially untouched; the same scenario entered near `break_floor_agl_m`
