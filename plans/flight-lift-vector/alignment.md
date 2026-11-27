@@ -650,3 +650,93 @@ before this check.
    still what you meant by "momentary overload... about 2 G" — or should the cap come down to 60°
    (exact 2.0 G) to match your own figure more directly? (Recommend: 60°, since it still sits inside
    E5's 60–80° window and still binds tighter than the old uncapped rate at every card speed.)
+
+## Plan check — LV-3 amendment (2026-11-28)
+
+**Verdict:** CONCERNS
+
+Checked at `0c03b0a4` (`fix/bl16-flight-epoch-bound`). Inputs: `explore-notes.md` "LV-3 explore
+(2026-11-27)" and "LV-3 diagram review corrections (user, verbatim, 2026-11-28)"; this file's
+2026-11-20 goal check (E1–E10, open assumptions, Findings 1–2); `plan.md` "LV-3 amendment
+(2026-11-27)" through the end, including sections C and E's "Corrected 2026-11-28" notes and the
+"Answered 2026-11-28" U12–U17 block.
+
+The LV-3 expectations, read from the explore answers (no separate numbered E-list exists for
+hover; the user's four answers plus the two 2026-11-28 corrections are the expectations):
+
+| expectation | stage | status |
+|---|---|---|
+| LE1 — yaw cue is nose/yaw-rate, not ball; yaw-rate damper added in all flight | D (unexplained-yaw overlay, every speed) | met |
+| LE2 — blend starts higher, top at 80 km/h (was 50) | A, diagram 2 (`lambda_forward_kmh = 80.0`) | met |
+| LE3 — pedal leads collective at the same moment | D, finding 5 (existing torque feed-forward, unchanged) | met |
+| LE4 — hover heading change calm, 45° in ≤10 s | C (hover `ω`/rate/accel caps, finding 3's numbers) | met |
+| LE4b — pedal bounded ±0.3 of hover-stable value | E, gated correctly to "during a commanded heading change only" per the 2026-11-28 correction | met — but see Finding 1 (diagram 2's note states it unconditionally) |
+| LE5 — below 80 km/h, slower *rate* of change, not smaller values; collective/pedal lead; altitude held through stop; transitional lift/ground effect left to existing integrators, no model | G | met |
+| LE6 — drift at speed 0 accepted, no fixed-spot hold | B ("a position is not held … drift at speed 0 accepted, user answer 4") | met |
+| LE7 (2026-11-28 correction) — bank is not "never"; crosswind countering and sideways translate still use bank; only turning-to-heading uses pedal, not bank | C (corrected text, in writing) | met in prose — but see Finding 1 (diagram 2's note still says "never bank") |
+| LE8 (U13 answer) — full pedal range, no artificial ±0.5 cap | U13 answer (`pedal_limit_positive = 1.0`, `pedal_limit_negative = -1.0`) | met — but see Finding 2 (a Risks entry built on the removed cap is not rewritten, only covered by a blanket substitution that breaks its sentence) |
+| LE9 — U17: low-slow-RPM "accelerate" class leaves LV-3 | deferred → `[[BL-16]]` "Open, within BL-16" list | deferred; target is named and the user's own answer places it there, so this is a clean deferral, not a drop |
+
+### Findings
+
+1. **Diagram 2 (the one the user reviewed and corrected) still carries both statements the
+   2026-11-28 correction overturned.** Lens: in the sim / the pilot would see.
+   - **Assumption:** the correction note under section C — *"carried into `plan.md` LV-3 sections
+     C and E"* — covers every place in the plan that asserted the pre-correction reading.
+   - **In the plan:** diagram 2's hover note (the `stateDiagram-v2` under "One blend, three
+     regimes") still reads, unchanged since before the correction: `pedal owns heading (yaw-rate
+     loop), never bank` and, on the next line, `pedal within +-0.3 of the learnt hover pedal` with
+     no qualifier. Both are exactly what the user struck down: bank is not "never" (crosswind,
+     sideways translate), and the ±0.3 band applies only during a commanded heading change, not to
+     hover generally.
+   - **The pilot would see:** nothing wrong in flight if the implementer reads section C in full —
+     the prose is correct. But this diagram is the one the user looked at and corrected
+     (AGENTS.md's diagram-review step); leaving its own text contradicting the correction it
+     prompted means the artifact the user approved no longer matches the plan it sits beside, and
+     an implementer skimming diagrams first (the diagrams exist precisely so a reader does not have
+     to parse every paragraph) carries the wrong rule into the drift-hold or hover-pedal-band code.
+   - **Grounded in:** `plan.md` lines ~1627 and ~1629 (diagram 2's hover note) against the
+     "Corrected 2026-11-28" text under section C (bank) and section E (pedal band gate).
+   - **Suggests:** redraw diagram 2's hover note to say what C and E now say — pedal owns the
+     *turn-to-heading* share of yaw; bank stays available for drift/crosswind and later translate;
+     the ±0.3 band binds only while a commanded heading change runs. Same memory pattern as
+     `[[project_bl16_lv1_amendment_rpm_correction_not_backpropagated]]` and
+     `[[project_lift_vector_u8_floor_removed_but_not_grepped_everywhere]]`: a same-day correction
+     box reliably reaches the text below it, not diagrams or summaries that sit elsewhere in the
+     document and were not named.
+
+2. **The U13 Risks entry is "fixed" by a blanket substitution that makes it nonsensical, not
+   actually rewritten.** Lens: purpose.
+   - **Assumption:** the Answered-2026-11-28 instruction — *"Where the plan above says 'existing
+     absolute limits stay where they are' or '+0.5', read full range"* — correctly patches every
+     earlier mention of the old cap, including the Risks & Unknowns entry: *"If a stable hover
+     needs more right pedal than `t_y`'s +0.5 clamp, hover cannot hold heading — the trace shows
+     `t_y` pinned at +0.5 with a left yaw."*
+   - **In the plan:** substituting "full range" (1.0) for "+0.5" turns that sentence into "if a
+     stable hover needs more right pedal than the full range clamp, hover cannot hold heading" —
+     which is vacuous (nothing needs more than 100% of the axis by definition) and loses the real
+     content of the risk, which was specifically about the *artificial* half-travel cap. The actual
+     remaining risk — whether the real Mi-24P's hover need exceeds what the aircraft physically has
+     — is a different, much smaller risk that this sentence no longer states.
+   - **The pilot would see:** nothing directly (this is a planning artifact, not flown code), but
+     an implementer or reviewer reading only the Risks section comes away either confused by a
+     nonsensical sentence or under the impression the old +0.5-clamp risk is still live, when the
+     reason it existed (the cap) is gone.
+   - **Grounded in:** `plan.md` lines ~1995–1997 (Risks & Unknowns, "The DCS Mi-24P's hover pedal
+     need is unknown…") against the U13 answer's blanket substitution instruction and its own
+     stated reasoning (the cap was "a software cap… never a request to cap the command").
+   - **Suggests:** rewrite the Risks entry rather than relying on the find/replace: the open risk
+     after U13 is narrower ("if the Mi-24P's real hover need exceeds what full pedal travel gives,
+     row 3 shows a `t_y` pinned near the limit with residual yaw" — still worth watching on the
+     card, just not the same statement).
+
+Both findings are plan-text hygiene issues, not behavioural gaps — the *behaviour* the LV-3
+amendment specifies (E, C corrected; U13 answered) already serves the why. They are raised because
+root `CLAUDE.md`'s own calibration ("a stale risk entry reads as settled when it is the opposite of
+settled") and this role's own memory on this exact plan flag this as the recurring failure mode for
+same-day corrections in `flight-lift-vector/plan.md`.
+
+### Questions for the user
+None — both findings are plan-hygiene corrections the main loop can apply directly (redraw diagram
+2's hover note; rewrite the Risks entry) without needing a decision from you. Flagging here so the
+implementer does not build diagram 2's uncorrected reading.
