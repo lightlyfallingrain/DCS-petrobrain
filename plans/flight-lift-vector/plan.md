@@ -239,6 +239,8 @@ flowchart TB
 **5. Speed regimes: one law, blended.** `λ` goes from 0 (hover) to 1 (forward flight) on measured
 horizontal ground speed. Nothing switches; every term is weighted. LV-1 and LV-2 fly with `λ = 1`
 throughout and no commanded-speed floor (U8, no floor); LV-3 adds the blend below 50 km/h.
+**Superseded in part, 2026-11-27** ("LV-3 amendment" below): the blend runs **80 → 25 km/h**, not
+50 → 25, and the pedal's yaw term is no longer hover-only — a yaw-rate damper acts at all speeds.
 
 ```mermaid
 stateDiagram-v2
@@ -355,6 +357,9 @@ was given. The break's height floor (Decision 29) and the VRS cap (Decision 31) 
   speed along the nose near hover (U2, answered yes). `λ = 1` until LV-3.
 - `a_r,d = λ·V_t·r_d + (1 − λ)·k_vg·(0 − V_g,r)`: centripetal in forward flight, "stop drifting
   sideways" near hover. `r_d = r_ref + K_ψ·wrap(ψ_ref − ψ)` as today.
+- **Superseded in part, 2026-11-27** ("LV-3 amendment", C): `λ` blends from 80 down to 25 km/h; the
+  speed term is written over one blended measured speed `V_m`; the near-hover heading rate is flown
+  by the pedal under its own hover bandwidth and rate cap.
 
 **D. Lift-vector direction (cyclic).** The targets the inner loop flies are a **feed-forward nudge
 plus a trim learnt from observation**:
@@ -413,6 +418,13 @@ heading loop in forward flight (finding 2), and no deliberate extra pedal in har
   `1 − λ`.
 - The asymmetric pedal limits stay (right is the small side for `rotor_dir = +1`), and a collective
   increase is still rate-capped near the right limit.
+- **Superseded in part, 2026-11-27** ("LV-3 amendment", D): "never a heading loop in forward
+  flight" stands, but the pedal now also carries a **yaw-rate damper at every speed**, on the yaw
+  the bank does not explain (user: *"Would be a good idea to have some of that yaw based pedal in
+  all flight"*). It holds no heading and no rate of its own choosing — its forward-flight reference
+  is the rate the measured bank implies — so finding 2's reason survives; the "only the ball" part
+  does not. The ball's share is `λ`-weighted; near hover the pedal also carries a bounded yaw-rate
+  integrator and a ±0.3 band around the learnt hover pedal.
 
 **G. Priority under limits (diagram 4).** The manoeuvre class is **derived every frame**:
 `break` if a rate override is set, `low_slow_rpm` if the RPM guard is active below 50 km/h, else
@@ -565,6 +577,9 @@ SAU H, K and T off itself before each new take.
    60 speed, right pedal was added too late and too slowly which caused left yaw to run away. This
    is more slow speed behaviour, so can go to that stage."* Watch the pedal loop's own response
    near 60 km/h on this stage's card, not only the blend/jerk behaviour already listed.
+   **Superseded, 2026-11-27**: LV-3's design, stages and card are now "LV-3 amendment
+   (2026-11-27)" below (blend 80 → 25 km/h, all-speed yaw damper, hover pedal band, low-speed goal
+   slew). The low-slow-RPM row is proposed for deferral there (U17).
 
 Each stage runs the subproject checks (`fast-tests.sh aircraft-layer`; body-layer too in LV-1 and
 LV-3). LV-1 and LV-2 may be built back to back as one perf/security batch if LV-1's card is flown
@@ -609,7 +624,8 @@ running-average chain is tested, not bypassed.
   (no floor, U8).
 - Regimes (LV-3): `λ` crosses 25 and 50 km/h with no output step; speed 0 holds ground speed near 0
   in wind; a 90° heading change at hover moves the pedal, bank stays under a few degrees;
-  `clamp_speed(0)` returns 0.
+  `clamp_speed(0)` returns 0. **Superseded, 2026-11-27**: the LV-3 test list is in "LV-3
+  amendment" below (breakpoints 25 and 80 km/h; runaway reproduction; hover band).
 - Kept tests stay green: pause freeze, VRS cap, RPM/stall caps, stopping height, settle write-back.
 - Harness hygiene: every new local and module added to the extraction tuples (the silent-default
   trap from the desired-state plan).
@@ -672,7 +688,8 @@ hand-back to the player" rule, independent of this law, is now built and reviewe
   gets slow drift until BL-16's hover item adds the fixed spot.
 - **Strong wind at low speed.** `λ` runs on ground speed while the aerodynamics follow airspeed; at
   hover in a 10 m/s wind the law is in hover regime while the rotor sees 36 km/h. Bounded by the
-  gentle schedule; watched on LV-3's card.
+  gentle schedule; watched on LV-3's card. **Revisited 2026-11-27** ("LV-3 amendment", U12): the
+  60 km/h runaway was flown in no wind, so the source did not decide it; ground speed kept.
 - **Every gain is a first cut**, as today. The schedule and chain shapes are designed; their numbers
   come from the cards.
 - **The ball arg's update rate is unknown** (the control args update at about 25 Hz). The pedal loop
@@ -1022,6 +1039,8 @@ detect"). This is the anticipatory layer above it:
   raised ball/torque gains do not close the row-10 slow-flight yaw gap (LV-3 scope, not retested by
   this amendment), that is the point at which a yaw-rate term gets its own look, in LV-3, against
   the hover regime's pedal-yaw-loop section (F) rather than bolted onto forward flight.
+  **Superseded, 2026-11-27** ("LV-3 amendment", D): they did not close it, and the user asked for
+  yaw-based pedal in all flight. LV-3 adds a yaw-rate damper at every speed.
 
 ### E. Input shape — E16
 
@@ -1451,3 +1470,568 @@ break is fast enough to expose it, that overshoots. Not addressed here (would ne
 anticipation term ahead of the deceleration, a separate mechanism, out of this one-constant fix's
 scope) — added to the LV-2 card's own "roll-out on the break heading" watch line for a live read
 against these measured figures.
+
+## LV-3 amendment (2026-11-27)
+
+Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `origin/feature/bl16-lift-vector-
+law`), tip `a9afa8da`. LV-2 is built and approved, **not yet flown**. Inputs read in full:
+`explore-notes.md` "LV-3 explore (2026-11-27)" (the specification; the user's words govern);
+this plan's A–K, Implementation Plan item 4, Tests, Risks, and the LV-1 and LV-2 amendments;
+`alignment.md` E1–E17; `docs/acceptance/2026-11-24-sortie-feedback.md` (row 10 and its trace note)
+and `2026-11-27-sortie-feedback.md`; `plans/flight-control/explore-notes.md` "Mode-1 hover";
+`body-layer/ROADMAP/BL-16.md` "Later — mode 1 hover". Code read at the tip:
+`flight_control.lua` (`law_apply_goal`, `law_init_at_take`, `law_update`, `law_outputs`,
+`est_sample`, `run_active_frame`, getters), `flight_profile.lua` in full, `flight_desired.lua`
+(`reseed_from_measured`, `write_internal`), body-layer `clamp_speed`. **Trace read**:
+`refly6_flight_trace.log` (sixth re-fly, the 60 km/h runaway, t = 330–363), from the
+`DCS-petrobrain-epochfix` worktree where the gitignored logs live.
+
+**Value against effort (1a).** Proportionate. The all-speed yaw damper is the cheapest piece and
+fixes the one flown defect (the runaway); the hover pieces are what "any speed" (Q1) costs and are
+already confirmed by the user. Hover *commands* (translate, fixed-spot hold, move up/down) stay in
+BL-16 "Later — mode 1 hover" and are out of scope; a position term at `λ = 0` is where they plug in.
+
+### What reading the code and the trace turned up (step 3a), before designing
+
+1. **The 60 km/h "left-yaw runaway" was a sideslip build-up first, and a yaw only at the end.**
+   Sixth re-fly, t = 337–363, decelerating 108 → 60 km/h on heading hold:
+
+   | t (s) | ground speed (km/h) | along nose / sideways | sideslip `aoss` | yaw rate ψ̇ (°/s) | bank | ball | pedal cmd |
+   |---|---|---|---|---|---|---|---|
+   | 337 | 108 | 108 / 13 | 7° | −0.5 | 0° | 0.03 | +0.19 |
+   | 346 | 86 | 80 / 30 | 21° | −0.6 | +2° | 0.00 | −0.07 |
+   | 354 | 74 | 55 / 49 | 42° | −2.0 | +4.5° | 0.05 | +0.23 |
+   | 358 | 82 | 28 / 77 | 68° | −8.8 | +12° | 0.16 | +0.56 |
+   | 361 | 108 | −15 / 107 | 65° | −0.9 | +29° | 0.47 | +1.00 |
+
+   For about 20 s the nose barely moved (ψ̇ −0.2 to −2 °/s) while the aircraft slid right through
+   the air, ball centred, under the 2–5° of right bank that heading hold kept asking for (bank-to-
+   turn, the forward law). The nose did not follow the bank. The violent yaw (−10 °/s) came only
+   once the sideslip passed about 55°. **No wind in this segment:** `aoss` equals `atan(sideways/
+   along-nose)` from the ground velocity to within 0.5° throughout, so air and ground velocity were
+   the same. (The 2026-11-24 sortie note's "wind … ~40° crab" reading of its own row 10 may need the same
+   check; that trace was not re-read here.) What follows from
+   it:
+   - The user's cue, *"nose moving sideways… the yaw movement"*, is the nose **not following the
+     flight path**. "Yaw the bank does not explain" catches exactly this: the 2–5° bank implies
+     +1 to +2 °/s of right yaw at that speed (`g·tan φ / V`, 2–4.5° at 24–21 m/s), the nose did
+     −0.6 to −2, so the unexplained yaw was 2–4 °/s from the start of the slide, while the ball
+     read nothing. **Unexplained yaw rate is the rate of change of sideslip**, so the damper
+     below must not be washed out (high-pass filtered): a washout would filter out exactly this
+     slow, 20 s build.
+   - The `λ` source did not decide this case (U12): ground and air speed were equal.
+   - **Probable contributor, unconfirmed:** pitch stayed nose-up 2–4° while the along-nose ground
+     speed fell from 75 to below the 60 goal. If `LoGetIndicatedAirSpeed` is the total airspeed
+     including the sideways part (ground speed stayed ~74 km/h), the speed loop kept decelerating
+     the nose-forward component as the slide grew. The trace does not carry IAS, so this cannot be
+     checked; LV-3 adds IAS and TAS to the trace (Risks).
+2. **The right-pedal limit (+0.5) bounds only the `t_y` integrator, not the pedal command.**
+   `law_update` clamps `t_y` to `[pedal_limit_negative, pedal_limit_positive]`; `law_outputs` adds
+   the ball proportional term and `turn_coord_pedal` on top and clamps the sum only to ±1. In the
+   runaway `t_y` sat at +0.5 while the command reached +1.0. The confirmed reading ("the existing
+   absolute limits, right +0.5, still apply on top") assumes otherwise. U13.
+3. **The existing heading shaper cannot meet "45° in ≤ 10 s" at hover.** At `omega_heading` 0.3 a
+   45° step reaches 2° of the goal in ~17 s (simulated, the law's own shaper equations). `ω` 0.7
+   with an 8 °/s rate cap and the hover accel cap (6 °/s² × `schedule_gain_min` 0.3 = 1.8 °/s²)
+   gets there in ~9.7 s with zero overshoot. Also, `r_max` comes from `law_turn_rate_at_bank` and
+   is meaningless near zero airspeed (0 below 1 m/s, then the 30 °/s fallback; 29 °/s at 7 m/s).
+4. **The shapers can step their acceleration, so a commanded change steps the attitude target.**
+   Each shaper is second-order: on a new goal its acceleration jumps straight to the (scheduled)
+   cap. At 60 km/h a "speed 0" steps `a_f,d` by ~1.1 m/s², i.e. ~6° of pitch target in one law
+   step, which the inner loop then flies at its own fast rate. That is what the user means by *"not
+   the angles but how fast they change"*. Simulated: slewing that goal acceleration (not the
+   reference) cuts the peak jerk of `a_f,d` from ~33 to ~1 m/s³ with the same settle time and no
+   overshoot (D, "Low-speed gentleness"). A jerk limit **inside** the shapers instead overshoots
+   badly (31° on a 45° heading step) because nothing brakes it; rejected.
+5. **"Pedal leads collective at the same moment" is already built.** The torque feed-forward
+   `k_pedal_from_collective_rate · u_c_rate · rotor_dir` is integrated into `t_y` in the same law
+   step that moves collective. No change; LV-3 only keeps the hover band from cutting it (E).
+6. **Latent leak:** `flight_desired.write_internal({heading_deg})` sets `hdg_mode = "heading"` but
+   never clears `bank_hold_deg`. Harmless today (no settle path runs from a held bank); live as
+   soon as LV-3's held-bank conversion (F) uses it.
+7. **`in_band_speed` can never be true at a speed goal of 0** (`speed_band_frac × 0`).
+8. **The estimator already computes a placeholder `λ`** (hard-coded 25 → 50 km/h on `v_g`, read by
+   nothing, `est_reset` sets it to 0). LV-3 replaces it with the profile's breakpoints.
+9. **`low_slow_rpm` (G) was never built** — the LV-2 amendment deferred it to LV-3; its card row
+   relied on `ROTOR_RPM_DUMMY_PCT`, which no longer applies now that rotor RPM is read live. U17.
+
+**Constants checked (widened 4a rule).** Grepped `flight_profile.lua` in full, `flight_control.
+lua`'s `fc_limits`/`FC_LIMIT_BOUNDS`, and `body-layer/config/defaults.toml` for hover, yaw, pedal,
+blend, drift, jerk, VRS and speed constants. **Reused:** `turn_settle_deg_s` (the "not turning"
+test for learning the hover pedal), `k_turn_coord_pedal` (the hover yaw-rate feed-forward, as
+is), `k_pedal_from_collective_rate` (the pedal lead), `k_speed_error` (the ground-speed term),
+`heading_accel_cap_deg_s2 × schedule_g` (hover yaw acceleration), `schedule_gain_min`/
+`schedule_full_speed_kmh` (unchanged, IAS-based), `vrs_*` (unchanged), `pedal_limit_*`
+(unchanged, U13), `ball_centre`. **Replaced:** the estimator's hard-coded 25/50 `λ`. **No existing
+constant governs** the 80 km/h blend top, the yaw damper, the hover yaw integrator, the hover
+heading bandwidth and rate cap, the drift hold, the hover pedal band or the low-speed goal slew;
+all new, all in the profile. `HELI_SURFACE_AGL_MAX_M`/`on_ground_agl_threshold_m` (10 m) still
+refuse a take at or below 10 m AGL; hover card rows stay above it.
+
+**Investigator not invoked (step 3).** Two DCS facts are unconfirmed: whether
+`LoGetIndicatedAirSpeed` includes the sideways component, and whether `LoGetAngleOfSideSlip`'s
+sign and units hold in wind. Neither is needed by the design below (the damper reads Euler yaw
+rate and bank, which LV-0 confirmed); both are logged and watched on the card. A desk search would
+give at best a forum claim; the trace answers both on the first LV-3 card flight.
+
+### Design Overview (diagrams)
+
+**1. Who owns what.** Grey is unchanged. LV-3 adds no wire field and no body-layer change.
+
+```mermaid
+flowchart LR
+  subgraph BL["body-layer (unchanged)"]
+    CMD["'speed 0', 'turn heading', ...<br/>clamp_speed already 0..280"]
+  end
+  subgraph LUA["Export.lua"]
+    FD["flight_desired.lua<br/>take rule mirror: no bank hold at hover<br/>write_internal also clears bank_hold_deg"]
+    PROF["flight_profile.lua<br/>NEW: blend 25 / 80 km/h, yaw damper,<br/>hover yaw loop, hover heading, drift hold,<br/>pedal band, goal slew"]
+    EST["estimator<br/>lambda from profile (was hard-coded 25/50)<br/>V_g, V_g,f, V_g,r, psi-dot (kept)"]
+    LAW["law_update<br/>speed measure blend, drift hold,<br/>heading split, goal slew,<br/>yaw damper, hover yaw loop,<br/>hover pedal reference, held-bank end"]
+    OUTS["law_outputs (every frame)<br/>pedal sum, then hover band"]
+  end
+  CMD --> FD -- "by stamp" --> LAW
+  PROF --> EST
+  PROF --> LAW
+  EST -- "measured.lambda, V_g,f, V_g,r" --> LAW --> OUTS
+  LAW -- "held bank ended at hover:<br/>settle write-back" --> FD
+  EST -- "getters: lambda, take speed" --> FD
+```
+
+**2. One blend, three regimes.** `λ` from horizontal ground speed (vector length): 0 at or below
+25 km/h, 1 at or above 80, linear between (U12). Above 80 km/h everything is LV-2 except the yaw
+damper.
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  Hover: Hover, at or below 25 km/h (lambda = 0)
+  Blend: Blend, 25 to 80 km/h
+  Forward: Forward, at or above 80 km/h (lambda = 1)
+  Hover --> Blend
+  Blend --> Forward
+  Forward --> Blend
+  Blend --> Hover
+  note right of Forward
+    LV-2 law unchanged, plus the yaw damper
+    speed = IAS, bank owns heading,
+    ball loop owns steady pedal
+  end note
+  note right of Blend
+    every term weighted by lambda
+    goal-driven changes slewed (gentler as lambda falls)
+    feedback untouched
+  end note
+  note right of Hover
+    speed = ground speed along the nose
+    pedal owns heading (yaw-rate loop), never bank
+    lateral cyclic holds sideways ground speed at 0
+    pedal within +-0.3 of the learnt hover pedal
+    a held bank ends here, heading holds
+  end note
+```
+
+**3. The pedal channel.** One integrator, three overlays, one band. The yaw damper's reference
+slides from "the rate the bank implies" (forward) to "the commanded rate" (hover), so one term is
+both the all-speed damper and the hover yaw-rate loop's proportional part.
+
+```mermaid
+flowchart LR
+  BALL["ball - centre"] --> TI
+  YR["psi-dot (Euler)"] --> EY["unexplained yaw<br/>e = psi-dot - expected<br/>expected = lambda * rate bank implies<br/>+ (1 - lambda) * r_d"]
+  BANK["bank, V_t"] --> EY
+  RD["r_d (heading shaper)"] --> EY
+  UC["u_c_rate"] --> TI
+  EY --> TI["t_y integrator<br/>+ lambda * k_ball * ball<br/>+ (1 - lambda) * k_yaw_i * (-e)<br/>+ torque FF (pedal leads collective)<br/>clamped to pedal limits (as today)"]
+  EY --> YD["yaw damper overlay<br/>-k_yaw_damp * e, capped<br/>every speed, no washout"]
+  BALL --> BP["ball P overlay, x lambda"]
+  RD --> TC["turn_coord_pedal (kept)<br/>= hover yaw-rate feed-forward"]
+  TI --> SUM["pedal sum"]
+  YD --> SUM
+  BP --> SUM
+  TC --> SUM
+  SUM --> BAND["hover band<br/>ref +- w(lambda), w = 0.3 at hover,<br/>2.0 at 80 km/h (never binds)"]
+  REF["pedal_hover_ref<br/>follows the output while not turning,<br/>frozen during a heading change,<br/>shifted by the torque FF"] --> BAND
+  BAND --> OUT["pedal command"]
+```
+
+**4. Low-speed gentleness: slow the goal, not the feedback.** Only the shapers' own accelerations
+are slewed, below 80 km/h. The references (`v_ref`, `h_ref`) are not touched, so they still cannot
+overshoot; every correcting term is added after the slew.
+
+```mermaid
+flowchart LR
+  G["goal: speed / altitude"] --> SH["shaper (kept)<br/>a_ref, v_ref, h_ref"]
+  SH -- "a_ref (goal-driven)" --> SL["slew, below 80 km/h only<br/>jerk J(lambda): 0.5 m/s3 at hover,<br/>5 at 80, off above"]
+  SL --> SUMD["desired accel a_d"]
+  FB["feedback (fast, unchanged)<br/>k_speed_error, k_vs_error, k_alt_error<br/>trim integrators, collective integrator,<br/>inner attitude loop, ball, yaw damper"] --> SUMD
+  SUMD --> FF["pitch / bank / collective targets<br/>and, through u_c_rate, the pedal lead"]
+```
+
+**5. The runaway, before and after.** What the trace shows, and which term now sees it.
+
+```mermaid
+flowchart TB
+  A["decelerating 108 -> 60 km/h,<br/>heading hold, bank-to-turn"] --> B["heading creeps left -> r_d right -><br/>2-5 deg right bank"]
+  B --> C{"nose follows the bank?"}
+  C -- "fast flight: yes (weathervane, ball sees slip)" --> OK["coordinated turn"]
+  C -- "slow: no" --> D["aircraft slides right, nose stays put<br/>sideslip 7 -> 42 deg in 17 s<br/>ball centred (blind at low airspeed)"]
+  D --> E["LV-1/LV-2: nothing reacts<br/>(pedal flies only the ball)"]
+  E --> F["sideslip > 55 deg: yaw -10 deg/s, runaway"]
+  D --> G["LV-3: bank implies +1..+2 deg/s,<br/>nose does -0.6..-2 -> 2-4 deg/s unexplained<br/>-> damper adds right pedal from the start,<br/>nose follows the flight path"]
+  G --> H["and below 80 km/h the bank's share<br/>of heading shrinks with lambda"]
+```
+
+**6. A held bank as the aircraft slows (U15).**
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  Held: hdg_mode = bank (forward, full)
+  Fading: bank share x lambda, 25-80 km/h<br/>pedal yaw share capped at hover rate
+  Ended: hdg_mode = heading on the heading reached<br/>(written back to desired)
+  Held --> Fading: ground speed below 80
+  Fading --> Held: back above 80
+  Fading --> Ended: lambda reaches 0 (25 km/h)
+  Held --> Ended: heading-type command (unchanged, Q3)
+  Fading --> Ended: heading-type command
+```
+
+### A. Estimator: `λ` from the profile
+
+- New profile fields `lambda_hover_kmh = 25.0` (the user's hover threshold, 2026-11-19) and
+  `lambda_forward_kmh = 80.0` (the user's 2026-11-27 *"down to 80 km/h as implemented now"*).
+- One pure helper, `law_lambda(v_g_mps, profile)`, linear between the two, clamped to [0, 1];
+  **a non-finite or missing input returns 1.0** (the forward law, today's behaviour — the same as
+  "unknown", never a plausible-looking hover). `est_sample` calls it; the hard-coded 25/50 goes.
+  `est_reset` sets `est.lambda = nil` (was 0.0, which read as "hover"); `run_active_frame` merges
+  `measured.lambda` only when primed, and every law function reads `measured.lambda or 1.0`.
+- Input: `est.v_g` (horizontal ground speed, vector length), as the plan and the user's hover
+  definition have it (U12).
+- Trace gains `ias`, `tas`, `v_m`, `yaw_e`, `yaw_damp_pedal`, `pedal_hover_ref`, `a_f_goal_s`,
+  `a_u_goal_s` (the runaway diagnosis needed IAS and could not have it). Status gains nothing new
+  (`fc_est_lambda` already exists).
+
+### B. Speed and drift: what "speed" means near hover (C, U2)
+
+- **One blended measured speed** `V_m = λ·IAS + (1 − λ)·V_g,f` (ground speed along the nose,
+  signed: backwards is negative). It replaces `measured.ias_mps` in exactly four places:
+  the speed-error term of `a_f,d` (`k_speed_error·(v_ref − V_m)`), `in_band_speed`, the take's
+  `v_ref` seed and the take's default `speed_goal_mps`. So "speed 0" means stopped over the ground,
+  in wind too. The shaper itself is unchanged. `desired.ias_kmh` keeps its name and wire shape; near
+  hover it carries `V_m` (no wire change, U2's "speed = ground speed near hover").
+- `flight_desired.reseed_from_measured` seeds `desired.ias_kmh` from a new getter
+  `flight_control.get_take_speed_kmh()` (`V_m`), falling back to IAS as today if the getter is
+  missing.
+- **Speed band floor:** `in_band_speed` uses `max(speed_band_frac · goal, speed_band_min_mps)`,
+  `speed_band_min_mps = 1.0` (profile; 3.6 km/h), so a "speed 0" can be in band.
+- **Drift hold** (C, kept from the plan): `a_r,d = λ·a_r,turn + (1 − λ)·(−k_drift_hold·V_g,r)`, with
+  `a_r,turn` today's `V_t·r_d` (or the held-bank relation). Lateral cyclic stops sideways ground
+  motion near hover; a position is not held (drift at speed 0 accepted, user answer 4).
+  `k_drift_hold = 0.3` per s (1 m/s sideways asks 0.3 m/s², about 1.7° of bank).
+
+### C. Heading near hover: the pedal yaws, the bank does not
+
+- The heading shaper's bandwidth, rate cap and accel cap blend with `λ`:
+  `ω = λ·omega_heading + (1 − λ)·hover_omega_heading` (0.3 → 0.7);
+  `rate_limit = λ·r_max + (1 − λ)·hover_yaw_rate_max_deg_s` (8 °/s at hover); the accel cap stays
+  `heading_accel_cap_deg_s2 × schedule_g` (1.8 °/s² at hover). A 45° change at hover: within 2° in
+  ~9.7 s, peak 8 °/s, no overshoot, a soft S. A break (`rate_override_deg_s`) keeps LV-2's own
+  bandwidth and caps; below 80 km/h its `rate_limit` is blended the same way, so a break entered
+  slow at hover-ish speed becomes a calm pedal turn (U6 holds).
+- `r_d` goes to two places: the bank (through `a_r,turn`, weight `λ`) and the pedal (through the
+  yaw loop, weight `1 − λ`, D). Nothing else changes in step 1.
+
+### D. Pedals: yaw damper at every speed, yaw-rate loop near hover
+
+**The unexplained yaw** `e = ψ̇ − ψ̇_exp`, with
+`ψ̇_exp = λ·law_turn_rate_at_bank(φ, max(V_t, yaw_damp_v_floor_mps)) + (1 − λ)·r_d`
+(reuses the existing helper; `ψ̇` is the estimator's Euler yaw rate). In forward flight `ψ̇_exp` is
+the rate the bank implies, so in steady coordinated flight `e ≈ 0` and the term is silent; near
+hover it is the commanded rate.
+
+- **Yaw damper overlay (all speeds):** `yaw_damp_pedal = clamp(−k_yaw_damp·e, ±yaw_damp_max)`,
+  recomputed every law step, never integrated, added at `law_outputs` — the same "position
+  overlay" shape as `turn_coord_pedal` and the ball P term. Sign: nose yawing left of what the bank
+  implies (`e < 0`) → right pedal (positive command). **No washout**, because unexplained yaw rate
+  is the sideslip rate (finding 1). A small standing bias in forward flight (the bank-implied rate
+  is approximate in a climbing or descending turn) is absorbed by the ball integrator: the pedal
+  sum and the ball are unchanged at steady state, so no crossed controls.
+- **Reconciling plan F / finding 2, in writing.** Finding 2 forbids a **heading or yaw-rate loop
+  in forward flight** because bank owns heading there and a pedal loop on heading would fight it.
+  The damper has no heading reference and no rate goal of its own: its forward-flight reference is
+  whatever the measured bank already implies. It cannot hold a heading, cannot command a turn and
+  reads zero in any coordinated turn, so the reason behind finding 2 still holds. What changes is
+  "the pedal flies only the ball": the user asked for yaw-based pedal in all flight to damp the
+  yaw oscillation seen "even when flying the ball". A deliberate change, not a reversal.
+- **The ball's share is `λ`-weighted** (integral and proportional): at low airspeed the ball reads
+  nothing (finding 1), so it fades as the yaw loop takes over.
+- **Hover yaw-rate integral:** `ṫ_y += (1 − λ)·k_yaw_rate_i·(−e)` alongside `λ·k_ball·(ball −
+  centre)` and the unchanged torque feed-forward. The integral learns the anti-torque pedal (the
+  "hover-stable" value) and the extra pedal a steady yaw rate needs; `turn_coord_pedal`
+  (`k_turn_coord_pedal·r_d`, kept as is) is the hover yaw-rate feed-forward.
+- **Pedal leads collective**: the existing torque feed-forward, unchanged (finding 5). The growing
+  right-pedal need in transitional lift and below is left to the integrator on yaw and the ball,
+  per the user (*"this can be done with the control law from vertical speed and yaw"*). No
+  speed-scheduled pedal trim.
+- **In a break (LV-2, above 80 km/h):** on roll-in the bank leads the yaw, so `e < 0` for a right
+  break and the damper adds pedal **into** the turn while the nose catches up; on roll-out the yaw
+  outlives the bank and the damper pushes against it. Both act only while the nose and the bank
+  disagree, both are capped at `yaw_damp_max`, and the ball loop still owns the steady pedal. It
+  can only reduce, not add, yaw overshoot on roll-out; the LV-2 overshoot figures (~5.5° / 7–10°)
+  are the baseline the card compares against. Setting `k_yaw_damp = 0` gives the LV-2 law back
+  bit-exactly above 80 km/h (tested), for a comparison row.
+- **Bit-exact at take:** `yaw_damp_pedal` is computed at take from the same measured frame and
+  backed out of `t_y`'s seed together with the (now `λ`-weighted) ball P term — the established
+  pattern (`t_y = command.pedals − t_y_p_at_take − yaw_damp_at_take`).
+
+### E. The hover pedal band (±0.3, user)
+
+- New law state `pedal_hover_ref`. Each law step: while the heading is not being changed
+  (`|r_d| < turn_settle_deg_s`), it follows the pedal command (so it is "the value where hover is
+  stable" whenever the aircraft is holding heading); while a heading change runs it is **frozen**,
+  except that it moves with the torque feed-forward (`+ k_pedal_from_collective_rate · u_c_rate ·
+  rotor_dir · dt`), so the band never cuts the pedal lead on collective.
+- At `law_outputs`, after summing: `pedal = clamp(sum, ref − w, ref + w)` with
+  `w = hover_pedal_band + λ·(hover_pedal_band_forward − hover_pedal_band)` (0.3 at hover, 2.0 at
+  80 km/h and above, where it can never bind). The existing absolute limits stay where they are
+  today (U13).
+- At take `pedal_hover_ref = command.pedals`, so the take frame is inside the band (bit-exact).
+- If the band binds, a hover heading change is slower than 10 s; that is the user's trade
+  (*"we'll refine after testing if necessary"*), visible in the trace.
+
+### F. Held bank and take at low speed (U15)
+
+- **Take rule:** unchanged except that at `λ = 0` (25 km/h and below) a take with `|φ̄| ≥ 5°` holds
+  heading, not the bank — in hover a bank is a sideways translation, not a turn (*"Bank in hover is
+  not the way to change heading"*). Mirrored in `flight_desired.reseed_from_measured` via a new
+  getter `flight_control.get_lambda()` (falls back to today's rule if missing).
+- **A held bank while slowing:** between 80 and 25 km/h it keeps going with its bank share
+  weighted by `λ` (flatter as speed falls) and its pedal share's rate capped at
+  `hover_yaw_rate_max_deg_s` (without the cap, `g·tan(30°)/V_t` at 2 m/s is 160 °/s). Q3 still
+  holds — a speed command does not end it. **When `λ` reaches 0 it ends**: `law_update` sets
+  `bank_hold_deg = nil`, `heading_goal_deg = psi_ref`, and the existing heading shaper decays `r_ref`
+  to zero (no snap). `run_active_frame` writes the heading back with the existing settle write-back
+  (`prev_bank_hold ~= nil and fc_law.bank_hold_deg == nil` → `write_internal({heading_deg})`), and
+  `write_internal`'s heading branch also clears `bank_hold_deg` (finding 6).
+
+### G. Low-speed gentleness: slow the goal, keep the feedback fast
+
+User: *"It's not the pitch/bank angles themselves but how fast they change. Same for collective and
+pedals. While fast response may be needed to correct and stabilize, flight state changes should be
+more gradual than in fast flight."* (This refines E16's "gentleness is in the size of each
+correction": the corrections stay fast and small; the commanded change of state is what slows.)
+
+- The speed and altitude shapers' accelerations (`a_ref_v`, `a_ref_h`) pass through a slew into new
+  state `a_f_goal_s`/`a_u_goal_s` before they enter section C:
+  `a_goal_s += clamp(a_ref − a_goal_s, −J·dt, J·dt)`, with
+  `J = goal_jerk_hover_mps3 + λ·(goal_jerk_edge_mps3 − goal_jerk_hover_mps3)` below 80 km/h and
+  **no slew at all at `λ = 1`** (`a_goal_s = a_ref`, so LV-2 is bit-identical above 80 km/h).
+  First cut 0.5 m/s³ at hover (about 2.6 °/s of goal-driven pitch change) and 5 m/s³ at the 80 km/h
+  edge (never binds in practice there).
+- Everything after the slew is unchanged: `k_speed_error`, `k_vs_error`, `k_alt_error`, the trim
+  and collective integrators (their errors are computed against the slewed `a_d`, so they do not
+  wind up against it), the inner attitude loop, the ball, the damper. The references `v_ref`/`h_ref`
+  are not slewed, so they keep their no-overshoot guarantee.
+- **Collective and pedal follow for free:** the collective's goal-driven part comes from `a_u,d`
+  and `n_d` (both slewed), and the pedal lead follows `u_c_rate`. **Bank and hover yaw** are already
+  rate-shaped by the heading shaper's accel cap (a turn onset at 60 km/h is a bank-rate step of
+  ~6 °/s, at hover a yaw-acceleration step of 1.8 °/s²); no further slew is added there.
+- At take `a_f_goal_s = a_u_goal_s = 0`.
+- **Altitude through a stop** is held by the unchanged collective integrator on vertical
+  acceleration (`e_u`), which also supplies the extra collective of transitional lift and the
+  reduction in ground effect, with no model (user answer 3). U14 asks about the deceleration
+  collective nudge below 80 km/h.
+
+### Tuning constants (all in `flight_profile.lua`; no `tuning.py` equivalent in aircraft-layer Lua)
+
+| field | first cut | why |
+|---|---|---|
+| `lambda_hover_kmh` | 25.0 | user's hover threshold (2026-11-19) |
+| `lambda_forward_kmh` | 80.0 | user: *"down to 80 km/h as implemented now"* |
+| `k_yaw_damp` | 0.03 pedal per °/s | the runaway's 2–4 °/s unexplained yaw → 0.06–0.12 right pedal from its first seconds, where the ball gave 0; at hover an 8 °/s rate error asks 0.24, inside the cap and the band |
+| `yaw_damp_max` | 0.25 | bounds a break roll-in transient (bank leading yaw by 10 °/s would ask 0.3) |
+| `yaw_damp_v_floor_mps` | 5.0 | keeps `g·tan φ / V` finite near hover, where its weight is ~0 anyway |
+| `k_yaw_rate_i` | 0.03 per (°/s)·s | 1 °/s of steady yaw-rate error moves the trim 0.03/s, the order of the ball integral's response |
+| `hover_omega_heading` | 0.7 rad/s | 45° within 2° in ~9.7 s (finding 3) |
+| `hover_yaw_rate_max_deg_s` | 8.0 | peak of a calm 45° S-turn; also caps a held bank's pedal share |
+| `k_drift_hold` | 0.3 1/s | 1 m/s sideways → ~1.7° of bank |
+| `speed_band_min_mps` | 1.0 | lets "speed 0" be in band (finding 7) |
+| `hover_pedal_band` | 0.3 | user, confirmed (command domain, −1…+1) |
+| `hover_pedal_band_forward` | 2.0 | band width at 80 km/h and above: never binds |
+| `goal_jerk_hover_mps3` | 0.5 | ~2.6 °/s goal-driven pitch change at hover |
+| `goal_jerk_edge_mps3` | 5.0 | at the 80 km/h edge; the slew is off above it |
+
+Every field is Lua-edited data (no `lo`/`hi`, same trust level as every other profile field). **No
+new boundary float** enters from outside the process: LV-3 reads no new telemetry for the law (IAS
+and TAS are already read; adding them to the trace is diagnostic). The one non-finite path is `λ`
+itself, handled in A (non-finite → 1.0).
+
+### Co-moving fields
+
+Trigger (6a): the regime is derived (`λ`, never stored), but new law state moves with it, and
+`hdg_mode`/`bank_hold_deg` are written both externally (`apply_set`, `law_apply_goal`) and
+internally (take, the new held-bank end). Construction sites grepped at `a9afa8da`:
+`law_init_at_take` (the only place law state is created); `law_apply_goal`/`law_update` copy with
+`pairs`, so a field exists only if `law_init_at_take` creates it; `fc_law = nil` at
+`request_release`, `check_envelope` failure, the two park/arm sites in `run_flight_control`,
+`on_stop`, `reset`. Estimator: `est_reset` (`est_sample` on a gap). Desired: `clear_desired`,
+`reseed_from_measured`, `reseed_from_overlay`, `convert_turn_to_heading_for_m2`, `apply_set`,
+`write_internal`.
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `a_f_goal_s`, `a_u_goal_s` (NEW) | internal | take (voice or unpark) | both 0; outputs bit-exact |
+| same | internal | `λ` reaches 1 (≥ 80 km/h) | equal to the raw shaper accel every step (no slew); falling below 80 starts from that value, no step |
+| `yaw_damp_pedal` (NEW) | internal | take | the take-frame value, backed out of `t_y`; sum equals `command.pedals` |
+| `pedal_hover_ref` (NEW) | internal | take | `= command.pedals` |
+| same | internal | heading change starts (`|r_d|` ≥ settle) | frozen, moved only by the torque feed-forward |
+| same | internal | heading change ends | follows the pedal command again from the next step |
+| `t_y` | internal | any `λ` | ball share `λ`, yaw share `1 − λ`; clamp to `pedal_limit_*` as today |
+| `bank_hold_deg`, `heading_goal_deg`, `turn_mode` (law) | internal (NEW) | `λ` reaches 0 with a held bank | `bank_hold_deg = nil`, `heading_goal_deg = psi_ref`, `turn_mode = false`; `r_ref` decays through the shaper |
+| `desired.hdg_mode`, `heading_deg`, `bank_hold_deg` | internal (write-back) | same | `"heading"`, heading reached, **`bank_hold_deg = nil`** (`write_internal` fix) |
+| same | internal | take at `λ = 0`, `|φ̄| ≥ 5°` | `"heading"`, `bank_hold_deg = nil` (law and `reseed_from_measured` agree) |
+| `v_ref`, `speed_goal_mps` (law), `desired.ias_kmh` | internal | voice take | seeded from `V_m`, not IAS |
+| same | external | unpark with a mode-2 speed | seed used as given, interpreted as `V_m` (same number near forward flight) |
+| `est.lambda` | internal | `est_reset`, first frame | `nil`; the law reads 1.0 until primed |
+| every law field above | internal | release, envelope, park, stop, reset | `fc_law = nil`; next take rebuilds all |
+
+### Implementation plan (LV-3, one batch)
+
+1. **Toy plant first, failure reproduced.** A new low-speed driver in `test_flight_control_law.py`:
+   ground velocity in 2D, airspeed = ground velocity − wind, heading with yaw dynamics (pedal →
+   yaw acceleration, a pedal trim that rises with collective, yaw damping, a weathervane term ∝
+   airspeed² × sideslip), side force and ball ∝ airspeed² × sideslip (blind near hover), bank →
+   lateral acceleration, a power-required curve that rises below translational lift, optional
+   ground effect. **Pass gate for the plant itself:** the current law (LV-2) reproduces the
+   runaway — decelerating 108 → 60 km/h on heading hold, sideslip passes 30° with the ball inside
+   ±0.05. A plant that cannot fail this way cannot show the fix. Every LV-3 test runs against the
+   **shipped** `flight_profile.lua` values (reviewer memory: the shared `_PROFILE` table is a stale
+   baseline for several fields).
+2. **Yaw damper, all speeds** (D, minus the hover parts). The smallest change that addresses the
+   flown defect. `λ` still 1 everywhere.
+3. **The regime**: `λ` from the profile (A), `V_m` and the speed band floor (B), drift hold (B), the
+   heading split and hover heading shaper (C), the `λ`-weighted ball, the hover yaw integral and
+   the band (D, E), the held-bank end and take rule with the `write_internal` fix (F), the two
+   getters.
+4. **Low-speed goal slew** (G).
+5. **Trace fields** (A) and the card.
+
+Checks: `fast-tests.sh aircraft-layer` per stage; body-layer untouched. Performance and security
+once, after stage 5 (one batch). Lua budget: `law_update` has 8 upvalues and `run_active_frame` 34
+(of 60), measured with `luac5.1 -l`; LV-3 adds at most two to each. `flight_control.lua` has 122
+top-level locals (of 200); LV-3 adds no module-level local beyond the two getters on `M`.
+
+### Tests (real-Lua toy plant)
+
+- **`λ` helper:** 0 at ≤ 25, 1 at ≥ 80, linear between; NaN, ±inf and nil → 1.0.
+- **Runaway reproduced, then fixed:** the stage-1 scenario with `k_yaw_damp = 0` → sideslip > 30°
+  (the plant gate); shipped profile → sideslip stays under 10°, `ψ̇` never below −5 °/s, ball
+  centred.
+- **Damper sign:** nose yawing left of the bank-implied rate drives the pedal positive (right).
+- **Above 80 km/h, unchanged:** with `k_yaw_damp = 0`, every LV-1/LV-2 scenario is bit-identical to
+  the tip; with the shipped damper, a steady coordinated 30° turn shows `|yaw_damp_pedal|` < 0.02
+  and the ball centred; a 180 km/h break stays within LV-2's measured overshoot and
+  `|yaw_damp_pedal| ≤ yaw_damp_max`.
+- **Stop 150 → 0:** altitude in band throughout (power curve on); speed monotonic, no reversal
+  past −2 km/h; above 80 km/h the pitch rate matches LV-2; below it the goal-driven pitch-target
+  rate stays ≤ ~3 °/s; no output step as `λ` crosses 80 and 25 (largest per-step change bounded).
+- **Accelerate 0 → 150:** smooth through the blend, the same bound.
+- **Hover heading change 45° and 90°, both ways:** 45° within 2° in ≤ 10 s, overshoot ≤ 3°, bank
+  within 3°, pedal inside `ref ± 0.3`; with a plant needing more than 0.3, the turn is slower and
+  the pedal still never leaves the band.
+- **Band does not cut the lead:** a collective step in hover with no heading change moves the pedal
+  by the full torque feed-forward, past 0.3 if needed.
+- **Speed 0 in a 5 m/s crosswind:** ground speed settles under 1 m/s; heading held by pedal; bank
+  carries the drift hold; "speed 0" reaches `in_band_speed`.
+- **Ground effect and transitional lift:** with the plant's ground-effect and power-curve terms on,
+  altitude stays in band through the stop and in a low hover, with no model in the law.
+- **Take at 20 km/h:** bit-exact (with the ball off-centre and a non-zero unexplained yaw at take,
+  per the implementer memory on bit-exact tests); a 10° bank at take holds heading, not the bank;
+  `speed_goal_mps` is `V_m`.
+- **Held bank slowing through 25 km/h:** ends once, heading held on the heading reached, no snap;
+  `test_flight_control_lua.py` checks the write-back and `desired.bank_hold_deg == nil`.
+- **Low-speed slew:** at `λ = 1` `a_goal_s` equals `a_ref` exactly; below 80 its per-step change never
+  exceeds `J·dt`.
+- **Harness hygiene:** new fields and getters in the extraction tuples and the parity tests.
+
+### LV-3 card rows (SAU H, K, T off before every take; branch named in the card)
+
+1. **Ordinary flight, damper check** at 150 km/h: heading hold and a 30° turn each way. Ball
+   centred as before, no new oscillation in yaw or pedal.
+2. **The runaway row:** from 150 km/h, "speed 60", hold 30 s. Nose stays on the flight path (trace
+   `aoss` under ~10°), no left yaw, pedal moves right as collective comes in.
+3. **Stop:** from 150 km/h at ≥ 100 m AGL, "speed 0". No jerk; pitch changes gentle below 80;
+   altitude held; settles over the ground; slow drift accepted.
+4. **Hover heading:** "turn heading" +45°, −45°, +90° at speed 0. Calm, ≤ 10 s per 45°, wings stay
+   level, nose does not overshoot; note whether the pedal band ever seems to limit it.
+5. **Hover in wind** if the mission has any: speed 0 into, across and with the wind.
+6. **Low hover** at ~15 m AGL (above the 10 m take threshold, inside ground effect): altitude held.
+7. **Away:** "speed 150" from the hover. Smooth through 25–80 km/h.
+8. **Voice take at ~20 km/h** (accepted; holds ground speed and heading; a banked take holds
+   heading).
+9. **Break at 180 km/h** with the damper (compare against the LV-2 card, U16).
+
+### Risks & unknowns (LV-3)
+
+- **The DCS Mi-24P's hover pedal need is unknown.** If a stable hover needs more right pedal than
+  `t_y`'s +0.5 clamp, hover cannot hold heading — the trace shows `t_y` pinned at +0.5 with a left
+  yaw. Row 3 finds it first; U13 is the decision behind it.
+- **IAS may include the sideways component** (finding 1). If row 2's trace shows IAS ≈ total ground
+  speed while sliding, the speed loop decelerates the wrong component during a slide; a
+  `cos(sideslip)` correction would then need `aoss` confirmed in wind. Not built; the damper should
+  keep sideslip small enough (cos 10° = 0.985) that it does not matter.
+- **The damper's forward-flight reference is approximate** in climbing or descending turns
+  (`g` not `g + a_u`); the bias is a few percent and the ball integrator absorbs it. If row 1 shows
+  a standing ball offset, switch to `g + a_u` (one line).
+- **Wind at low speed** (U12): `λ` on ground speed means a strong tailwind puts low airspeed under
+  the forward law; the damper covers the yaw side. A strong headwind means pedal-turning at
+  60–80 km/h airspeed, uncoordinated but gentle.
+- **The toy plant's weathervane and ball model is a guess.** It is good enough to reproduce the
+  flown failure (the stage-1 gate) and no more; every number is a first cut, as throughout.
+- **LV-2 unflown** (U16): flying LV-2 on the LV-3 build mixes the two changes.
+
+### Second-order effect
+
+The `λ = 0` regime with a pedal yaw loop and a ground-velocity hold is the slot BL-16's "Later —
+mode 1 hover" plugs into: translate is a non-zero `V_g,f`/`V_g,r` goal, "hold" a position term on
+the same `a_f`/`a_r`. The all-speed yaw damper also meets the SAU stage, whose heading channel damps
+yaw too: the SAU plan must decide which of the two owns yaw damping when H is on.
+
+### Decisions Requiring User Input (LV-3)
+
+- **U12: What `λ` is computed from.** — recommend: horizontal **ground speed** (vector length), as
+  the plan and your hover definition have it, one blend for every channel; why: the runaway was
+  flown in no wind (sideslip matched the ground track to 0.5°), so the source did not decide it,
+  and ground speed is what makes "speed 0" stop over the ground. The alternative is two blends —
+  airspeed for the pedal/bank split, ground speed for the speed and drift references — better in
+  strong wind, one more thing to tune; keep it for if a windy card shows trouble.
+- **U13: Where the absolute pedal limits apply.** Today +0.5 right bounds only the integrator; the
+  ball and turn overlays add on top (the runaway's command reached +1.0 with the integrator at
+  +0.5). Your confirmed reading assumed the limit bounds the total. — recommend: leave the
+  absolute limits where they are for LV-3 and apply the new ±0.3 hover band to the total; why:
+  capping the total at +0.5 changes forward flight and break behaviour that LV-1/LV-2 were flown
+  or built with, and would have capped the runaway's recovery at half. Find out on row 3 whether
+  hover needs more than +0.5, then decide what the +0.5 should mean.
+- **U14: The "slowing down is less collective" nudge below 80 km/h.** Your 2026-11-20 rule
+  (*"Slowing down is always pitch back and also less collective"*) is built as a feed-forward that
+  lowers collective while decelerating. Below roughly the minimum-power speed, slowing further
+  needs **more** power (your own 2026-11-27 words: *"In transitional lift and slower the need for
+  collective… increases"*), so the nudge then works against the altitude hold. — recommend: fade
+  the nudge with `λ` (full at ≥ 80 km/h, gone at ≤ 25); why: altitude must hold through the stop,
+  and the integrator would otherwise spend the stop undoing the nudge.
+- **U15: A held bank as the aircraft slows, and a banked take at hover.** — recommend: the held
+  bank continues through 80–25 km/h, flattening with `λ` (speed commands still do not end it, Q3),
+  and ends at 25 km/h with heading held on the heading reached; a take at 25 km/h or slower holds
+  heading even with ≥ 5° of bank; why: in a hover a bank is a sideways slide, not a turn (*"Bank in
+  hover is not the way to change heading"*), and without an end the pedal would chase the bank's
+  implied rate (160 °/s at 2 m/s).
+- **U16: Fly the LV-2 card before LV-3 is built, or on the LV-3 build?** — recommend: before; why:
+  the yaw damper also acts in breaks, so a break flown on LV-3 tests two changes at once. If you
+  would rather fly once, the LV-3 build ships `k_yaw_damp = 0` as a one-line profile edit for the
+  LV-2 rows.
+- **U17: The low-slow-RPM "accelerate" class (plan G).** Never built; its card row depended on the
+  RPM dummy that is now live RPM, and your LV-3 answers do not mention it. — recommend: take it out
+  of LV-3 and record it as an open BL-16 item; why: today's rotor-RPM warning already eases
+  collective, a deliberate forward acceleration out of a low hover needs its own look at obstacles
+  and height, and nothing on the LV-3 card can exercise it safely.
