@@ -4,6 +4,24 @@
   the launch callout, impact, and resetting the guidance transmitter.** #status/in-progress
   #needs-flight
 
+  ## 2026-11-27 (later) — batch B parked by the user, draft committed
+
+  **Waiting, by the user's direction** (*"Leave BL-B67 as is. Commit anything not committed on the
+  branch and leave it waiting."*). Every attempt to build or review batch B was stopped by
+  Anthropic's safety checks (`general_harms`), four times across two sessions; request IDs in
+  `todo/todo/X-T31.md`. The draft Stages 5–7 is committed as WIP `b469e99a` on
+  `feature/bl-b67-batch-b` (pushed; worktree `../DCS-petrobrain-b67b`).
+
+  State of the draft, checked 2026-11-27: aircraft-layer 1090 tests pass, body-layer 3834 pass
+  (4 xfail), mypy clean both; lint/format findings are only in old `research/` files and match
+  `main`. Stage 5 written with unit tests, incl. the Security carry-forward bound
+  (`MAX_OWN_WEAPON_TYPE_NAME_LEN` = 48). Stage 6 written (sequences, step→station map,
+  effectors) — **no tests of its own**. Stage 7 wired (`decide_atgm_run` now called per poll in
+  `body.py`) — **no integration tests**. Not checked against the plan, not reviewed.
+
+  **User's plan for resuming, in a new session:** Stage 6 unit tests if they get through; Stage 7
+  unit tests only, **no end-to-end test**; anything stopped is marked untested and left.
+
   ## 2026-11-27 — Stage 0 sortie flown; knob re-probe owed
 
   Answers in `docs/acceptance/2026-11-27-bl-b67-stage0-probe-feedback.md`. **Q1** payload feed works
