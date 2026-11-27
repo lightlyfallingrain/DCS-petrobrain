@@ -94,3 +94,77 @@ structure and confirming (via `grep`) that no `wake`-specific assertion exists a
 `test_ai_pilot_wheel_lua.py` — the test-gap finding is itself the kind of claim this role is
 expected to verify by mutation/execution rather than reading, and a fuller pass would have written
 the missing test and run it red-then-green rather than only locating its absence.
+
+---
+
+### Re-review (2026-11-27)
+
+Base: `fix/mode2-recovery-wake` tip `ae53dc2c` — reviewed on a local branch `b139-rereview` cut
+from that exact sha (the worktree named in the dispatch, `DCS-petrobrain-recoverywake`, was not
+touched). Diff against the reviewed commit `d998bfe6` is exactly one file,
+`aircraft-layer/tests/test_ai_pilot_wheel_lua.py`, adding `TestAiPilotGoalWakeKick` (5 tests, +208
+lines, no production code touched).
+
+**Coverage against the four scenario groups the required fix asked for** — all four present, plus
+one the fix didn't explicitly ask for but the debug report's edge-case list implies:
+
+- (a) altitude, matching value, `wake=true` → forces DOWN, then converges —
+  `test_altitude_wake_forces_a_down_hold_then_converges_to_the_exact_target`. Covered, including
+  the hand-off once `ordinary_dir` becomes non-nil.
+- (b) DOWN produces no change within `AI_PILOT_WAKE_KICK_TIMEOUT_S` → falls back to UP → both fail
+  → gives up —  `test_altitude_wake_falls_back_to_up_then_gives_up_without_holding_forever`.
+  Covered, including the mid-timeout "still held" assertion.
+- (c) the same for the speed tap variant, exactly-once-per-direction —
+  `test_speed_wake_taps_down_once_then_up_once_not_once_per_tick`. Covered, using `press_log` to
+  distinguish "tapped once" from "tapped every tick."
+- (d) `wake=false` at a matching value still settles with zero presses —
+  `test_altitude_wake_false_at_target_presses_nothing`. Covered.
+- Bonus: `test_altitude_wake_already_off_target_skips_the_kick_entirely` — the *ordinary* case
+  (never a forced DOWN when genuinely off-target), deliberately using a below-target value so a
+  wrongly-forced DOWN is distinguishable from the correct UP. Good choice of fixture value; this
+  is exactly the kind of case a lazier test (matching value only) would have missed.
+
+**Verified by running the tests, not just reading them.** `pytest -k WakeKick` → 5 passed. Full
+`aircraft-layer` suite → 1078 passed (1073 before + 5 new), `ruff format --check`, `ruff check`,
+`mypy src` (strict) all clean, `luac5.1 -p` clean on every `.lua` file in `dcs-export/`.
+
+**Verified by mutation, per the standing "verify by mutation" habit** — three mutations against
+`aircraft-layer/dcs-export/Petrobrain/ai_pilot_wheel.lua`, each reverted immediately after
+(confirmed byte-identical via `diff` against a pre-mutation backup; `git status --porcelain` clean
+throughout):
+
+1. Disabled the "already off target → skip the kick" early return in
+   `ai_pilot_wake_kick_direction_hold` (force DOWN unconditionally). Caught by 2 tests:
+   `test_altitude_wake_forces_a_down_hold_then_converges_to_the_exact_target` and
+   `test_altitude_wake_already_off_target_skips_the_kick_entirely`.
+2. Removed the give-up branch in the same function (holds UP forever instead of releasing). Caught
+   by `test_altitude_wake_falls_back_to_up_then_gives_up_without_holding_forever` (asserts
+   `hold_cmd_final == "nil"`).
+3. Removed the `"wait"` state in `ai_pilot_wake_kick_direction_tap` (re-taps every tick instead of
+   waiting one `AI_PILOT_WAKE_KICK_TIMEOUT_S` window). Caught by
+   `test_speed_wake_taps_down_once_then_up_once_not_once_per_tick` (the `press_log` string gains a
+   duplicate tap).
+
+All three mutations were caught by exactly the test the scenario mapping above predicted, and no
+mutation produced a false pass. The required fix is satisfied: the wake-kick mechanism itself —
+DOWN-then-UP fallback, give-up, the off-target skip, and the discrete-tap-not-every-tick
+distinction — is now exercised by real Lua execution, not constant-parity checks.
+
+**No new findings.** Nothing else in the diff to flag — it is additive test-only, no production
+Lua or Python touched, no new tuning constant, no new comment to prune, no new float parsed from
+outside the process.
+
+#### Verdict (re-review)
+
+**APPROVED.** The required fix from the first pass is closed. BL-B140 was never in question. Ready
+for DoD; branch to name in any test card remains `fix/mode2-recovery-wake`, still `#needs-flight`
+on both `BL-B139.md` and `BL-B140.md` per the original review (no Windows/DCS reachable from this
+environment).
+
+#### Review Confidence (re-review)
+
+Full read of the diff. Ran the real test suite (not just inspected it), ran the full
+`aircraft-layer` format/lint/type/test commands, and ran three targeted mutations against the
+actual Lua implementation to confirm each test fails for the reason its docstring claims rather
+than trivially. Did not re-review BL-B140 or the rest of the already-approved production diff —
+out of scope for this re-review, which was dispatched specifically against the one test-file diff.
