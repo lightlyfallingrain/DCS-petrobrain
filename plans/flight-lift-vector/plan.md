@@ -1323,8 +1323,7 @@ table in full (widened 4a rule) before naming any of these; none overlaps an exi
 other constant in these tables is — the implementer checks each with `math.isfinite`-style
 guarding (or the project's established pattern for these tables) the same way the other limits in
 `flight_control.lua`'s bounds tables already are, per the architect/implementer/reviewer standing
-rule on boundary floats (merged to `main` as `f832991b`, "Standing rule: check boundary floats for
-being finite").
+rule on boundary floats (merged to `main` as `c0d8af86`).
 
 ### Co-moving Fields
 
@@ -1396,3 +1395,7 @@ pass/fail, more than any single number.
   named the break specifically, and widening to ordinary flight is a separate, if plausible
   (matches the project's own 50–800 m AGL operating-envelope note), change this amendment was not
   asked to make. Flagging rather than deciding silently, per "do not expand scope silently."
+
+**Answered (user, 2026-11-27, verbatim):** *"U11, only breaks"* — `break_floor_agl_m` (50 m) is
+break-only; ordinary flight and the unpark seed keep `floor_agl_m` (40 m). Diagrams (throwaway
+artifact): *"diagrams approved"*.
