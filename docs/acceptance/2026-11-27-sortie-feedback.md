@@ -23,6 +23,10 @@ Logs (gitignored): `docs/acceptance/logs-2026-11-27/refly6_flight_trace.log`,
   and slowly near 60, left yaw ran away. User's own routing: *"This is more slow speed behaviour, so
   can go to that stage."*
 
+## Seventh re-fly verdict (2026-11-27)
+
+User, verbatim: *"speed change: pass. / proceed to next stage"* — LV-1 card closed; next is LV-2.
+
 ## Follow-up: blade-stall guard threshold (2026-11-27)
 
 Debug round 2 found the residual decel dip comes from the retreating-blade-stall guard, which forbids
