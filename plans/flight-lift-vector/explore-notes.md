@@ -349,3 +349,14 @@ does not use the SAU.
 wait between them, just turn all on right away. (referring to the general rule of 1 s between
 effector writes, this case is exception.)"* — applies to both the take-side (off) and hand-back
 (on) SAU rows; the ~1 s default spacing stays for every other sequence.
+
+## LV-3 diagram review corrections (user, verbatim, 2026-11-28)
+
+> "speed = ground speed along the nose pedal owns heading, never bank" -> not "never bank".
+> Countering cross wind requires bank. Sideways hover translate requires bank. Do not bank to turn
+> to heading, use pedals, that is true.
+> "pedal within +-0.3 of hover pedal" -> applies to commanded heading change. To maintain current
+> heading in hover, any pedal settingn is allowed.
+
+Carried into `plan.md` LV-3 sections C and E ("Corrected 2026-11-28").
+

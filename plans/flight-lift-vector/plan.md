@@ -1730,7 +1730,15 @@ stateDiagram-v2
   motion near hover; a position is not held (drift at speed 0 accepted, user answer 4).
   `k_drift_hold = 0.3` per s (1 m/s sideways asks 0.3 m/s², about 1.7° of bank).
 
-### C. Heading near hover: the pedal yaws, the bank does not
+### C. Heading near hover: the pedal yaws, the bank does not turn
+
+**Corrected 2026-11-28 (user, verbatim):** *"not \"never bank\". Countering cross wind requires
+bank. Sideways hover translate requires bank. Do not bank to turn to heading, use pedals, that is
+true."* The rule is about **turning to a heading** only: near hover the pedal turns the nose and
+the bank takes no share of the heading job. Bank stays fully available for everything else — the
+drift hold (B, lateral cyclic against sideways ground speed, which is how a crosswind is countered)
+and, later, sideways hover translate (BL-16 "Later"). Nothing below limits bank for those.
+
 
 - The heading shaper's bandwidth, rate cap and accel cap blend with `λ`:
   `ω = λ·omega_heading + (1 − λ)·hover_omega_heading` (0.3 → 0.7);
@@ -1786,6 +1794,16 @@ hover it is the commanded rate.
   pattern (`t_y = command.pedals − t_y_p_at_take − yaw_damp_at_take`).
 
 ### E. The hover pedal band (±0.3, user)
+
+**Corrected 2026-11-28 (user, verbatim):** *"\"pedal within +-0.3 of hover pedal\" -> applies to
+commanded heading change. To maintain current heading in hover, any pedal settingn is allowed."*
+So the band **binds only while a commanded heading change runs** (`|r_d| ≥ turn_settle_deg_s`).
+While holding heading the clamp is not applied at all (the absolute pedal limits, U13, still are).
+The bullets below are read with that gate: `pedal_hover_ref` still follows the pedal while holding
+and freezes at the start of a heading change, and the clamp in the second bullet runs only during
+the change. Test: holding heading at hover with a large yaw disturbance, the pedal goes beyond
+ref ± 0.3 unclamped; during a commanded 45° change it stays inside.
+
 
 - New law state `pedal_hover_ref`. Each law step: while the heading is not being changed
   (`|r_d| < turn_settle_deg_s`), it follows the pedal command (so it is "the value where hover is
