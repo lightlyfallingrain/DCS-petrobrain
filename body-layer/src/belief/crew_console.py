@@ -5963,6 +5963,7 @@ class CrewConsole:
         resolving_optic: Optic | None = None,
         vertical: bool = True,
         guidance_floor: Optic = UNAIDED_OPTIC,
+        sun_elevation_deg: float | None = None,
     ) -> AttackRunState | None:
         """Pulls one tick of attack-run guidance and speaks it, if
         `belief.attack_run.decide` says to (`plans/attack-run/plan.md`
@@ -6002,6 +6003,13 @@ class CrewConsole:
         docstring for why `SIGHT_WIDE_OPTIC` vs. `UNAIDED_OPTIC` (the
         default) is decided at the same granularity as `vertical` above,
         not narrowed further.
+
+        `sun_elevation_deg` (`BL-B124` Stage 4, `plans/bl-b124-light-level/
+        plan.md`) is passed straight through to `decide`'s own keyword of
+        the same name -- `None` (the default) for every pre-existing
+        caller. `body.py`'s poll loop passes `runner.light_level_sun_
+        elevation_deg`, the same value this poll's own `decide_optic`/
+        naked-eye assignment already used.
 
         **Resolves the target's `belief.groups.Group` and passes it to
         `decide` as of Stage 7** -- tier 2's own projection input (Decision
@@ -6059,6 +6067,7 @@ class CrewConsole:
             resolving_optic=resolving_optic,
             vertical=vertical,
             guidance_floor=guidance_floor,
+            sun_elevation_deg=sun_elevation_deg,
         )
         if speech is None:
             return new_state

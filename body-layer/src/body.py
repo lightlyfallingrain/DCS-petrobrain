@@ -120,6 +120,7 @@ import argparse
 import hashlib
 import itertools
 import logging
+import math
 import shutil
 import sqlite3
 import sys
@@ -130,7 +131,7 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Final, Literal, TextIO, cast
+from typing import Any, Final, Literal, TextIO, cast
 
 import tuning
 from aircraft_client import AircraftLayerClient, AircraftLayerError
@@ -236,6 +237,7 @@ from belief.optic_policy import (
     search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
+from belief.ptt_hold import PttHoldGate
 from belief.sight_effector import (
     REQUIRED_POLLED_ARGS,
     GuidanceUnitState,
@@ -249,6 +251,7 @@ from belief.tasks import TaskStore
 from belief.tool_api import BRAIN_TOOLS_BY_NAME, ToolContext, ToolObservation
 from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
+from coordinates import dcs_to_wgs84
 from coordinates.projections import THEATRE_PROJECTIONS
 from detection_trace_writer import DetectionTraceWriter
 from expected_area_log import ExpectedAreaLogWriter
@@ -297,6 +300,9 @@ from perception.geometry import (
     sector_runs_for_legs,
 )
 from perception.hybrid_source import HybridPerceptionSource
+from perception.light_level import MISSION_CLOCK_MAX_AGE_S, SIGHT_FULL_DARK_SUN_ELEV_DEG
+from perception.light_level import light_factor as _optic_light_factor
+from perception.light_level import sun_elevation_deg as _compute_sun_elevation_deg
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import (
@@ -499,6 +505,18 @@ class ConsolePerceptionRunner:
     #: Stage P2) -- the `take_controls` `TOO_SLOW` consumer this field
     #: was originally added for is gone (BL-16 lift-vector law, LV-1).
     last_ias_kmh: float | None = None
+    #: The current telemetry sample's own `received_wall_clock_s` (review
+    #: fix 1, `plans/bl-b133-ptt-speech-hold/review.md`) -- set in
+    #: `run_once` from the same `GET /telemetry/latest` poll that already
+    #: fills `last_ownship_state`/`last_ias_kmh` above, so `PttHoldGate`'s
+    #: staleness check reuses this poll rather than issuing a second
+    #: request. Read from `SpeechWorker`'s own background thread (via the
+    #: callable `main()` wires `PttHoldGate` with) -- a simple `float`
+    #: read/write needs no lock here, unlike `speech_log_sink`'s own
+    #: multi-field consistent-snapshot requirement (see that closure's
+    #: docstring). `None` before the first poll, same posture as `last_
+    #: ownship_state`.
+    last_telemetry_received_wall_clock_s: float | None = None
     #: Built lazily on the first poll that has both real telemetry and a
     #: `world_model_conn`/`theatre` (i.e. always, once `_run_crew_text_poll_
     #: loop` has set those two), then updated in place every poll after --
@@ -865,6 +883,51 @@ class ConsolePerceptionRunner:
     #: pattern.
     altimeter_qnh_sync: AltimeterQnhSyncState | None = None
 
+    #: `[[BL-B124]]` Stage 4 (`plans/bl-b124-light-level/plan.md`) -- the
+    #: most recent `(abs_time_s, year, month, day)` this poll's `GET
+    #: /firing/latest` `mission_clock` sub-wire actually reported, or
+    #: `None` before any sample has ever been read this mission.
+    #: `run_once` extrapolates `abs_time_s` forward between samples via
+    #: `light_level_last_clock_model_time_s` below (the ownship model
+    #: time the sample was captured at) rather than re-reading one every
+    #: poll -- see `run_once`'s own "BL-B124 Stage 4" comment block for
+    #: the full staleness/error handling this feeds.
+    light_level_last_clock: tuple[float, int, int, int] | None = None
+    #: The ownship `t_sim` (model time) at which `light_level_last_clock`
+    #: above was captured -- the anchor `run_once` advances `abs_time_s`
+    #: from on every later poll, until a fresher sample replaces both
+    #: together.
+    light_level_last_clock_model_time_s: float | None = None
+    #: `time.monotonic()` the mission clock first became unreadable this
+    #: mission (no sample has ever arrived, the most recent poll's read
+    #: failed/was absent, **or** the most recent poll's read parsed fine
+    #: but was byte-for-byte identical to `light_level_last_clock` -- a
+    #: dead feed that keeps serving its last-ingested sample is not
+    #: evidence of a new one; review fix, `plans/bl-b124-light-level/
+    #: review-stages-4-5.md` Required Fix 1), or `None` while the most
+    #: recent poll read a genuinely new sample. Cleared the instant a
+    #: genuinely new sample arrives; **not** cleared merely because a
+    #: cached sample still exists to extrapolate from -- `run_once` reads
+    #: the elapsed time against this to decide whether extrapolation is
+    #: still trustworthy (`MISSION_CLOCK_MAX_AGE_S`) or whether to fail
+    #: loud instead (user Q6: "mission should always have both readable.
+    #: Error if not" -- `docs/acceptance/`-equivalent answer, `plans/
+    #: bl-b124-light-level/explore-notes.md`).
+    light_level_unavailable_since_wall: float | None = None
+    #: One-shot latch so the "mission clock unreadable" `logger.error`
+    #: fires once per mission, not every poll -- same pattern as
+    #: `command_reset_warned`/`watched_args_unavailable_warned` above.
+    light_level_error_logged: bool = False
+    #: This poll's own resolved sun elevation (`None` while no theatre is
+    #: resolved -- the loud-refusal/not-yet-started state, where no
+    #: source is polled anyway) -- cached here so `_run_crew_text_poll_
+    #: loop`'s later `drain_attack_run` call (outside `run_once`) can
+    #: reuse the exact value this poll's own `decide_optic`/naked-eye
+    #: assignment already used, rather than recomputing it (and risking
+    #: the two disagreeing because the ownship sample or clock moved on
+    #: between the two calls).
+    light_level_sun_elevation_deg: float | None = None
+
     def reset_for_new_mission(self) -> None:
         """Give a clean slate on a genuine DCS mission (re)start (`BL-15`
         Stage 1). Re-invokes `__init__` on this same object, passing
@@ -884,7 +947,10 @@ class ConsolePerceptionRunner:
         `_last_look_direction`, `last_mission_start_sequence`,
         `pending_mission_start_fire`, `pending_mission_start_in_air_check`,
         `mission_start_fresh_sample_baseline_t_sim`,
-        `mission_start_resolving_since_wall`, `altimeter_qnh_sync`) resets to its
+        `mission_start_resolving_since_wall`, `altimeter_qnh_sync`,
+        `light_level_last_clock`, `light_level_last_clock_model_time_s`,
+        `light_level_unavailable_since_wall`, `light_level_error_logged`,
+        `light_level_sun_elevation_deg`) resets to its
         declared default (D11: a mission (re)start drops every
         running/pending effector-sequence run with nothing carried over;
         the three mission-start-trigger fields reset to `False`/`False`/
@@ -970,6 +1036,11 @@ class ConsolePerceptionRunner:
             if isinstance(ias_mps, (int, float)) and not isinstance(ias_mps, bool)
             else None
         )
+        received_wall_clock_s = telemetry.get("received_wall_clock_s")
+        if isinstance(received_wall_clock_s, (int, float)) and not isinstance(
+            received_wall_clock_s, bool
+        ):
+            self.last_telemetry_received_wall_clock_s = received_wall_clock_s
         # Ownship-anchored attention areas track the nose, and they must be
         # re-projected *before* this tick's `ingest`/`tick` so the contacts
         # ingested below are judged against this tick's heading rather than
@@ -1117,6 +1188,33 @@ class ConsolePerceptionRunner:
                 glass_recent_steps_s=(),
                 glass_step_started_sim=None,
             )
+        # `[[BL-B124]]` Stage 4 -- this poll's own ambient sun elevation,
+        # from the firing-events Hook's `mission_clock` sub-wire (already
+        # fetched for emitter resolution by each `NakedEyePerceptionSource`
+        # itself, but that fetch is source-internal and this runner has no
+        # access to it, so this is a second, independent `GET
+        # /firing/latest` -- negligible at 1 Hz, the same cost class as
+        # every other per-poll aircraft-layer GET in this loop). Cached on
+        # `self` so `_run_crew_text_poll_loop`'s later `drain_attack_run`
+        # call can reuse the exact value this poll used, and so a mission
+        # restart resets it like every other per-mission field (`reset_
+        # for_new_mission`'s own docstring).
+        sun_elevation_deg: float | None = None
+        if self.theatre is not None:
+            # No theatre resolved means no source is polled anyway
+            # (loud-refusal/not-yet-started state) -- skip the extra `GET
+            # /firing/latest` entirely rather than make every caller's
+            # aircraft-layer double implement a method whose answer would
+            # be discarded, same reasoning `_resolve_sun_elevation_deg`'s
+            # own `theatre is None` early return gives.
+            try:
+                firing_for_light = self.aircraft_client.get_firing_latest()
+            except AircraftLayerError:
+                firing_for_light = None
+            sun_elevation_deg = _resolve_sun_elevation_deg(
+                self, ownship, firing_for_light
+            )
+        self.light_level_sun_elevation_deg = sun_elevation_deg
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
@@ -1217,6 +1315,10 @@ class ConsolePerceptionRunner:
             # lag `guidance_request`/`sight_lock_contact_id` above already
             # accept.
             sight_lock_seen=_sight_lock_seen(self.sight_head, self.atgm_run_state),
+            # `[[BL-B124]]` Stage 4 -- this poll's own ambient sun elevation
+            # (computed just above), threaded through to every `tier_
+            # ranges()` call `decide_optic`'s own call chain makes.
+            sun_elevation_deg=sun_elevation_deg,
         )
         # `[[BL-B80]]` v2: Petrovich must not perceive through the sight
         # while the simulated head is not `free` yet -- capped to
@@ -1319,6 +1421,9 @@ class ConsolePerceptionRunner:
                 if is_sight_tier and sight_head_body_direction is not None
                 else None
             ),
+            # `[[BL-B124]]` Stage 4 -- resolves `source.light_factor`
+            # against *this* poll's already-decided `optic_decision.optic`.
+            sun_elevation_deg=sun_elevation_deg,
         )
         if updated_optic_state is not None:
             self.optic_state = updated_optic_state
@@ -2399,6 +2504,176 @@ def _sight_point_sweep(
     ]
 
 
+def _parse_mission_clock_dict(raw: object) -> tuple[float, int, int, int] | None:
+    """Parse `GET /firing/latest`'s `"mission_clock"` sub-dict (`{"abs_
+    time_s", "year", "month", "day"}`, `aircraft_client.get_firing_
+    latest`'s own docstring) into `(abs_time_s, year, month, day)`, or
+    `None` for anything else -- absent, not a dict, or a field missing/
+    wrong-typed, **or `abs_time_s` non-finite (NaN/Infinity)** --
+    defence in depth alongside `schema.firing.MissionClockSample.
+    from_wire`'s own wire-boundary guard (`[[BL-B137]]`): this dict comes
+    from `GET /firing/latest`'s JSON body, a second boundary a stale or
+    unpatched aircraft-layer collector could still cross. `bool` is
+    explicitly excluded from the numeric checks (`isinstance(x, bool)` is
+    also `isinstance(x, int)` in Python) the same way every other
+    wire-parsing function in this codebase does."""
+    if not isinstance(raw, dict):
+        return None
+    abs_time_s = raw.get("abs_time_s")
+    year = raw.get("year")
+    month = raw.get("month")
+    day = raw.get("day")
+    if (
+        isinstance(abs_time_s, (int, float))
+        and not isinstance(abs_time_s, bool)
+        and math.isfinite(abs_time_s)
+        and isinstance(year, int)
+        and not isinstance(year, bool)
+        and isinstance(month, int)
+        and not isinstance(month, bool)
+        and isinstance(day, int)
+        and not isinstance(day, bool)
+    ):
+        return float(abs_time_s), year, month, day
+    return None
+
+
+def _resolve_sun_elevation_deg(
+    runner: ConsolePerceptionRunner,
+    ownship: OwnshipState,
+    firing: dict[str, Any] | None,
+) -> float | None:
+    """`[[BL-B124]]` Stage 4 (`plans/bl-b124-light-level/plan.md`) -- this
+    poll's own ambient sun elevation, or `None` only while no theatre is
+    resolved (the loud-refusal/not-yet-started state, `runner.sources`
+    already empty there, so nothing downstream reads this value
+    meaningfully).
+
+    **Once a theatre is resolved, this always returns a real `float`,
+    never `None`** -- `None` would read as the legacy "no dimming" no-op
+    through `belief.optic_policy._light_factor_for`/`perception.light_
+    level.light_factor`, i.e. full daylight, which is exactly the
+    fallback user Q6 forbids (`explore-notes.md`: *"mission should always
+    have both readable. Error if not."*). A sample counts as fresh only
+    when it **differs** from `runner.light_level_last_clock`, not merely
+    when `GET /firing/latest` parses -- `EmitterTracker.snapshot()`
+    (aircraft-layer) keeps serving its last-ingested `MissionClockSample`
+    verbatim once the Hook/collector feed dies, so a well-formed dict is
+    not on its own evidence of a new one. Review fix, `plans/
+    bl-b124-light-level/review-stages-4-5.md` Required Fix 1: before this,
+    an identical repeated dict reset the unavailable-since timer and the
+    error latch every poll, so a feed that died at noon left Petrovich
+    reasoning as if it were permanently noon -- the grace/error path below
+    was never reached. A genuinely new sample updates `runner.light_
+    level_last_clock`/`_model_time_s` and clears the unavailable-since
+    timer; a repeated or absent sample starts that timer (if not already
+    running) and the cached sample -- if any -- is extrapolated forward
+    via the ownship model-time delta from the *last genuinely new*
+    sample's capture time (sun elevation moves ~0.004 deg/s, so this stays
+    accurate well past one poll, and keeps advancing correctly through a
+    run of repeated/dead polls rather than freezing). Once the clock has
+    been unreadable for longer than `MISSION_CLOCK_MAX_AGE_S` (covers both
+    "never read one yet, right after mission load" and "the feed died or
+    froze mid-mission" -- the same timer, the same bound, so "the first
+    second after load" is simply this bound's ordinary grace window, not a
+    separate case), or the ownship position cannot be projected to lat/lon
+    for this theatre (`dcs_to_wgs84` raising `ValueError`), or the sun-
+    elevation computation itself raises `ValueError` on a non-finite
+    `abs_time_s`/intermediate (`[[BL-B137]]` -- should not happen once
+    `_parse_mission_clock_dict` has already rejected a non-finite stored
+    sample, but the `abs_time_s` passed below is extrapolated fresh every
+    poll and never passes back through that guard) -- none of these
+    three should happen for an already-validated theatre/sample, but all
+    are treated the same way rather than silently defaulting: this logs
+    one `ERROR` for the
+    mission (`runner.light_level_error_logged`) and returns `SIGHT_FULL_
+    DARK_SUN_ELEV_DEG` -- forcing every optic's light factor to `(0.0,
+    0.0, 0.0)` via the existing flat-floor clamp in `light_factor()`, the
+    safe direction for the no-omniscience goal this whole feature exists
+    for (better Petrovich sees too little than something no real crewman
+    could). **The grace window stays wall-clock** (`time.monotonic()`),
+    not sim-time: the Hook polls `GET /firing/latest` on its own 1 Hz
+    wall-clock cadence regardless of DCS pause state, so wall time is the
+    correct unit to bound *its* responsiveness against -- a paused mission
+    legitimately reporting the same sample is a known, accepted gap (same
+    review, Optional Refinement 2), to be checked live rather than guarded
+    in the unit suite."""
+    if runner.theatre is None:
+        return None
+    now_wall = time.monotonic()
+    fresh = _parse_mission_clock_dict(
+        firing.get("mission_clock") if firing is not None else None
+    )
+    if fresh is not None and fresh != runner.light_level_last_clock:
+        runner.light_level_last_clock = fresh
+        runner.light_level_last_clock_model_time_s = ownship.t_sim
+        runner.light_level_unavailable_since_wall = None
+        runner.light_level_error_logged = False
+    elif runner.light_level_unavailable_since_wall is None:
+        runner.light_level_unavailable_since_wall = now_wall
+
+    stale_s = (
+        now_wall - runner.light_level_unavailable_since_wall
+        if runner.light_level_unavailable_since_wall is not None
+        else 0.0
+    )
+    if runner.light_level_last_clock is not None and stale_s <= MISSION_CLOCK_MAX_AGE_S:
+        abs_time_s0, year, month, day = runner.light_level_last_clock
+        model_time_at_capture = (
+            runner.light_level_last_clock_model_time_s
+            if runner.light_level_last_clock_model_time_s is not None
+            else ownship.t_sim
+        )
+        try:
+            lat_deg, lon_deg = dcs_to_wgs84(runner.theatre, ownship.x, ownship.z)
+        except ValueError:
+            lat_deg, lon_deg = None, None
+        if lat_deg is not None and lon_deg is not None:
+            try:
+                return _compute_sun_elevation_deg(
+                    year=year,
+                    month=month,
+                    day=day,
+                    abs_time_s=abs_time_s0 + (ownship.t_sim - model_time_at_capture),
+                    lat_deg=lat_deg,
+                    lon_deg=lon_deg,
+                )
+            except ValueError:
+                # Non-finite `abs_time_s`/intermediate (`[[BL-B137]]`) --
+                # `_parse_mission_clock_dict` already guards the stored
+                # sample itself, but the extrapolated `abs_time_s` above
+                # is computed fresh every poll and never passes back
+                # through that guard, so it is checked here too. Treated
+                # the same as the coordinate-projection failure below:
+                # beyond-grace, never a silent daylight fallback.
+                pass
+        # Coordinate projection failed for an already-validated theatre, or
+        # the sun-elevation computation itself produced a non-finite value
+        # -- should not happen, but treated as beyond-grace (always surfaced)
+        # rather than silently falling back to the quiet "still within
+        # grace" path below, which exists for the ordinary "no sample yet"
+        # case, not a genuine anomaly.
+        stale_s = MISSION_CLOCK_MAX_AGE_S + 1.0
+
+    if stale_s <= MISSION_CLOCK_MAX_AGE_S:
+        # Still within grace -- either the very first poll(s) of a mission
+        # (no sample has ever arrived) or one/a few dropped Hook polls with
+        # a cached sample still trusted above. Neither is "error if not
+        # readable" (user Q6) yet; forced dark, logged nothing.
+        return SIGHT_FULL_DARK_SUN_ELEV_DEG
+
+    if not runner.light_level_error_logged:
+        logger.error(
+            "BL-B124: mission date/clock unreadable for %.1fs -- forcing "
+            "Petrovich's ambient light factor to full dark (never a daylight "
+            "fallback) until the firing-events Hook's mission_clock reads "
+            "again",
+            stale_s,
+        )
+        runner.light_level_error_logged = True
+    return SIGHT_FULL_DARK_SUN_ELEV_DEG
+
+
 def _apply_active_gaze(
     sources: list[PerceptionSource],
     tasks: TaskStore,
@@ -2409,12 +2684,25 @@ def _apply_active_gaze(
     dt_s: float = 0.0,
     sight_head_body_az_deg: float | None = None,
     sight_head_body_el_deg: float | None = None,
+    sun_elevation_deg: float | None = None,
 ) -> OpticState | None:
     """Assigns the resolved scan plan and optic onto whichever `sources`
     entry is a `NakedEyePerceptionSource` -- a true no-op for every other
     source, and for a `sources` list (e.g. in tests) that holds no
     naked-eye source at all. The same write-thread/single-assignment
     pattern `last_t_sim` already uses safely (`run_once`'s only caller).
+
+    `sun_elevation_deg` (`BL-B124` Stage 4, default `None`, a true no-op)
+    is resolved to `(1.0, 1.0, 1.0)`, or to `optic`'s own measured factor
+    at this sun elevation, and assigned onto `source.light_factor` in the
+    same loop as `source.optic` below -- deliberately *after* `decision`
+    (this poll's already-resolved optic) is known, since `perception.
+    light_level.light_factor`'s curve is per-optic (binoculars and the
+    9K113's orange filter dim differently from the naked eye at the same
+    sun elevation): assigning it alongside the optic it was computed for,
+    rather than threading a precomputed value from further up the call
+    chain, is what keeps the two from ever disagreeing about which optic
+    a given factor belongs to.
 
     Both are applied here rather than in two places because they are one
     act -- *where he is looking and through what* -- and splitting the
@@ -2561,6 +2849,11 @@ def _apply_active_gaze(
     gaze_centre_elevation_deg: float | None = None
     if sight_cone is not None and updated_state is not None:
         gaze_centre_elevation_deg = updated_state.actual_aim_elevation_deg
+    light_factor = (
+        _optic_light_factor(optic, sun_elevation_deg)
+        if sun_elevation_deg is not None
+        else (1.0, 1.0, 1.0)
+    )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = resolved_plan
@@ -2568,6 +2861,7 @@ def _apply_active_gaze(
             source.sight_cone = sight_cone
             source.gaze_centre_elevation_deg = gaze_centre_elevation_deg
             source.suppressed_until_sim = suppressed_until_sim
+            source.light_factor = light_factor
     return updated_state
 
 
@@ -3171,6 +3465,7 @@ def _reset_mission_state(
     mission_memory: MissionMemory,
     fired_on_tracker: FiredOnTracker | None = None,
     lost_contact_tracker: LostContactTracker | None = None,
+    speech_worker: SpeechWorker | None = None,
 ) -> None:
     """`BL-15` Stage 1 (`plans/bl15-mission-start/plan.md`) -- give every
     piece of belief/mission-memory state a clean slate on a genuine DCS
@@ -3211,7 +3506,13 @@ def _reset_mission_state(
     stalls `fired_on` mission-memory writes after a restart.
     `LostContactTracker` (`[[BL-B112]]`) is brought under this mechanism
     from the day it is added, to avoid discovering the same gap a second
-    time."""
+    time. `speech_worker` (`[[BL-B133]]` review fix 1,
+    `plans/bl-b133-ptt-speech-hold/review.md`) is the same "optional
+    collaborator, `None` is a no-op" shape -- `CrewConsole.reset_for_new_
+    mission` preserves `speech_worker` as the same object across a
+    restart (it is not rebuilt), so this call site, not that one, is
+    where a stuck `held=True` cached PTT sample from the mission that
+    just ended gets cleared."""
     runner.store.reset_for_new_mission()  # shared with crew_console.store
     runner.tasks.reset_for_new_mission()  # shared with crew_console.tasks
     for source in runner.sources:
@@ -3224,6 +3525,8 @@ def _reset_mission_state(
         fired_on_tracker.reset_for_new_mission()
     if lost_contact_tracker is not None:
         lost_contact_tracker.reset_for_new_mission()
+    if speech_worker is not None:
+        speech_worker.reset_for_new_mission()
 
 
 def _enter_refusal_mode(
@@ -4113,6 +4416,7 @@ def _check_for_new_mission(
     lost_contact_tracker: LostContactTracker | None = None,
     rule_runtime: RuleRuntime | None = None,
     audio_client: AudioAdapterClient | None = None,
+    speech_worker: SpeechWorker | None = None,
 ) -> bool:
     """`BL-15` Stage 1 -- poll `GET /mission_start/latest` and, if its
     `sequence` has moved since the last poll, reset belief/mission memory
@@ -4122,10 +4426,10 @@ def _check_for_new_mission(
     too (`_reroll_run_logs`, decision 5), not just for a future spoken
     acknowledgement.
 
-    `fired_on_tracker`/`lost_contact_tracker` are passed straight through
-    to `_reset_mission_state` -- see that function's own docstring for why
-    they default to `None` and what leaving either out would silently
-    break.
+    `fired_on_tracker`/`lost_contact_tracker`/`speech_worker` are passed
+    straight through to `_reset_mission_state` -- see that function's own
+    docstring for why they default to `None` and what leaving any of them
+    out would silently break.
 
     **A genuine reset also arms `runner.pending_mission_start_fire`/
     `pending_mission_start_in_air_check`**, with `mission_start_fresh_
@@ -4244,7 +4548,12 @@ def _check_for_new_mission(
     # "Two new triggers: mission start").
     pre_reset_t_sim = runner.last_t_sim
     _reset_mission_state(
-        runner, crew_console, mission_memory, fired_on_tracker, lost_contact_tracker
+        runner,
+        crew_console,
+        mission_memory,
+        fired_on_tracker,
+        lost_contact_tracker,
+        speech_worker,
     )
     _maybe_switch_theatre(
         runner,
@@ -5268,6 +5577,7 @@ def _run_crew_text_poll_loop(
                     lost_contact_tracker=lost_contact_tracker,
                     rule_runtime=rule_runtime,
                     audio_client=speech_client,
+                    speech_worker=crew_console.speech_worker,
                 ):
                     trace_writer, belief_truth_writer, slew_trace_writer = (
                         _reroll_run_logs(
@@ -6127,6 +6437,13 @@ def _run_crew_text_poll_loop(
                                 if runner.atgm_run_state is not None
                                 else UNAIDED_OPTIC
                             ),
+                            # `BL-B124` Stage 4 -- the same sun elevation
+                            # `run_once` computed and used for this poll's
+                            # own `decide_optic`/naked-eye assignment,
+                            # cached on `runner` since this call happens
+                            # later in the poll loop, after `run_once` has
+                            # already returned.
+                            sun_elevation_deg=runner.light_level_sun_elevation_deg,
                         )
                         # `[[BL-B67]]` Stage 1 -- "run ends with attack_
                         # run_state" (drop target/cancel/lost contact, all
@@ -7431,7 +7748,27 @@ def main() -> None:
     # to happen inside `CrewConsole._print` now happen on this worker's
     # own background thread instead (Decision 2), but through the same
     # reporter instance.
-    speech_worker = SpeechWorker(audio_adapter_client, reporter=audio_adapter_reporter)
+    # `[[BL-B133]]` -- its own `ConnectionReporter` instance, not `audio_
+    # adapter_reporter`: the aircraft-layer `/ptt/state` seam and the
+    # audio-adapter `/speak` seam are two independent dependencies, and
+    # sharing one reporter would mean an audio-adapter outage logging as
+    # an aircraft-layer one (or vice versa).
+    ptt_gate = PttHoldGate(
+        aircraft_client,
+        # Review fix 1 (`plans/bl-b133-ptt-speech-hold/review.md`):
+        # reuses `crew_runner`'s own telemetry poll (`run_once` sets this
+        # every poll) rather than issuing a second request -- staleness
+        # is keyed to the telemetry feed's own freshness, not the PTT
+        # sample's, since `Export.lua` sends `ptt` only on change but
+        # telemetry every tick.
+        telemetry_received_wall_clock_s=lambda: (
+            crew_runner.last_telemetry_received_wall_clock_s
+        ),
+        reporter=ConnectionReporter(logger, label="ptt feed"),
+    )
+    speech_worker = SpeechWorker(
+        audio_adapter_client, reporter=audio_adapter_reporter, ptt_gate=ptt_gate
+    )
     speech_worker.open()
     # `plans/effector-sequences/plan.md` D5/D6, BL-B90 Stage 2 --
     # loaded once here, before `CrewConsole` exists, so a bad

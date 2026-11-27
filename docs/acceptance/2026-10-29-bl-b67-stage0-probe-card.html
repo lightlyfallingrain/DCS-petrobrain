@@ -96,6 +96,9 @@ git pull</pre>
   <div class="subhead" style="font-size:0.9rem">On the Windows clone. The probe files merged to <code class="i">main</code> with BL-B67 batch A.</div>
 </div>
 
+<div class="note"><span class="tag">Re-probe 2026-11-27 — the knob only</span><br>
+The first flight answered the payload, names, Radiation Reset and launch/impact questions. The knob did not move because the probe wrote to the 9K113 unit instead of the weapons system &mdash; fixed. <code class="i">git pull</code>, same setup, shorter flight: hands off the knob for ~20&nbsp;s &mdash; <strong>this time it should visibly step through the positions and park</strong> &mdash; then fire one missile and wait ~25&nbsp;s past impact to see it advance. Bring back only <code class="i">aircraft_layer_probe_weapons.log</code>. Record: did it move in the sweep, where did it park, did it advance after the shot?</div>
+
 <div class="note warn"><span class="tag">Not testable this flight</span><br>
 The production pipeline is off: the probe replaces <code class="i">Export.lua</code>, so no collector, no voice, no Petrovich callouts. Nothing here tests the attack run itself.</div>
 

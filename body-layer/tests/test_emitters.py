@@ -10,6 +10,7 @@ from perception.emitters import (
     EmitterKind,
     burning_emitters,
     firing_emitters,
+    launch_flash_emitters,
     resolve_emitters,
 )
 
@@ -216,3 +217,72 @@ def test_resolve_emitters_merges_independent_units() -> None:
         1: Emitter(kind=EmitterKind.BURNING),
         2: Emitter(kind=EmitterKind.FIRING, targets_ownship=False),
     }
+
+
+def _launch_flash_active(name: str) -> dict[str, object]:
+    return {"kind": "launch_flash", "since_sim": 50.0, "targets_ownship": False}
+
+
+def test_launch_flash_unit_resolves_to_an_emitter() -> None:
+    """`BL-B124` Stage 5 -- `launch_flash_emitters`' own sibling tests to
+    `test_firing_unit_resolves_to_an_emitter` above."""
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_1": _launch_flash_active("Unit_1")}
+
+    result = launch_flash_emitters(raw_objects, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.LAUNCH_FLASH)}
+
+
+def test_no_active_launch_flash_this_poll_returns_empty() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+
+    assert launch_flash_emitters(raw_objects, None) == {}
+    assert launch_flash_emitters(raw_objects, {}) == {}
+
+
+def test_a_non_launch_flash_kind_in_the_active_map_is_ignored() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_1": _firing_active("Unit_1")}
+
+    assert launch_flash_emitters(raw_objects, active) == {}
+
+
+def test_launch_flash_non_unique_unit_name_drops_to_unresolved() -> None:
+    raw_objects = [_object(1, "Unit_1"), _object(2, "Unit_1")]
+    active = {"Unit_1": _launch_flash_active("Unit_1")}
+
+    assert launch_flash_emitters(raw_objects, active) == {}
+
+
+def test_resolve_emitters_firing_wins_over_launch_flash_for_the_same_unit() -> None:
+    """The collector's own `EmitterTracker._apply` already keeps a unit
+    from being both `FIRING` and `LAUNCH_FLASH` at once (it never
+    overwrites an existing `FIRING` entry with a later `S_EVENT_SHOT`),
+    but `resolve_emitters`' own merge order is tested directly here too
+    -- belt-and-suspenders, per that function's own docstring."""
+    raw_objects = [_object(1, "Unit_1")]
+    active = {"Unit_1": _firing_active("Unit_1")}
+
+    result = resolve_emitters(raw_objects, None, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.FIRING, targets_ownship=False)}
+
+
+def test_resolve_emitters_launch_flash_wins_over_burning_for_the_same_unit() -> None:
+    raw_objects = [_object(1, "Unit_1")]
+    samples = {"Unit_1": _sample(life=0.5, life0=1.0)}  # burning
+    active = {"Unit_1": _launch_flash_active("Unit_1")}  # also launching
+
+    result = resolve_emitters(raw_objects, samples, active)
+
+    assert result == {1: Emitter(kind=EmitterKind.LAUNCH_FLASH)}
+
+
+def test_resolve_emitters_merges_a_launch_flash_unit_independently() -> None:
+    raw_objects = [_object(1, "Unit_1"), _object(2, "Unit_2")]
+    active = {"Unit_2": _launch_flash_active("Unit_2")}
+
+    result = resolve_emitters(raw_objects, None, active)
+
+    assert result == {2: Emitter(kind=EmitterKind.LAUNCH_FLASH)}

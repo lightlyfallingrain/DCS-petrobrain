@@ -539,6 +539,74 @@ def test_tier_ranges_presence_threshold_uses_the_optic_s_own_cap() -> None:
     assert presence_narrow == pytest.approx(20_000.0)
 
 
+# --- `light_factor` threading (`BL-B124` Stage 3, `plans/bl-b124-light-level/
+# plan.md`) -- `check_visibility`'s gate 3 (`size_curve_threshold_m`) and
+# `tier_ranges()`'s own presence threshold must stay the same quantity under
+# a non-default `light_factor`, or a dimmed-out candidate beyond the real
+# presence range would still register as detected (the review's Required
+# Fix 2 and the implementer-memory note on this exact desync risk). T-72B
+# (size 7.0 m) under `UNAIDED_OPTIC` at `light_factor=(1.0, 1.0, 1.0)` has a
+# presence threshold of `7 / 0.003 = 2333.33 m` (the derivation the lowres
+# tests above already pin); `light_factor=(0.1, 1.0, 1.0)` scales that
+# presence component down to `233.33 m`.
+
+
+def test_light_factor_shrinks_presence_range_and_gate_three_tracks_it() -> None:
+    """A candidate inside the *unscaled* presence range (2333.33 m) but
+    outside the *scaled* one (233.33 m) is rejected at gate 3 -- proving
+    gate 3's own `size_curve_threshold_m` actually reads `light_factor`,
+    not just `tier_ranges()`'s internal call inside `_achieved_tier`."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=300.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, light_factor=(0.1, 1.0, 1.0)
+    )
+
+    assert result is None
+
+
+def test_light_factor_candidate_within_scaled_range_still_resolves_a_tier() -> None:
+    """A candidate within the *scaled* presence range still clears gate 3
+    and resolves to a real tier via `_achieved_tier` -- never the "beyond
+    even lowres" fallback the desync would otherwise have forced it into
+    (unreachable from here precisely because gate 3 and `tier_ranges()` are
+    now in sync)."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=200.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, light_factor=(0.1, 1.0, 1.0)
+    )
+
+    assert result is not None
+    assert result.tier in ("lowres", "medres", "hires")
+
+
+def test_tier_ranges_light_factor_scales_the_presence_threshold() -> None:
+    """Direct `tier_ranges()` pin, isolated from gate ordering: a
+    `light_factor` that only shrinks the presence component scales the
+    presence threshold by that factor, and -- because `class`/`type` are
+    chained through `min()` against `presence` -- pulls the other two
+    thresholds down to match whenever their own unscaled values would have
+    exceeded it."""
+    presence_default, class_default, type_default = tier_ranges(
+        presence_size_m=7.0, recognition_extent_m=7.0, optic=UNAIDED_OPTIC
+    )
+    presence_dim, class_dim, type_dim = tier_ranges(
+        presence_size_m=7.0,
+        recognition_extent_m=7.0,
+        optic=UNAIDED_OPTIC,
+        light_factor=(0.1, 1.0, 1.0),
+    )
+
+    assert presence_dim == pytest.approx(presence_default * 0.1)
+    assert class_dim == pytest.approx(presence_dim)
+    assert type_dim == pytest.approx(presence_dim)
+    assert class_dim < class_default
+    assert type_dim < type_default
+
+
 def test_forward_and_below_candidate_at_a_mild_depression_is_visible() -> None:
     # Dead ahead (body azimuth 0), a mild 10 deg depression -- comfortably
     # under any plausible "steep ahead" allowance (see module docstring).

@@ -464,6 +464,13 @@ PROVENANCE_EMITTER_FIRING_TARGETS_OWNSHIP: Final[str] = (
 #: kind for that candidate (bypass fired) or not.
 PROVENANCE_EMITTER_FIRING_VISIBLE: Final[str] = "world_objects/emitter_firing_visible"
 
+#: `plans/bl-b124-light-level/plan.md` Stage 5 -- a missile/rocket
+#: launch's own light source. Presence only, no class/type, no
+#: `targets_ownship` distinction (same as `PROVENANCE_EMITTER_BURNING`) --
+#: a launch is not "aimed at" anyone the way a gun burst's target field
+#: is, so one value, not two, suffices.
+PROVENANCE_EMITTER_LAUNCH_FLASH: Final[str] = "world_objects/emitter_launch_flash"
+
 #: `visibility.VisibilityResult.emitter_kind` (an `EmitterKind.value`
 #: string) -> the `PROVENANCE_EMITTER_*` constant it should produce, for
 #: `_build_observation`'s cluster-level fold below. A `dict`, not a
@@ -474,6 +481,7 @@ PROVENANCE_EMITTER_FIRING_VISIBLE: Final[str] = "world_objects/emitter_firing_vi
 #: method's own docstring).
 _PROVENANCE_BY_EMITTER_KIND: Final[dict[str, str]] = {
     EmitterKind.BURNING.value: PROVENANCE_EMITTER_BURNING,
+    EmitterKind.LAUNCH_FLASH.value: PROVENANCE_EMITTER_LAUNCH_FLASH,
 }
 
 #: `derived_world_position.method` for every emitted naked-eye `Observation`
@@ -557,6 +565,16 @@ class NakedEyePerceptionSource:
     #: regression gate 2B used and it is worth repeating here: the
     #: plumbing is proven before any behaviour rides on it.
     optic: Optic = UNAIDED_OPTIC
+    #: `(presence, class, type)` multiplier for ambient light level
+    #: (`BL-B124` Stage 4, `plans/bl-b124-light-level/plan.md`,
+    #: `perception.light_level.light_factor`). Assigned per poll by
+    #: `body._apply_active_gaze` alongside `optic`, from `light_factor(
+    #: optic, sun_elevation_deg)` -- computed against *this poll's own
+    #: decided optic*, since the curve is per-optic (binoculars/the
+    #: 9K113 dim differently from the naked eye at the same sun
+    #: elevation). Default `(1.0, 1.0, 1.0)` is a true no-op, still the
+    #: value every test that does not care about light level gets.
+    light_factor: tuple[float, float, float] = (1.0, 1.0, 1.0)
     #: The player-bubble directional exemption (`BL-B64` Stage 2, direction
     #: §7) -- assigned per poll by `body._apply_active_gaze` alongside
     #: `optic`, from the same resolution: the sight's own *actual* pointing
@@ -636,7 +654,9 @@ class NakedEyePerceptionSource:
         **not** touch `scan_plan`/`optic`/`sight_cone`/`suppressed_until_sim`
         -- those are per-poll fields the poll loop overwrites every tick
         (`body._apply_active_gaze`), not mission-scoped state that would
-        otherwise leak across a restart. `peripheral_stimulus_ids` is the
+        otherwise leak across a restart. `light_factor` (`BL-B124`) is the
+        same shape -- a per-poll field the poll loop overwrites every
+        tick, not mission-scoped state. `peripheral_stimulus_ids` is the
         same shape (the attention-capture channel that would ever write it
         does not exist yet -- it stays its construction-time default
         forever today), so it is likewise left untouched.
@@ -849,6 +869,7 @@ class NakedEyePerceptionSource:
                 live_los_coverage=self.live_los_coverage,
                 forest=self.forest,
                 emitter=emitter_by_object_id.get(candidate.object_id),
+                light_factor=self.light_factor,
             )
             if self.trace_sink is not None:
                 resolved_los = los_by_object_id.get(candidate.object_id)

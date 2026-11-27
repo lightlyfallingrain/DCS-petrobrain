@@ -1,6 +1,6 @@
 ---
 name: project-recurring-unguarded-nonfinite-float-before-conversion
-description: six findings now, across four sessions -- three in one day (2026-10-13) in two body-layer modules, a fourth on 2026-10-30 (BL-B104, a new wire field converted with int() before any isfinite check, at the LAN-HTTP boundary into body-layer), a fifth on 2026-11-17 (BL-17, the same gap at a non-LAN boundary -- Lua-to-Python action dispatch), and a sixth on 2026-11-19/20 (fix/handover-ack-seq, the first occurrence on the ENCODE side -- core.lua's fmt_num_or_null blanket-formatted int-strict schema fields as %.5f, silently dropping every flight_control telemetry line for a full day before being traced). All a non-finite or wrong-typed numeric value crossing a boundary this codebase did not fully construct, with no validation anywhere it enters or leaves. A recurring category, not isolated bugs, still being caught at Security/DoD/Debugger rather than earlier, now confirmed to generalize past "wire boundary," past "parse side," and past "LAN/HTTP" to any numeric value crossing any boundary in either direction.
+description: seven findings now, across five sessions -- three in one day (2026-10-13) in two body-layer modules, a fourth on 2026-10-30 (BL-B104, a new wire field converted with int() before any isfinite check, at the LAN-HTTP boundary into body-layer), a fifth on 2026-11-17 (BL-17, the same gap at a non-LAN boundary -- Lua-to-Python action dispatch), a sixth on 2026-11-19/20 (fix/handover-ack-seq, the first occurrence on the ENCODE side -- core.lua's fmt_num_or_null blanket-formatted int-strict schema fields as %.5f, silently dropping every flight_control telemetry line for a full day before being traced), and a seventh on 2026-11-25 (BL-B124/BL-B137, a float()-not-int() parse that does not raise on "nan"/"inf" at all, propagating through a clamp to a concrete, silently wrong daylight value -- the worst-consequence instance yet). All a non-finite or wrong-typed numeric value crossing a boundary this codebase did not fully construct, with no validation anywhere it enters or leaves. A recurring category, not isolated bugs, still being caught at Security/DoD/Debugger rather than earlier, now confirmed to generalize past "wire boundary," past "parse side," past "LAN/HTTP," and past "int() raises" to any numeric value crossing any boundary in either direction, including a float() parse that never raises at all.
 metadata:
   type: project
 ---
@@ -69,6 +69,23 @@ upstream, and now a fourth time in a different feature entirely:
    measurement now encodes as `null` instead of literal `nan`/`inf` text (which is not valid JSON
    either -- the same silent-whole-line-drop failure, reached from the opposite direction).
 
+7. `BL-B124`/`[[BL-B137]]` (2026-11-25, Security deep analysis, `plans/bl-b124-light-level/
+   security.md` Finding 1): **the first occurrence where the parse itself never raises at all.**
+   `aircraft-layer/src/schema/firing.py`'s `MissionClockSample.from_wire` used `float(abs_str)`
+   (not `int()`) for `abs_time_s`, and Python's `float()` happily parses the strings `"nan"`/
+   `"inf"`/`"-inf"` without error -- so even a sibling `isinstance`+`int()` guard elsewhere in the
+   same dataclass (`year`/`month`/`day`) would not have caught this one by analogy, because the
+   failure mode is at the `float()` call itself, not at a later `int()` conversion. Traced
+   end-to-end (not just flagged): the NaN propagated through `perception.light_level.
+   sun_elevation_deg`'s own final clamp (`max(-1.0, min(1.0, sin_altitude))`, which does not hold
+   NaN clean -- `min`/`max` keep their first argument on a NaN comparison) to a concrete `90.0`
+   degrees, silently taking the feature's own full-daylight branch -- the one outcome its design
+   explicitly forbade for a bad reading. Worst-consequence instance so far: not a crash, not a
+   dropped line, a *silently wrong, in-range, plausible-looking answer* with zero logging. Fixed
+   at both the wire boundary (`math.isfinite` added to the success condition) and defense-in-depth
+   inside `sun_elevation_deg` itself (raises before the clamp). Notes-worthy generalisation filed
+   in `notes/wire-protocol-validation.md`.
+
 The common root: a raw float/int entering from somewhere this codebase did not fully construct
 itself — DCS telemetry, a wire payload, or (as of finding 5) a sandboxed scripting language's own
 runtime values — with no finiteness validation anywhere it crosses in, and every new consumer has
@@ -80,7 +97,16 @@ where values this codebase did not construct get `int()`/`float()`-converted," a
 needs to reach Architect/Implementer time for *any* new boundary, not just new wire fields on
 already-known boundaries.
 
-**How to apply.** Three things now, not two:
+**How to apply.** Four things now, not three:
+
+- **Do not assume "this field uses `float()`, not `int()`, so it's safe" — `float()` is the
+  *less* safe conversion for this category, because it never raises on `"nan"`/`"inf"`/`"-inf"`
+  at all, where `int()` at least raises `ValueError` on those same strings.** Finding 7 is the
+  first instance where the unguarded conversion itself produced zero exception, only a silently
+  wrong answer several functions downstream. A `float(x)` parse at any boundary needs its own
+  explicit `math.isfinite` check regardless of whether a sibling `int()` field in the same
+  structure already has one -- the two conversions fail differently and a fix for one does not
+  imply the other is covered.
 
 - **At Reviewer/Security on any new function taking a raw externally-sourced float** (DCS
   telemetry, a wire payload, *or now a sandboxed scripting runtime's own values* -- not only

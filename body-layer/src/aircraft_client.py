@@ -39,7 +39,15 @@ resolving the per-`unit_name` join against a world-objects snapshot itself
 -- this client does no joining or interpretation, mirroring every other
 `get_*` method here.
 
-`get_line_of_sight_latest`/`post_look_direction` (`plans/dcs-driven-los/
+`get_line_of_sight_latest`/`get_ptt_state_latest` (`body-layer/ROADMAP/BL-B133.md`) is this seam's
+`GET /ptt/state` counterpart to `get_spu8_state_latest` -- same "not an
+error" empty-cache posture: `None` until the trigger first moves at all
+this collector process's lifetime. `belief.ptt_hold.PttHoldGate` is the
+one caller, resolving the typed hold/debounce/staleness decision itself
+-- this client does no interpretation, same division of labour every
+other `get_*` method here already has.
+
+`post_look_direction` (`plans/dcs-driven-los/
 plan.md`, X-B29) are this seam's `GET /line_of_sight/latest` and
 `POST /command/look_direction` counterparts. `get_line_of_sight_latest`
 follows `get_unit_velocity_latest`'s exact "not an error" empty-cache
@@ -70,7 +78,12 @@ still raises `AircraftLayerError` on a genuine transport/parse failure
 (an aircraft-layer instance predating `AC-B8` has no such route at all,
 same as every other `get_*` on an unreachable endpoint). `naked_eye_
 source.py` resolves the per-`unit_name` join itself, same split of
-responsibility as the velocity and LOS feeds.
+responsibility as the velocity and LOS feeds. The response dict also
+carries a `"mission_clock"` key (`BL-B124`, amendment 2026-11-25) --
+`{"abs_time_s", "year", "month", "day"}` or `null` -- this client makes
+no attempt to parse it; a future caller reads it straight out of the
+returned dict, same shallow pass-through posture as every other field
+here.
 
 `write_cockpit_switch` (`plans/9k113-effectors/plan.md`, BL-B66 Stage 1)
 is this seam's write side for the generic cockpit-switch channel. It
@@ -304,8 +317,9 @@ class AircraftLayerClient:
     def get_firing_latest(self) -> dict[str, Any]:
         """`GET /firing/latest` -> the most recent `EmitterTracker.
         snapshot()` as a dict (`{"dcs_model_time_s", "received_wall_
-        clock_s", "active"}`, see `aircraft-layer/src/collector/
-        firing_receiver.py`). Never `None` -- see the module docstring."""
+        clock_s", "active", "mission_clock"}`, see `aircraft-layer/src/
+        collector/firing_receiver.py`). Never `None` -- see the module
+        docstring."""
         result = self._get_json("/firing/latest")
         if not isinstance(result, dict):
             raise AircraftLayerError(
@@ -395,6 +409,24 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /spu8/state, got {type(result).__name__}"
+            )
+        return result
+
+    def get_ptt_state_latest(self) -> dict[str, Any] | None:
+        """`GET /ptt/state` -> the pilot/operator push-to-talk trigger
+        sample as a dict (see `aircraft-layer/src/schema/ptt.py`'s
+        `PttSample.to_api_dict`, i.e. `{"t", "received_wall_clock_s",
+        "raw", "intercom", "radio", "last_seat"}` -- `"intercom"` is
+        already gated by the SPU-8 switches, server-side), or `None` if
+        the trigger has not moved at all this collector process's
+        lifetime -- same "not an error" posture as `get_spu8_state_
+        latest` (`body-layer/ROADMAP/BL-B133.md`)."""
+        result = self._get_json("/ptt/state")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /ptt/state, got {type(result).__name__}"
             )
         return result
 

@@ -46,10 +46,11 @@ curl -s -X POST http://<collector-host>:7791/command/probe_points \
 
 **Check:**
 - `dcs.log` shows new `PetrobrainLineOfSight` lines (no errors/exceptions from the Hook).
-- `curl -s http://<collector-host>:7791/line_of_sight/latest` carries a `"probes"` field — a
-  string, not a list: `"<seq>|<i>:<0|1|>;..."`. Expected: `"1|0:1;1:0;2:1"` — clear, blocked,
-  clear for near-slope/behind-crest/open-ground. An empty value after `:` means "could not
-  evaluate" (fail closed), never clear.
+- `curl -s http://<collector-host>:7791/line_of_sight/latest` carries a `"probes"` object:
+  `{"seq": 1, "dcs_model_time_s": ..., "clear": [true, false, true, null, null, null]}` — six fixed
+  slots, clear/blocked/clear for near-slope/behind-crest/open-ground, `null` = unused slot or
+  "could not evaluate" (fail closed), never clear. (Corrected 2026-11-27 from the flown result;
+  the card used to show the collector's internal string form.) **Points must be integer metres.**
 
 ## Step 2 — fly closer and confirm the near-slope point flips
 

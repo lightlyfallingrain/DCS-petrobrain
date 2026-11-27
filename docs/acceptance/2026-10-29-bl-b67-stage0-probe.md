@@ -23,6 +23,18 @@ Two files, both already disposable extensions of existing committed probes (not 
 plan.md`'s Stage 1–7 batches need before they can be built or merged. Nothing here is production
 code and nothing here is kept after the questions are answered.
 
+## Re-probe 2026-11-27 — the knob only
+
+First flight 2026-11-27 answered Q1, Q2, Q5, Q6
+(`docs/acceptance/2026-11-27-bl-b67-stage0-probe-feedback.md`). The knob did not move because the
+probe wrote to the 9K113 unit (device 7) instead of the weapons system (device 6)
+(`aircraft-layer/research/2026-11-27-bl-b67-shscho-knob-command.md`); fixed. Fly the same setup
+again, shorter: hands off the knob for the first ~20 s — **this time it should visibly step through
+the positions and park** — then fire one missile and wait ~25 s past impact to see it advance.
+Record: did the knob move during the sweep, and where did it park? Did it advance after the shot?
+Bring back `aircraft_layer_probe_weapons.log` (it now also answers whether `CurrentStation` follows
+the knob). The Hook and `dcs.log` are not needed this time.
+
 ---
 
 ## What this answers

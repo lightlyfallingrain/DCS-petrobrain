@@ -4,6 +4,39 @@
   the launch callout, impact, and resetting the guidance transmitter.** #status/in-progress
   #needs-flight
 
+  ## 2026-11-27 (later) — batch B parked by the user, draft committed
+
+  **Waiting, by the user's direction** (*"Leave BL-B67 as is. Commit anything not committed on the
+  branch and leave it waiting."*). Every attempt to build or review batch B was stopped by
+  Anthropic's safety checks (`general_harms`), four times across two sessions; request IDs in
+  `todo/todo/X-T31.md`. The draft Stages 5–7 is committed as WIP `b469e99a` on
+  `feature/bl-b67-batch-b` (pushed; worktree `../DCS-petrobrain-b67b`).
+
+  State of the draft, checked 2026-11-27: aircraft-layer 1090 tests pass, body-layer 3834 pass
+  (4 xfail), mypy clean both; lint/format findings are only in old `research/` files and match
+  `main`. Stage 5 written with unit tests, incl. the Security carry-forward bound
+  (`MAX_OWN_WEAPON_TYPE_NAME_LEN` = 48). Stage 6 written (sequences, step→station map,
+  effectors) — **no tests of its own**. Stage 7 wired (`decide_atgm_run` now called per poll in
+  `body.py`) — **no integration tests**. Not checked against the plan, not reviewed.
+
+  **User's plan for resuming, in a new session:** Stage 6 unit tests if they get through; Stage 7
+  unit tests only, **no end-to-end test**; anything stopped is marked untested and left.
+
+  ## 2026-11-27 — Stage 0 sortie flown; knob re-probe owed
+
+  Answers in `docs/acceptance/2026-11-27-bl-b67-stage0-probe-feedback.md`. **Q1** payload feed works
+  (8 stations, counts, no names; count drops on the shot's own poll; `CurrentStation` did not follow
+  the hand-turned knob). **Q2** names `Ataka_9M120`, `AT_6`, `C_8CM`, `C_8`. **Q5** Radiation Reset
+  (3029, device 7) works. **Q6** `S_EVENT_SHOT` arrives for every own shot with `event.weapon`;
+  guided filter `category == 1 and guidance == 8`; `isExist()` false within ~0.2 s of the first
+  `S_EVENT_HIT`; HIT fires on every unit in the blast, so it does not name the aimed unit. **Q3**
+  unanswered: the probe wrote the knob to device 7 (I9K113) instead of 6 (WEAP_SYS) —
+  `aircraft-layer/research/2026-11-27-bl-b67-shscho-knob-command.md`; fixed, re-probe card section
+  added. **Re-probe flown same day: Q3 answered** — `GetDevice(6):performClickableAction(3038,
+  n*0.1)` sets arg 963 absolutely to n × 0.1; step n = `Stations[n]` (one shot, step 1 → station 1;
+  user confirmed: *"this is true"*); `CurrentStation` never follows the knob, so the selected station is read from arg 963.
+  Batch B Stage 6 (effectors) is unblocked on Q3.
+
   ## 2026-10-29 — DoD: batch A merged, batch B waiting on the Stage 0 sortie
 
   **Batch A (Stages 1-4, plus the Stage 0 probe files) passed DoD and merged to `main`

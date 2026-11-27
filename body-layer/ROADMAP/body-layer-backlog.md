@@ -160,7 +160,7 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B119]] — effector sequence rows speak their `petrovich-says`; hard-coded observ/weapons readbacks removed (DoD-PASSED, merged `18f73b09`, `#needs-flight`)
 - [[BL-B121]] — same-poll pending-restart may speak a speaking sequence row's line twice; not reachable by any sequence shipped today, closes before a multi-row speaking sequence lands
 - [[BL-B123]] — pilot and copilot seats: Petrovich takes the other seat, with that seat's abilities (9K113 copilot only; no optic while he flies)
-- [[BL-B124]] — light level and weather change what Petrovich can perceive (own ID for the section filed inside BL-B22)
+- [[BL-B124]] — light level and weather change what Petrovich can perceive (own ID for the section filed inside BL-B22) (Stages 1–5 DoD-PASSED, `#needs-flight`; Stage 6/explosions split to `[[BL-B136]]`)
 - [[BL-B122]] — a rejected/failed `ai_pilot_goal` write is marked sent and never retried; found in BL-16 Stage P2's security deep analysis, not blocking that merge
 - [[BL-B125]] — rule engine's instruction-count budget is counted in `debug.sethook` hook firings, ~1000× the real VM instruction count the named constants suggest; found in `[[BL-17]]` Stages 0/1b/2's security deep analysis, not blocking that merge
 - [[BL-B126]] — `PUT /rules`/`/transcribe` have no cap on body size or rule-list length; pre-existing posture inherited by a new endpoint; found in `[[BL-17]]` Stages 0/1b/2's security deep analysis, not blocking that merge
@@ -171,6 +171,11 @@ status vocabulary in `docs/TAGS.md`.
 - [[BL-B131]] — Recording/bench phrase list generated from the rule files (BL-17 follow-up)
 - [[BL-B132]] — Readable cockpit args (lamps, gauges, rotor RPM) in the switch reference
 - [[BL-B133]] — Petrovich does not start talking while the player keys ICS or RADIO
+- [[BL-B134]] — One readback rule for every command: "stand by", then confirm on execution
+- [[BL-B135]] — Guard non-finite floats at aircraft-layer wire boundaries (telemetry `received_wall_clock_s` and siblings)
+- [[BL-B136]] — Explosions as a night light source (split out of `BL-B124`)
+- [[BL-B137]] — `mission_clock` NaN/Infinity silently forces full daylight, not an error (third instance of `BL-B135`'s gap, found in `BL-B124`'s security deep analysis) (done, closed 2026-11-25 on `feature/bl-b124-light-level`)
+- [[BL-B138]] — Weather (fog, precipitation, cloud, visibility) changes what Petrovich can perceive (split out of `BL-B124`, light level done, weather deferred by the user)
 - [[BL-B139]] — Mode 2 recovery must change the set altitude/speed so DCS AI reacts (step down then back when already at target)
 - [[BL-B140]] — Mode 2 "speed 250" resolves to MAX instead of the 250 step
 

@@ -62,12 +62,14 @@ from body import (
     _build_sources,
     _commanded_or_default_sector,
     _log_live_los_coverage_summary,
+    _parse_mission_clock_dict,
     _poll_transcripts,
     _render_eyesight_frame,
     _render_pov_frame,
     _resolve_active_gaze,
     _resolve_sector_scan,
     _resolve_speech_log_path,
+    _resolve_sun_elevation_deg,
     _run_crew_text_poll_loop,
     _run_crew_text_repl,
     _search_sweep,
@@ -80,6 +82,7 @@ from body import (
     _warn_live_los_coverage_gap_once,
     main,
 )
+from coordinates import dcs_to_wgs84
 from mission_memory.admission import FiredOnTracker, LostContactTracker
 from mission_memory.store import MissionMemory
 from perception import association
@@ -94,6 +97,11 @@ from perception.gaze import (
 )
 from perception.geometry import GeoPosition, body_relative_direction
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
+from perception.light_level import (
+    MISSION_CLOCK_MAX_AGE_S,
+    SIGHT_FULL_DARK_SUN_ELEV_DEG,
+    sun_elevation_deg,
+)
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import SIGHT_NARROW_OPTIC, SIGHT_WIDE_OPTIC
 from perception.source import (
@@ -670,10 +678,26 @@ class FakeConsoleAircraftClient:
         # `plans/emitter-visibility/plan.md` Stage B -- nobody-firing
         # default, same reasoning as `test_naked_eye_source.py`'s
         # `FakeAircraftClient.get_firing_latest`.
+        #
+        # `[[BL-B124]]` Stage 4 -- `mission_clock` is a fixed, comfortably
+        # daylight local-noon sample (the plan's own 2020-06-01 test
+        # mission date, at `abs_time_s=43200.0`, noon) rather than absent:
+        # an absent/unreadable mission clock now forces every optic's
+        # light factor to full dark (`body._resolve_sun_elevation_deg`),
+        # which would silently blind every naked-eye test driven through
+        # the real poll loop in this file -- none of them are about light
+        # level, so they get the un-dimmed, pre-`BL-B124` behaviour by
+        # always reporting a readable, bright mission clock.
         return {
             "dcs_model_time_s": self._world_objects.get("dcs_model_time_s", 0.0),
             "received_wall_clock_s": 0.0,
             "active": {},
+            "mission_clock": {
+                "abs_time_s": 43200.0,
+                "year": 2020,
+                "month": 6,
+                "day": 1,
+            },
         }
 
     def post_look_direction(self, hour: int, fov_half_deg: int) -> None:
@@ -5004,6 +5028,7 @@ def test_crew_text_poll_loop_passes_the_used_optic_not_the_guidance_grant(
         resolving_optic: object = None,
         vertical: bool = True,
         guidance_floor: object = None,
+        sun_elevation_deg: object = None,
     ) -> AttackRunState | None:
         captured["resolving_optic"] = resolving_optic
         done.set()
@@ -5123,6 +5148,7 @@ def test_engage_missiles_constructs_atgm_run_state_same_poll_as_attack_run_state
         resolving_optic: object = None,
         vertical: bool = True,
         guidance_floor: object = None,
+        sun_elevation_deg: object = None,
     ) -> AttackRunState | None:
         # No real `attack_target` task exists in this fixture -- the real
         # `drain_attack_run` would read that absence as "selection gone"
@@ -5167,6 +5193,7 @@ def test_engage_without_missiles_ends_a_standing_atgm_run(
         resolving_optic: object = None,
         vertical: bool = True,
         guidance_floor: object = None,
+        sun_elevation_deg: object = None,
     ) -> AttackRunState | None:
         # Same reason as the sibling test above: no real `attack_target`
         # task exists here, and this test is not about that row.
@@ -5210,6 +5237,7 @@ def test_disengage_ends_both_the_attack_run_and_the_atgm_run(
         resolving_optic: object = None,
         vertical: bool = True,
         guidance_floor: object = None,
+        sun_elevation_deg: object = None,
     ) -> AttackRunState | None:
         done.set()
         return state
@@ -5243,6 +5271,7 @@ def test_lost_contact_ends_the_atgm_run_alongside_the_attack_run(
         resolving_optic: object = None,
         vertical: bool = True,
         guidance_floor: object = None,
+        sun_elevation_deg: object = None,
     ) -> AttackRunState | None:
         done.set()
         return None
@@ -9207,3 +9236,354 @@ def test_engage_with_no_target_fires_start_then_stop_through_the_poll_loop(
         _SEAT_COPILOT_WRITE,  # attack-run-start: observ on
         _SEAT_PILOT_WRITE,  # attack-run-stop: weapon_safety armed
     ]
+
+
+# --- BL-B124 Stage 4: `_resolve_sun_elevation_deg` -------------------------
+
+
+def _light_level_runner(theatre: str | None) -> ConsolePerceptionRunner:
+    """A minimal `ConsolePerceptionRunner` for `_resolve_sun_elevation_deg`
+    tests -- the function reads only `theatre` and the four `light_level_*`
+    fields, so no real `aircraft_client`/`sources` are needed."""
+    return ConsolePerceptionRunner(
+        aircraft_client=object(),  # type: ignore[arg-type]
+        theatre=theatre,
+    )
+
+
+def _ownship_at(t_sim: float) -> OwnshipState:
+    return OwnshipState(t_sim=t_sim, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+
+
+_MISSION_CLOCK_NOON: dict[str, Any] = {
+    "abs_time_s": 43200.0,
+    "year": 2020,
+    "month": 6,
+    "day": 1,
+}
+
+
+class TestResolveSunElevationDeg:
+    def test_no_theatre_is_none(self) -> None:
+        """The loud-refusal/not-yet-started state -- no source is polled
+        either, so there is nothing for a light factor to matter to."""
+        runner = _light_level_runner(None)
+        assert (
+            _resolve_sun_elevation_deg(
+                runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+            )
+            is None
+        )
+
+    def test_fresh_clock_matches_a_direct_sun_elevation_deg_call(self) -> None:
+        """A fresh, readable `mission_clock` resolves to the *same* value
+        `perception.light_level.sun_elevation_deg` would compute directly
+        from it and the ownship position -- proving the Stage 4 plumbing
+        (parse -> cache -> `dcs_to_wgs84` -> `sun_elevation_deg`) does not
+        corrupt the inputs along the way."""
+        runner = _light_level_runner("Syria")
+        ownship = _ownship_at(0.0)
+        resolved = _resolve_sun_elevation_deg(
+            runner, ownship, {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        assert resolved is not None
+        assert runner.theatre is not None
+        lat_deg, lon_deg = dcs_to_wgs84(runner.theatre, ownship.x, ownship.z)
+        expected = sun_elevation_deg(
+            year=2020,
+            month=6,
+            day=1,
+            abs_time_s=43200.0,
+            lat_deg=lat_deg,
+            lon_deg=lon_deg,
+        )
+        assert resolved == pytest.approx(expected)
+        assert runner.light_level_last_clock == (43200.0, 2020, 6, 1)
+        assert runner.light_level_unavailable_since_wall is None
+        assert runner.light_level_error_logged is False
+
+    def test_extrapolates_between_samples_via_model_time_delta(self) -> None:
+        """One fresh sample at `t_sim=0.0`, then a poll 10 s of model time
+        later with no fresh sample (the ordinary "between 1 Hz Hook
+        polls" case, not a failure) -- `abs_time_s` advances by the same
+        10 s, matching a direct `sun_elevation_deg` call at that later
+        time exactly (within floating-point noise), and no error is
+        logged (comfortably inside `MISSION_CLOCK_MAX_AGE_S`)."""
+        runner = _light_level_runner("Syria")
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        resolved = _resolve_sun_elevation_deg(runner, _ownship_at(10.0), None)
+        assert resolved is not None
+        lat_deg, lon_deg = dcs_to_wgs84("Syria", 0.0, 0.0)
+        expected = sun_elevation_deg(
+            year=2020,
+            month=6,
+            day=1,
+            abs_time_s=43210.0,
+            lat_deg=lat_deg,
+            lon_deg=lon_deg,
+        )
+        assert resolved == pytest.approx(expected, abs=1e-9)
+        assert runner.light_level_error_logged is False
+
+    def test_never_had_a_sample_within_grace_is_dark_but_not_yet_an_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The first poll(s) of a mission, before the firing-events Hook's
+        own 1 Hz poll has ever landed a `mission_clock` sample -- the
+        plan's own "first second after load" question. Forced full dark
+        (never the daylight no-op -- user Q6), but **not yet** logged as
+        an error: the unavailable timer only just started."""
+        runner = _light_level_runner("Syria")
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(runner, _ownship_at(0.0), None)
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert runner.light_level_unavailable_since_wall is not None
+        assert runner.light_level_error_logged is False
+        assert "BL-B124" not in caplog.text
+
+    def test_unreadable_past_the_grace_window_is_a_logged_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Once the clock has been unreadable for longer than
+        `MISSION_CLOCK_MAX_AGE_S` -- a genuinely dead Hook/collector feed,
+        not an ordinary single dropped poll -- this is user Q6's "error if
+        not": one `ERROR` log line, and the light factor stays forced to
+        full dark (not daylight)."""
+        runner = _light_level_runner("Syria")
+        runner.light_level_unavailable_since_wall = time.monotonic() - (
+            MISSION_CLOCK_MAX_AGE_S + 1.0
+        )
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(runner, _ownship_at(0.0), None)
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert runner.light_level_error_logged is True
+        assert "BL-B124" in caplog.text
+
+    def test_error_is_logged_once_per_mission_not_every_poll(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The one-shot latch (`light_level_error_logged`) -- a dead feed
+        does not spam one `ERROR` line per poll for the rest of the
+        sortie."""
+        runner = _light_level_runner("Syria")
+        runner.light_level_unavailable_since_wall = time.monotonic() - (
+            MISSION_CLOCK_MAX_AGE_S + 1.0
+        )
+        with caplog.at_level("ERROR"):
+            _resolve_sun_elevation_deg(runner, _ownship_at(0.0), None)
+            caplog.clear()
+            _resolve_sun_elevation_deg(runner, _ownship_at(1.0), None)
+        assert "BL-B124" not in caplog.text
+
+    def test_a_fresh_sample_recovers_from_the_error_state(self) -> None:
+        """Once the Hook's feed comes back, the next poll with a real
+        sample clears both the unavailable timer and the error latch --
+        a later, *new* failure gets its own fresh `ERROR` line rather
+        than staying silent forever because of the first one."""
+        runner = _light_level_runner("Syria")
+        runner.light_level_unavailable_since_wall = time.monotonic() - (
+            MISSION_CLOCK_MAX_AGE_S + 1.0
+        )
+        runner.light_level_error_logged = True
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        assert runner.light_level_unavailable_since_wall is None
+        assert runner.light_level_error_logged is False
+
+    def test_a_frozen_feed_serving_the_same_dict_forces_dark_and_logs(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Review fix (`plans/bl-b124-light-level/review-stages-4-5.md`
+        Required Fix 1): a collector/Hook feed that dies but keeps
+        serving the exact same cached `mission_clock` dict every poll
+        must not read as fresh forever. Feeding the *same* dict
+        repeatedly across ownship samples spanning ~57 minutes of
+        advancing `t_sim` (mirroring the review's own reproduction) must
+        still end in forced full dark and a logged error once the
+        wall-clock grace window has elapsed -- the same outcome an
+        absent sample produces -- not a frozen sun elevation with
+        `light_level_error_logged` staying `False` forever."""
+        runner = _light_level_runner("Syria")
+        # First poll: a genuinely new sample -- establishes the baseline,
+        # clears both timers, exactly like any other fresh read.
+        first = _resolve_sun_elevation_deg(
+            runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        assert first is not None
+        assert runner.light_level_unavailable_since_wall is None
+        assert runner.light_level_error_logged is False
+
+        # The feed is now dead, but `GET /firing/latest` keeps parsing --
+        # it just keeps returning the identical cached dict, across
+        # ownship samples spanning ~57 minutes of advancing model time
+        # (the review's own reproduction window). Each repeat must mark
+        # the clock unavailable, never fresh.
+        for minute in range(1, 58):
+            resolved = _resolve_sun_elevation_deg(
+                runner,
+                _ownship_at(minute * 60.0),
+                {"mission_clock": _MISSION_CLOCK_NOON},
+            )
+            assert resolved is not None
+            assert runner.light_level_unavailable_since_wall is not None
+
+        # Push the (real, wall-clock) unavailable-since timestamp back
+        # past the grace window -- same technique the pre-existing
+        # "unreadable past the grace window" test uses -- and confirm the
+        # one-shot ERROR fires and the resolved elevation is forced dark.
+        runner.light_level_unavailable_since_wall = time.monotonic() - (
+            MISSION_CLOCK_MAX_AGE_S + 1.0
+        )
+        with caplog.at_level("ERROR"):
+            last_resolved = _resolve_sun_elevation_deg(
+                runner, _ownship_at(58 * 60.0), {"mission_clock": _MISSION_CLOCK_NOON}
+            )
+        assert last_resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert runner.light_level_error_logged is True
+        assert "BL-B124" in caplog.text
+
+    def test_repeated_identical_sample_does_not_reset_the_unavailable_timer(
+        self,
+    ) -> None:
+        """The narrower claim the fix actually makes: once a sample
+        repeats verbatim, `light_level_unavailable_since_wall` starts
+        counting and does **not** get cleared back to `None` by the next
+        repeat of that same dict -- only a sample that genuinely differs
+        from `light_level_last_clock` may clear it. This is the
+        mutation-sensitive half of the fix: reverting the `fresh !=
+        runner.light_level_last_clock` guard back to a bare `fresh is not
+        None` check makes this assertion fail, because every repeat would
+        then re-clear the timer forever."""
+        runner = _light_level_runner("Syria")
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        assert runner.light_level_unavailable_since_wall is None
+
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(10.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        first_unavailable_since = runner.light_level_unavailable_since_wall
+        assert first_unavailable_since is not None
+
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(20.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        assert runner.light_level_unavailable_since_wall == first_unavailable_since
+
+    def test_extrapolation_keeps_advancing_through_a_run_of_repeated_samples(
+        self,
+    ) -> None:
+        """Within the grace window, a run of repeated dicts must still
+        extrapolate `abs_time_s` forward from the *last genuinely new*
+        sample's capture time -- not freeze at the value the frozen
+        repeat happens to carry. Reverting the equality guard makes every
+        repeat re-anchor `light_level_last_clock_model_time_s` to the
+        current `t_sim`, which zeroes the extrapolation delta and freezes
+        the resolved elevation; this test catches exactly that."""
+        runner = _light_level_runner("Syria")
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(0.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        # One repeat of the identical dict, then a real 10s-later poll
+        # with no sample at all -- extrapolation must still be anchored
+        # at t_sim=0.0 (the last genuinely new sample), not t_sim=5.0
+        # (where the repeat would have wrongly re-anchored it).
+        _resolve_sun_elevation_deg(
+            runner, _ownship_at(5.0), {"mission_clock": _MISSION_CLOCK_NOON}
+        )
+        resolved = _resolve_sun_elevation_deg(runner, _ownship_at(10.0), None)
+        assert resolved is not None
+        lat_deg, lon_deg = dcs_to_wgs84("Syria", 0.0, 0.0)
+        expected = sun_elevation_deg(
+            year=2020,
+            month=6,
+            day=1,
+            abs_time_s=43210.0,
+            lat_deg=lat_deg,
+            lon_deg=lon_deg,
+        )
+        assert resolved == pytest.approx(expected, abs=1e-9)
+
+    def test_non_finite_mission_clock_never_resolves_to_daylight(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`[[BL-B137]]` end to end: a NaN/Infinity `abs_time_s` on the
+        wire must never force full daylight (the user Q6-forbidden
+        fallback) -- `_parse_mission_clock_dict` rejects it, so this
+        reads exactly like "never had a sample", not like a fresh
+        reading of noon."""
+        runner = _light_level_runner("Syria")
+        bad_clock: dict[str, Any] = dict(_MISSION_CLOCK_NOON, abs_time_s=float("nan"))
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(
+                runner, _ownship_at(0.0), {"mission_clock": bad_clock}
+            )
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert resolved != 90.0
+        assert runner.light_level_last_clock is None
+        assert "BL-B124" not in caplog.text  # still within grace, not yet an error
+
+    def test_a_corrupted_stored_clock_falls_back_to_dark_not_daylight(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Defence in depth one level deeper: even if a non-finite
+        `abs_time_s` somehow reached `runner.light_level_last_clock`
+        (bypassing `_parse_mission_clock_dict`'s own guard --
+        constructed directly here to isolate this exact layer), the
+        `try`/`except ValueError` this fix added around
+        `_compute_sun_elevation_deg`'s call must catch
+        `sun_elevation_deg`'s own `ValueError` and fall through to the
+        beyond-grace path (surfaced as the usual one-shot `ERROR`, same
+        as the pre-existing coordinate-projection-failure case), never
+        returning the raised exception's value or a silently-resolved
+        daylight figure. Mutation-sensitive: deleting that
+        `try`/`except` makes this raise `ValueError` instead of
+        returning a forced-dark/error result."""
+        runner = _light_level_runner("Syria")
+        runner.light_level_last_clock = (float("nan"), 2020, 6, 1)
+        runner.light_level_last_clock_model_time_s = 0.0
+        with caplog.at_level("ERROR"):
+            resolved = _resolve_sun_elevation_deg(runner, _ownship_at(0.0), None)
+        assert resolved == SIGHT_FULL_DARK_SUN_ELEV_DEG
+        assert resolved != 90.0
+        assert runner.light_level_error_logged is True
+        assert "BL-B124" in caplog.text
+
+
+class TestParseMissionClockDict:
+    def test_absent_key_is_none(self) -> None:
+        assert _parse_mission_clock_dict(None) is None
+
+    def test_well_formed_dict_parses(self) -> None:
+        assert _parse_mission_clock_dict(_MISSION_CLOCK_NOON) == (
+            43200.0,
+            2020,
+            6,
+            1,
+        )
+
+    def test_wrong_typed_field_is_none(self) -> None:
+        bad = dict(_MISSION_CLOCK_NOON)
+        bad["year"] = "2020"
+        assert _parse_mission_clock_dict(bad) is None
+
+    def test_bool_is_rejected_even_though_it_is_an_int_subclass(self) -> None:
+        bad = dict(_MISSION_CLOCK_NOON)
+        bad["day"] = True
+        assert _parse_mission_clock_dict(bad) is None
+
+    @pytest.mark.parametrize("abs_time_s", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_abs_time_s_is_rejected(self, abs_time_s: float) -> None:
+        """`[[BL-B137]]` -- a second, independent guard against the same
+        gap `schema.firing.MissionClockSample.from_wire` now closes at
+        the wire: this dict comes from `GET /firing/latest`'s JSON body,
+        a boundary a stale/unpatched aircraft-layer collector could
+        still cross. Passes the `isinstance(x, (int, float))` check
+        either way -- the point of this test is that it must not stop
+        there."""
+        bad = dict(_MISSION_CLOCK_NOON, abs_time_s=abs_time_s)
+        assert _parse_mission_clock_dict(bad) is None
