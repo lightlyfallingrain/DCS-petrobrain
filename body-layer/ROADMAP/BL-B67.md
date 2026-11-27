@@ -15,8 +15,8 @@
   unanswered: the probe wrote the knob to device 7 (I9K113) instead of 6 (WEAP_SYS) —
   `aircraft-layer/research/2026-11-27-bl-b67-shscho-knob-command.md`; fixed, re-probe card section
   added. **Re-probe flown same day: Q3 answered** — `GetDevice(6):performClickableAction(3038,
-  n*0.1)` sets arg 963 absolutely to n × 0.1; one shot supports step n = `Stations[n]` (step 1 →
-  station 1); `CurrentStation` never follows the knob, so the selected station is read from arg 963.
+  n*0.1)` sets arg 963 absolutely to n × 0.1; step n = `Stations[n]` (one shot, step 1 → station 1;
+  user confirmed: *"this is true"*); `CurrentStation` never follows the knob, so the selected station is read from arg 963.
   Batch B Stage 6 (effectors) is unblocked on Q3.
 
   ## 2026-10-29 — DoD: batch A merged, batch B waiting on the Stage 0 sortie

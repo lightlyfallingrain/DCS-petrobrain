@@ -76,8 +76,8 @@ Log: `logs-2026-11-27-b67/aircraft_layer_probe_weapons_reprobe.log` (second run 
   (0.1 … 0.8), and the park write set 0.3. One stray reading: after step 5, arg 963 read 0.000 once
   (t 9.02) before step 6 set 0.6 — not explained, worth watching.
 - **Step → station:** one data point. The user turned the knob by hand to 0.1 and fired a 9M120 at
-  t 113.2; **station 1** dropped 2 → 1. Consistent with step n = `Stations[n]`, not proven for the
-  other steps.
+  t 113.2; **station 1** dropped 2 → 1. Consistent with step n = `Stations[n]`. **User confirmed, verbatim:** *"\"fits position n
+  firing station n\" -> this is true."*
 - **`CurrentStation` does not follow the knob:** 0 throughout the run, with the knob at 0.1–0.8. So
   Petrovich's own knowledge of the selected station has to come from arg 963 (which reads back
   reliably) and his own writes, not from `LoGetPayloadInfo`.
