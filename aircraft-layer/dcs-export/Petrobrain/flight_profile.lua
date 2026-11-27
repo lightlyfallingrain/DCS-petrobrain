@@ -235,6 +235,19 @@ M.PROFILES["Mi-24P"] = {
     -- `k_collective_speed_give * collective_speed_give_max_a_f_d_mps2`
     -- (0.1 * 3.0 = 0.30 of collective travel, well short of saturating
     -- `u_c`). First cut, owed by the re-fly.
+    --
+    -- Round 2 (debug-2026-11-27.md), answering `aircraft-layer/
+    -- research/2026-11-27-mi24p-rotor-engine-limits.md`'s own open
+    -- question (rotor read 100-101% with collective pinned full down
+    -- during the pre-fix sixth re-fly decel): this bound is also why no
+    -- separate high-rotor-RPM guard is added here. The old unbounded
+    -- rate bias pinned `u_c` at -1.00 (full down -- minimum blade
+    -- loading, maximum rotor-overspeed risk); the shipped-gain toy
+    -- plant for the same 273->108 km/h decel now bottoms at `u_c` ~0.11,
+    -- nowhere near the floor, because this nudge can no longer exceed
+    -- its own bound above. The mechanism that drove the rotor-RPM
+    -- excursion (collective pinned at its floor) is the same mechanism
+    -- Round 1 already bounded -- not a separate, unaddressed path.
     collective_speed_give_max_a_f_d_mps2 = 3.0,
 
     -- ---- LV-1 (section E, "Lift-vector length"): feed-forward from
@@ -256,6 +269,22 @@ M.PROFILES["Mi-24P"] = {
     pedal_near_limit_margin = 0.1,
     collective_rate_cap_near_pedal_limit = 0.3,
     retreating_blade_stall_margin_kmh = 20.0,
+    -- Debug-2026-11-27, round 2 (`plans/flight-lift-vector/debug-2026-
+    -- 11-27.md`): this zero freeze is *why* the sixth re-fly's own
+    -- 273->108 km/h decel still loses ~19 m in the toy plant with
+    -- Round 1's fix and the shipped gains both active -- not the speed-
+    -- give nudge Round 1 bounded. While IAS sits at/above `retreating_
+    -- blade_stall_ias_kmh - retreating_blade_stall_margin_kmh` (230 km/h
+    -- here), no collective increase is allowed at all, so the vertical
+    -- loop's own climb demand cannot act until IAS drops below that
+    -- line -- Decision 30's own stated posture for this guard class
+    -- (`plans/flight-control/plan.md`): "the aircraft may still, worst
+    -- case, lose more than 100 m ... not a defect to engineer away."
+    -- Left at 0.0, not widened -- see `aircraft-layer/research/2026-11-
+    -- 27-mi24p-rotor-engine-limits.md`: raising collective near
+    -- retreating blade stall is exactly the wrong direction; this guard
+    -- and the altitude-hold fix both want LESS collective reduction at
+    -- that envelope edge, not more.
     collective_rate_cap_near_blade_stall = 0.0,
 
     -- LV-1 amendment (2026-11-25, rotor-RPM warning, superseding the

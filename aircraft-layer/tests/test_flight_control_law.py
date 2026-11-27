@@ -2526,6 +2526,122 @@ print(string.format("%.6f", state.u_c))
         u_c_without_nudge = float(_run(driver_template.replace("{k}", "0.0"))[0])
         assert u_c_with_nudge < u_c_without_nudge
 
+    @staticmethod
+    def _run_decel_scenario_shipped(n_frames: int) -> tuple[float, float, float, float]:
+        """review-debug-1127.md required fix 1, round 2
+        (`plans/flight-lift-vector/debug-2026-11-27.md`, "Round 2"):
+        `_run_decel_scenario` above proves the mechanism against this
+        file's deliberately slow shared `_PROFILE`
+        (`feedback_toy_plant_test_profile_must_match_shipped_values.md`),
+        which understated the real loss (claimed -9.3 m against the real
+        shipped-gain -19.3 m). This loads `flight_profile.lua`'s actual
+        `PROFILES["Mi-24P"]` wholesale via `dofile` -- the same mechanism
+        `TestAmendmentProductionValuesTogether` uses -- rather than
+        overriding a handful of fields, since this scenario's own loss is
+        driven by the vertical channel (`k_vs_error`/`k_alt_error`/
+        `k_collective`/`k_lift_ff`/the retreating-blade-stall rate cap)
+        at least as much as by the speed channel the other amendment
+        tests override alone."""
+        driver = (
+            """
+local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
+local u_c_trim = 0.3
+local measured = {measured}
+local command = { pitch = -3.5, roll = 0.0, pedals = 0.0, collective = 0.3 }
+local state = flight_control.law_init_at_take(measured, LIMITS, command, nil, PROFILE)
+state = flight_control.law_apply_goal(state, { ias_kmh = 108.0 }, LIMITS, PROFILE)
+local dt = 0.05
+local start_h = measured.h_m
+local min_h, max_h = start_h, start_h
+for i = 1, {n} do
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    local tau_p = 1.5
+    measured.pitch_deg = measured.pitch_deg + (state.theta_d - measured.pitch_deg) * (dt / tau_p)
+    local ax = 0.2 * (-3.5 - measured.pitch_deg)
+    measured.ias_mps = measured.ias_mps + ax * dt
+    measured.v_t_mps = measured.ias_mps + 2.0
+    local target_w = (state.u_c - u_c_trim) * 10.0
+    local prev_w = measured.w_mps
+    measured.w_mps = measured.w_mps + (target_w - measured.w_mps) * (dt / 1.0)
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    measured.h_m = measured.h_m + measured.w_mps * dt
+    measured.asl_m = measured.h_m
+    if measured.h_m < min_h then min_h = measured.h_m end
+    if measured.h_m > max_h then max_h = measured.h_m end
+end
+print(string.format("%.6f", min_h - start_h))
+print(string.format("%.6f", max_h - start_h))
+print(string.format("%.6f", measured.ias_mps * 3.6))
+print(string.format("%.6f", measured.h_m - start_h))
+""".replace("{profile_path}", str(_FLIGHT_PROFILE_LUA))
+            .replace("{n}", str(n_frames))
+            .replace(
+                "{measured}",
+                _measured(
+                    pitch_deg=-3.5,
+                    ias_mps=273.0 / 3.6,
+                    v_t_mps=273.0 / 3.6 + 2.0,
+                    h_m=300.0,
+                    asl_m=300.0,
+                ),
+            )
+        )
+        lines = _run(driver)
+        min_dev, max_dev, final_kmh, final_dev = (float(x) for x in lines)
+        return min_dev, max_dev, final_kmh, final_dev
+
+    def test_shipped_gains_dip_is_bounded_by_the_blade_stall_guard_not_the_old_bug(
+        self,
+    ) -> None:
+        """review-debug-1127.md's own measurement, proved here rather
+        than only in a debug report: against the shipped
+        `flight_profile.lua` gains, the same 273->108 km/h decel loses
+        -19.3 m, not the stale-profile test's -9.3 m. Round 2 traced this
+        residual to a *different* mechanism than Round 1's bug: Decision
+        30's retreating-blade-stall guard
+        (`plans/flight-control/plan.md`) sets `collective_rate_cap_near_
+        blade_stall = 0.0` -- a hard freeze on every collective INCREASE
+        while IAS sits at/above `retreating_blade_stall_ias_kmh - margin`
+        (230 km/h here, since the scenario starts at 273 km/h, well above
+        it). For as long as IAS stays above that line the vertical loop's
+        own climb demand cannot act at all, by the law's own stated
+        philosophy (same plan: "the aircraft may still, worst case, lose
+        more than 100 m ... not a defect to engineer away" -- said of
+        this exact guard class). Confirmed causally, not just by
+        correlation: relaxing `collective_rate_cap_near_blade_stall` to
+        10.0/s for this scenario alone (diagnostic only, never committed)
+        cuts the loss to -3.3 m -- the guard, not the speed-give nudge
+        Round 1 fixed, is what the remaining loss is made of. The bound
+        below is the honest shipped-gain number with a small margin, not
+        a tightened target -- see the debug report's Round 2 section for
+        the open question this leaves for the user (whether that
+        guard's existing "not a defect" judgement, made for the rotor-RPM
+        floor case, is accepted for this blade-stall case too)."""
+        min_dev, max_dev, final_kmh, _ = self._run_decel_scenario_shipped(n_frames=400)
+        assert min_dev > -22.0
+        assert max_dev < 15.0
+        # The decel still actually happens under the (brisk) shipped
+        # speed-loop gains too.
+        assert final_kmh < 273.0 - 20.0
+
+    def test_shipped_gains_dip_fully_recovers_once_below_the_blade_stall_margin(
+        self,
+    ) -> None:
+        """Same scenario, run out to 120 s (review-debug-1127.md's own
+        extension) -- confirms there is a real `alt_goal_m` position
+        reference behind the dip, not just a rate reference: once IAS
+        drops below the blade-stall margin and the vertical integrator
+        can act freely again, altitude overshoots back up (a real
+        recovery, not a flat/stuck line) before settling to (near) zero
+        deviation at the new, lower cruise speed."""
+        min_dev, max_dev, final_kmh, final_dev = self._run_decel_scenario_shipped(
+            n_frames=2400
+        )
+        assert min_dev > -22.0
+        assert max_dev > 2.0
+        assert abs(final_dev) < 1.0
+        assert abs(final_kmh - 108.0) < 5.0
+
 
 def test_file_parses_without_a_lua_interpreter_too() -> None:
     """`luac5.1` sanity, independent of whether a runtime interpreter is
