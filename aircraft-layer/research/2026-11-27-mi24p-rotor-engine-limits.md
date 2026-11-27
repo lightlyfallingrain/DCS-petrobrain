@@ -48,7 +48,46 @@ Gauge scale: rotor and engine gauges read 0–110 %, gauge % = draw arg × 110 (
 | Cruise | 870 | 95.5 |
 | Idle | 780 | max idle N1 table value |
 
+## V_NE and retreating blade stall (second user paste, 2026-11-27)
+
+Supplied by the user as reference texts (not ED's manual verbatim; secondary summaries). The user's
+own call on the existing guard: *"'Above 230 km/h it forbids any collective increase' -> no, that's
+well within operating range."*
+
+**V_NE (IAS km/h) by barometric altitude and weight** — set to prevent retreating blade stall and
+high-speed pitch-up (*podkhvat*):
+
+| altitude | ≤ 11 200 kg (normal) | 11 200–11 500 kg | 11 500–12 000 kg |
+|---|---|---|---|
+| 0–500 m | 335 | 320 | 300 |
+| 500–1 000 m | 335 | 320 | 300 |
+| 1 000–2 000 m | 320 | 300 | 280 |
+| 2 000–3 000 m | 300 | 280 | 260 |
+| 3 000–4 000 m | 280 | 260 | — |
+| 4 000–4 500 m | 260 | — | — |
+
+Note in the source: exceeding 330–350 km/h in a shallow dive at low altitude is the commonest
+trigger for an abrupt right roll and loss of lift in DCS.
+
+**G and handling above 200 km/h** (stub wings carry ~25 % of lift in cruise; elevator linked to
+collective, so a hard pull stalls blades and wings together):
+
+| condition | max G | handling rule |
+|---|---|---|
+| light load, < 1 000 m | 1.8 | smooth cyclic; lower collective 1–3° before sharp turns |
+| combat load | 1.5–1.6 | collective ≤ 11–12° in high-speed manoeuvring |
+| > 2 000 m | 1.3–1.4 | below 280 km/h before steep bank |
+| turbulence | 1.3–1.4 | V_NE − 30–40 km/h |
+
+**Thresholds:** normal rotor RPM 95 % ± 2 %; never below 92 % at high speed (low RPM lowers the RBS
+threshold). No single official RBS table: onset depends on airspeed, weight, density altitude, rotor
+RPM and load factor. **Symptoms:** low-frequency vibration, uncommanded nose pitch-up, roll right
+(retreating side). **Recovery:** lower collective 1–3° first, then smooth forward cyclic, level wings.
+
 ## Against the flight law (BL-16) and the sixth re-fly
+
+- **Blade-stall guard:** `retreating_blade_stall_ias_kmh = 250` (guard from 230 km/h) sits well inside
+  the operating range by the table above (V_NE 335 km/h at Petrovich's normal 50–800 m AGL band).
 
 - **Low side:** `rotor_rpm_warning_pct` = 88 matches the 88 %-for-30-s minimum; the 85 % floor
   matches the autorotation minimum. The hand-flown fast acceleration dipped to 85.4 % (2026-11-25).
