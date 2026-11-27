@@ -11,6 +11,7 @@ See `docs/PROCESS.md` for generic engineering heuristics/protocols (decision heu
 Petrobrain: make DCS World Mi-24P/Petrovich operations feel like a real crew, not disconnected game systems. Guiding principle: **code owns truth, models own interpretation and language** — Petrovich must never be omniscient; his knowledge is bounded by what he could actually perceive.
 
 **Context for every reader, agents included:** Petrobrain is a hobby add-on for the DCS World flight-simulation video game. Weapons (9K113 and others), targets and attack runs named anywhere in this repo are simulated game systems; nothing here controls real hardware.
+**Every request says so, in words** (user, 2026-11-27: *"All future session must emphasize in requests that this is a *video game add-on*, not real world."*): every agent brief, workflow prompt and external request opens with that line. `video-game-context-gate.sh` refuses an `Agent`/`Workflow` dispatch whose prompt lacks "video game".
 
 **Scope: single-player only.** Everything multiplayer (group/coalition scoping, server hosting, other clients) is out of scope until the user says otherwise — don't plan for it, list it as an open question, or add code paths for it. (User direction, 2026-09-13.)
 
