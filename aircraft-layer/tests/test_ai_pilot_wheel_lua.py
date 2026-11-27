@@ -2463,6 +2463,214 @@ class TestAiPilotGoalTick:
         assert values["hvrt_hold_cmd"] == "3003"
 
 
+class TestAiPilotGoalWakeKick:
+    """`[[BL-B139]]` -- the recovery-only wake kick itself (`ai_pilot_
+    wake_kick_direction_hold`/`_tap`), driven through the real goal
+    ticks. Reviewer required fix: the earlier pass only checked that the
+    new functions/fields/constant exist, never that `wake=true` with an
+    already-matching value actually forces a press."""
+
+    def test_altitude_wake_forces_a_down_hold_then_converges_to_the_exact_target(
+        self,
+    ) -> None:
+        """Already at the recovery target: the first tick must hold
+        DOWN, not settle with zero presses (the exact bug `plans/
+        flight-control/debug-bl-b139.md` diagnoses). Once the forced
+        hold has actually moved the display away from the target, the
+        wake is marked done and the pre-existing hold-and-poll logic
+        converges it back to the exact value, unchanged from before this
+        branch."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "100"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 100.0, '
+            .. '"altitude_target_ref": "radar", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "wake": true}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+
+        -- The forced DOWN hold has moved the display -- the ordinary
+        -- correction direction is no longer nil, so the wake hands off
+        -- and the ordinary hold-and-poll loop takes over (here: UP,
+        -- correcting back up towards the target).
+        ai_pilot_alt_text = "95"
+        ai_pilot_goal_tick(0.2)
+        print("hold_cmd_moved=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_moved=" .. tostring(ai_pilot_goal.progress))
+
+        -- Exact match again -- settles, same as any ordinary goal.
+        ai_pilot_alt_text = "100"
+        ai_pilot_goal_tick(0.4)
+        print("hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN -- the forced kick
+        assert values["progress"] == "pressing"
+        assert values["hold_cmd_moved"] == "3004"  # AI_WHEEL_UP, ordinary correction
+        assert values["progress_moved"] == "pressing"
+        assert values["hold_cmd_after"] == "nil"
+        assert values["progress_after"] == "settled"
+
+    def test_altitude_wake_falls_back_to_up_then_gives_up_without_holding_forever(
+        self,
+    ) -> None:
+        """The displayed value never actually moves (the wheel's own
+        lower stop) -- DOWN is held for the full timeout, then UP is
+        tried once, and when that also produces nothing the kick gives
+        up rather than holding a button open forever."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "100"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 100.0, '
+            .. '"altitude_target_ref": "radar", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "wake": true}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+
+        -- Still well inside AI_PILOT_WAKE_KICK_TIMEOUT_S -- DOWN stays
+        -- held, nothing has changed.
+        ai_pilot_goal_tick(1.4)
+        print("hold_cmd_mid=" .. tostring(ai_pilot_goal.hold_cmd))
+
+        -- Timeout elapses with no detectable change -- falls back to UP.
+        ai_pilot_goal_tick(1.6)
+        print("hold_cmd_up=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_up=" .. tostring(ai_pilot_goal.progress))
+
+        -- UP also produces nothing within its own timeout window --
+        -- gives up: the goal settles (still at target, nothing left to
+        -- do) instead of holding a button past the deadline.
+        ai_pilot_goal_tick(3.2)
+        print("hold_cmd_final=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_final=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd"] == "3005"  # AI_WHEEL_DOWN, forced kick
+        assert values["hold_cmd_mid"] == "3005"  # still held, well inside timeout
+        assert values["hold_cmd_up"] == "3004"  # AI_WHEEL_UP fallback
+        assert values["progress_up"] == "pressing"
+        assert values["hold_cmd_final"] == "nil"  # given up, released
+        assert values["progress_final"] == "settled"
+
+    def test_speed_wake_taps_down_once_then_up_once_not_once_per_tick(self) -> None:
+        """Speed's own discrete-tap variant: the readback never actually
+        moves, so the kick must tap exactly once per forced direction
+        (DOWN, then UP) and wait between ticks, never re-tapping on
+        every tick -- that would walk the ladder further than the one
+        step the recovery kick asks for. Both directions failing gives
+        up with no further taps."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_speed_text = "150"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "speed", '
+            .. '"heading_target_deg": null, "altitude_target_m": null, '
+            .. '"altitude_target_ref": null, "speed_target_kmh": 150.0, '
+            .. '"hvrt_direction": null, "wake": true}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("press_1=" .. table.concat(press_log, ","))
+        print("progress_1=" .. tostring(ai_pilot_goal.progress))
+
+        -- Readback unchanged -- well inside the timeout, no second tap.
+        ai_pilot_goal_tick(0.2)
+        print("press_2=" .. table.concat(press_log, ","))
+        print("progress_2=" .. tostring(ai_pilot_goal.progress))
+
+        -- Timeout elapses with no detectable step -- exactly one UP tap.
+        ai_pilot_goal_tick(1.6)
+        print("press_3=" .. table.concat(press_log, ","))
+        print("progress_3=" .. tostring(ai_pilot_goal.progress))
+
+        -- UP also produced nothing -- no re-tap while waiting out its
+        -- own timeout window.
+        ai_pilot_goal_tick(1.8)
+        print("press_4=" .. table.concat(press_log, ","))
+        print("progress_4=" .. tostring(ai_pilot_goal.progress))
+
+        -- Both directions tried, neither moved the display -- gives up,
+        -- no further taps.
+        ai_pilot_goal_tick(3.2)
+        print("press_5=" .. table.concat(press_log, ","))
+        print("progress_5=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["press_1"] == "3005:1,3005:0"  # one DOWN tap
+        assert values["progress_1"] == "pressing"
+        assert values["press_2"] == "3005:1,3005:0"  # no second tap, still waiting
+        assert values["progress_2"] == "pressing"
+        assert values["press_3"] == "3005:1,3005:0,3004:1,3004:0"  # one UP tap
+        assert values["progress_3"] == "pressing"
+        assert values["press_4"] == "3005:1,3005:0,3004:1,3004:0"  # still no re-tap
+        assert values["progress_4"] == "pressing"
+        assert values["press_5"] == "3005:1,3005:0,3004:1,3004:0"  # given up
+        assert values["progress_5"] == "settled"
+
+    def test_altitude_wake_already_off_target_skips_the_kick_entirely(self) -> None:
+        """A recovery target that is already off the display (the
+        ordinary case, not the bug) must never see a forced DOWN kick --
+        `ordinary_dir` is computed first every tick, and a non-`nil`
+        result marks the wake done immediately. Held below target
+        (needs UP) is chosen deliberately so a wrongly-forced DOWN would
+        be distinguishable from the correct ordinary UP."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "90"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 100.0, '
+            .. '"altitude_target_ref": "radar", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "wake": true}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+
+        ai_pilot_alt_text = "100"
+        ai_pilot_goal_tick(0.2)
+        print("hold_cmd_after=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress_after=" .. tostring(ai_pilot_goal.progress))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert (
+            values["hold_cmd"] == "3004"
+        )  # AI_WHEEL_UP, ordinary -- never forced DOWN
+        assert values["progress"] == "pressing"
+        assert values["hold_cmd_after"] == "nil"
+        assert values["progress_after"] == "settled"
+
+    def test_altitude_wake_false_at_target_presses_nothing(self) -> None:
+        """`wake=false` (an ordinary voice goal, never a recovery one)
+        that happens to already match the held value must keep settling
+        with zero presses, exactly as before this branch -- the kick
+        only ever fires while `.wake` is set."""
+        script = """
+        ai_pilot_mode_text = "FLT"
+        ai_pilot_alt_text = "100"
+        ai_pilot_alt_add_text = "R"
+        handle_ai_pilot_goal_command('{"goal_seq": 1, "param": "altitude", '
+            .. '"heading_target_deg": null, "altitude_target_m": 100.0, '
+            .. '"altitude_target_ref": "radar", "speed_target_kmh": null, '
+            .. '"hvrt_direction": null, "wake": false}', 0.0)
+        ai_pilot_goal_tick(0.0)
+        print("hold_cmd=" .. tostring(ai_pilot_goal.hold_cmd))
+        print("progress=" .. tostring(ai_pilot_goal.progress))
+        print("press_log=" .. table.concat(press_log, ","))
+        """
+        out = _run_goal_integration(script)
+        values = dict(line.split("=", 1) for line in out.strip().splitlines())
+        assert values["hold_cmd"] == "nil"
+        assert values["progress"] == "settled"
+        assert values["press_log"] == ""
+
+
 class TestHandleAiPilotGoalCommand:
     def test_a_different_param_releases_any_open_hold(self) -> None:
         """`heading_target_deg` is deliberately sent **non-null** in the
