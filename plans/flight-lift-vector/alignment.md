@@ -590,3 +590,63 @@ the five answered questions, plus `docs/acceptance/2026-11-24-sortie-feedback.md
 - None — all open questions from the goal check (Q1–Q5) are answered and the answers are reflected
   in the plan's decisions (modulo Finding 1's stale text, which is a plan-wording fix, not a
   question).
+
+## Plan check — 2026-11-27 — LV-2 amendment (breaks)
+
+**Verdict:** CONCERNS
+
+Checked `plan.md` "LV-2 amendment (2026-11-27)" to the end (branch `fix/bl16-flight-epoch-bound`,
+tip `866fb63b`; the amendment's final paragraph records U11 answered and the diagrams approved)
+against E5/E17 (goal check, 2026-11-20) and the user's own verbatim LV-2 answers in
+`explore-notes.md`, "LV-2 explore — breaks (2026-11-27)." No dedicated goal-aligner pass exists for
+LV-2; the explore answers serve as the settled expectations, per the task brief, so E18–E21 below
+are reconstructed directly from the user's own words, not derived by this pass.
+
+| expectation | stage | status |
+|---|---|---|
+| E5 — break: steep, fast, measured | B (bank/rate cap), C (height-gives routing) | met in shape; the G actually reached runs higher than intended — Finding 1 |
+| E17 — breaks fly as an aggressive escape (deferred here from LV-1) | Design Overview, B, C, "what reading the code turned up" §1 | met — closes the LV-1 amendment's deferral; steep bank, no separate end condition, roll-out on break heading all addressed |
+| E18 — ~2 G accepted, momentarily (*"I seem to go to about 2 G"*) | B (`break_max_bank_deg = 65°`) | contradicted in part — the cap itself yields 2.37 G, and B's own "Effect, by speed" note shows it binds continuously (not momentarily) at all three card speeds — Finding 1 |
+| E19 — less, smoother pull-back: turn from bank + collective, not aft cyclic; no violent oscillation | C (class-aware shortfall routing) | met — `effective_shortfall` scaled toward 0 while height has budget, which is the pitch-back/bank-easing the user reported |
+| E20 — height gives first, bounded by both ≤ 100 m loss AND ≥ 50 m AGL | C, D | met — `break_floor = max(break_floor_agl_m, break_entry_h_m − break_max_height_loss_m)`, both budgets live together, confirmed against the same-day correction text |
+| E21 — break = ordinary heading goal (±90°/±180° break-away), flown more aggressively, no new end condition | "What reading the code turned up" §1, B | met — shown already built by a direct code read (`axes_break_turn`/`law_apply_goal`/the settling clear), not re-derived |
+
+U11 (does the new 50 m break floor also move the ordinary-flight floor?) is answered ("only
+breaks") and carried correctly into D: `break_floor_agl_m` (new, 50) is break-only;
+`floor_agl_m` (40) and the unpark seed clamp are untouched. The diagrams were approved by the user
+before this check.
+
+### Findings
+
+1. **The break's bank cap is picked to land "a touch above" the user's own G figure, and the plan's
+   own stated reason for why that is safe is contradicted by its own next paragraph.** Lens: world
+   truth / internal consistency.
+   - **Assumption:** `break_max_bank_deg = 65°` is chosen "close to the ~2 G the user accepts
+     momentarily... deliberately a touch above 2.0 G rather than below it... the rate-cap below, not
+     this angle alone, is what actually bounds the load a break reaches in practice."
+   - **In the plan's own numbers:** 65° gives `n = 1/cos(65°) ≈ 2.37 G`, not ~2.0 G (60° gives
+     exactly 2.0 G, inside the same 60–80° window). The very next subsection, "Effect, by speed,"
+     shows the 65° cap **binds at all three card speeds** (120/180/250 km/h all need 67–79° for a
+     bare 40°/s turn), meaning the break flies at the full 65° cap, not under it, for the bulk of
+     each turn (2.5–5.2 s depending on speed) — the opposite of "the rate cap... bounds the load in
+     practice." The rate cap is what *drives* the bank to 65° and holds it there; it does not keep
+     the load below 65°'s own G.
+   - **The pilot would see:** roughly 2.37 G held for several seconds in every break at every card
+     speed, not a brief overshoot — a number the user did not say and a duration that sits uneasily
+     with "momentary."
+   - **Grounded in:** `plan.md` section B, "Chosen to land inside..." and "Effect, by speed";
+     `1/cos(60°) = 2.0`, `1/cos(65°) ≈ 2.366`; `atan(ω·V/g)` at 120/180/250 km/h ≈ 67°/74°/79° (own
+     arithmetic, checked against the plan's cited values).
+   - **Suggests:** either tighten the cap to 60° (exact 2.0 G, still inside E5's 60–80° window and
+     matching the user's own figure, still landing above the old 40°/s-implied bank at every card
+     speed), or ask the user directly whether ~2.37 G held for several seconds counts as the
+     "momentary... about 2 G" they described — the Risks section already flags 65° as a first cut
+     the card measures, but it does not flag this specific tension between "momentary" and
+     "continuously binding," which is new information from reading the plan's own two paragraphs
+     together.
+
+### Questions for the user
+1. Finding 1: is roughly 2.37 G, sustained for the 2.5–5.2 s a break's roll takes at the 65° cap,
+   still what you meant by "momentary overload... about 2 G" — or should the cap come down to 60°
+   (exact 2.0 G) to match your own figure more directly? (Recommend: 60°, since it still sits inside
+   E5's 60–80° window and still binds tighter than the old uncapped rate at every card speed.)
