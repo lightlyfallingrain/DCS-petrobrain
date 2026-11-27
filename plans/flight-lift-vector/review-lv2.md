@@ -154,3 +154,150 @@ Full read of the diff, the plan, the alignment check, the implementation note an
 and three mutations re-run independently (not taken on report). The one gap: `luac5.1` was not
 available in this environment, so the Lua syntax check itself was not independently re-run (spot
 reliance on the implementer's report for that one check only).
+
+---
+
+## Re-review — LV-2 fix pass, commit `15451bcd`
+
+Base: `15451bcd7fdfb1870099856c37cd3c191702567d` on `fix/bl16-flight-epoch-bound` (branch `lv2-fix`
+in the implementer's own account). This worktree's starting point (`f9864b45`, a different,
+unrelated feature) was not an ancestor, and the branch the task named is checked out elsewhere
+(`/Users/sg/Code/DCS-petrobrain-epochfix`, not touched); per the dispatch instructions a fresh
+branch `lv2-rereview` was checked out from the same object store at the named sha. Full read:
+`git show 15451bcd` in full (`flight_control.lua`, `flight_profile.lua`, the test file, the card,
+`plan.md`'s new "LV-2 fix pass" section, `implementation-lv2.md`'s fix-pass addendum, the new
+implementer agent-memory file). Checks run independently: `ruff format --check`, `ruff check`,
+`mypy --strict src` and the touched test file, `luac5.1 -p` on every deployed `.lua` file
+(available in this environment, unlike the prior pass — passes clean, closing that spot-check
+gap), full `pytest aircraft-layer/tests` (1211 passed). One mutation re-run independently (not
+taken on the implementer's word): commented out the `omega_heading = profile.break_omega_heading`
+line in `flight_control.lua` (reverting to the pre-fix, always-ordinary-shaper behaviour) and
+re-ran the touched test file — 12 of the targeted tests went red for the stated reason (every
+`TestLV2BreakShaperBandwidth` test but the ordinary-case regression, plus the renamed
+`TestLV2BreakBankRateCap` test), file restored and confirmed clean (`git diff` empty). Also
+independently re-derived, from first principles, the two numeric claims the fix pass's reasoning
+depends on: (1) a bare Python simulation of the idealized critically-damped shaper confirms the
+peak-rate formula `err·ω/e` at both `ω=0.3` (~9.95°/s, matching the original review) and `ω=1.0`
+(~33.1°/s, matching the fix pass's own figure); (2) `law_turn_rate_at_bank(60°, v)` at 120/180/250
+km/h gives 29.21/19.47/14.02°/s, matching the plan's/comment's "~29.2/19.5/14.0" cap figures
+exactly.
+
+### (1) Break now faster than ordinary, cap binds — through the real heading error, not seeded
+
+Confirmed. The fix adds exactly one mechanism (`break_omega_heading`, read only inside the
+existing `state.rate_override_deg_s ~= nil` branch, `flight_control.lua:912-940`) and the new
+`TestLV2BreakShaperBandwidth` class exercises it through the full closed-loop toy plant (bank lag
+included), not a seeded `r_ref` — the exact gap the original required fix named. The mutation
+above shows these tests are not decorative: removing the one line that reads `break_omega_heading`
+turns 11 of 13 new-class tests red for the right reason (cap-binds, faster-than-ordinary, and both
+no-sustained-oscillation checks all fail; the two that stay green — the pinned ordinary-case
+regression and one 180°-break-away overshoot-bound at the far end — do so because a reverted
+shaper still produces *some* overshoot-free, if far slower, motion, which is the right thing for
+them to still pass on). The claimed cap-derived rates (29.2/19.5/14.0°/s) and the claimed natural
+peak rate at the new bandwidth (~33.1°/s, which is why the cap now binds rather than being inert)
+both check out independently, above. The documentation correction is real too, not just a comment
+edit — `plan.md`'s "Effect, by speed" table, the `flight_profile.lua` comment and the card's
+expectation line now all state the same measured numbers (peak bank ~56/63/64° and ~5.4/6.2/7.3 s
+to 90% of the turn at 120/180/250 km/h), cross-checked consistent across all three documents.
+
+### (2) Ordinary heading flight bit-identical
+
+Confirmed. The `else` branch (ordinary, non-break heading) is untouched by the diff — the only
+change inside `law_update`'s heading-rate step is the new `local omega_heading` selection, which
+reads `profile.omega_heading` (unchanged value, 0.3) whenever `state.rate_override_deg_s == nil`.
+`TestLV2BreakShaperBandwidth::test_ordinary_heading_change_is_bit_identical_to_before_this_fix_pass`
+pins the exact closed-loop numbers for a 120 km/h ordinary 90° turn, and the full pre-existing
+regression suite (1211 tests, unmodified elsewhere) stays green. No new global, no cross-frame
+state — `omega_heading` is a fresh per-call `local`, not persisted on `state`.
+
+### (3) The ~5–10° roll-out overshoot — plant-lag artefact, acceptable as a first cut
+
+This is the one place a second reviewer could reasonably disagree, so stating the reasoning fully
+rather than deferring to the implementer's framing. The claim is that the overshoot belongs to the
+toy plant's first-order bank lag on `phi_d`, not to the shaper's own reference trajectory
+(`r_ref`/`psi_ref`), which stays critically damped (`zeta=1`, unchanged) at any bandwidth. Checked
+by reading `_LV2_CLOSED_LOOP_DRIVER`: the lag is modelled exactly where the implementer says it is
+(`measured.bank_deg = measured.bank_deg + (state.phi_d - measured.bank_deg) * (dt/tau)`,
+`tau = 1.0`, the same shape `_BREAK_PLANT_DRIVER`/`_HEADING_PLANT_DRIVER` already use elsewhere in
+this file) — a real, physically-motivated artifact (the aircraft's own bank cannot reverse
+instantly once the shaper starts decelerating toward the target), not a shortcut invented to excuse
+a defect. The claim that the idealized shaper alone shows zero overshoot at any bandwidth is
+consistent with standard 2nd-order critically-damped step response theory (no complex poles, so no
+ringing by construction) and is independently plausible, not just asserted. The residual itself is
+bounded (≤2 zero-crossings, asserted and mutation-tested) and single-shot, not growing or
+divergent, and it is the SAME mechanism the original review's own table implicitly already carried
+(any shaper fast enough to reach a bank cap will show some plant lag on roll-out) — this fix pass
+is the first point that mechanism became visible because, before it, the break never flew fast
+enough to expose it. **Judgment: acceptable to fly as a first cut with the card watching it, not a
+required fix.** It is disclosed in three places (the `flight_profile.lua` comment, the plan's own
+fix-pass section, and the card's watch line), bounded by a test, and named on the card's own
+acceptance item as something the user should flag if it reads as *more* than one clean correction —
+which is the right bar for a first-cut tunable (`break_omega_heading`) that the project's own
+"behaviour-affecting constants are tunable" convention already treats as something to retune from
+a live sortie, not something to perfect in the toy plant before ever flying it. If a future stage
+wants to tighten it, the implementer's own memory file and plan section already name the fix
+(a lookahead/anticipation term) rather than leaving it a mystery.
+
+### (4) Pitch stays calm — height-gives-first still holds
+
+Confirmed by inspection and by scope: this commit touches only `law_update`'s heading-rate step
+(`flight_control.lua` section B's `if`/`else`, 20 changed lines) and `flight_profile.lua` comments
+plus the one new constant. Section C (height-gives-first, `effective_shortfall`) is untouched —
+confirmed by `git show --stat` (no other hunk in `flight_control.lua`) and by reading the
+surrounding lines in the post-fix file, which show the pitch/altitude channel below the heading
+step is reached only after `r_d` is computed, with no new read of `break_omega_heading` or the
+local `omega_heading` anywhere in it. The faster roll-in does not feed back into the altitude
+shaper by construction — they are separate channels (heading-rate vs. altitude/pitch), and nothing
+in this diff couples them.
+
+### (5) Tests mutation-sound
+
+Confirmed, independently (not taken on the implementer's own counterfactual report) — see the
+mutation above. The renamed `TestLV2BreakBankRateCap` assertion
+(`test_cap_does_not_bind_below_88_kmh_leaving_the_rate_free_to_move`) was also checked for being a
+real property rather than a restated magic number: its exact-value assertion
+(`abs(r_after - 38.7) < 1e-6`) is derived from the unclamped `a_ref` formula at the new bandwidth
+(`38 + (90 - 2*38) * 0.05`), not a number copied from a single run, and the comment shows the
+derivation.
+
+### (6) Card expectations match the numbers
+
+Confirmed. The card's peak-bank/90%-time figures, the "~5–6°"/"~7–10°" overshoot ranges, and the
+branch/deploy instructions (`lv2-impl`/`lv2-fix`/`fix/bl16-flight-epoch-bound`, harvested onto
+`feature/bl16-lift-vector-law`) all cross-check against `plan.md`'s table and
+`implementation-lv2.md`'s own numbers, with no drift between the three documents.
+
+### Everything else checked — no new issues
+
+- **Cross-key coupling** (`break_omega_heading` vs. `t_roll`/`break_max_bank_deg`): named and
+  reasoned about in `implementation-lv2.md`, not guarded in code, consistent with the rest of this
+  table's own (unguarded) convention — correctly disclosed rather than silently skipped.
+- **Tuning mechanism**: `break_omega_heading` is a Lua-literal `flight_profile.lua` field, never
+  wire-received, same posture the original review already accepted for its three LV-2 siblings —
+  outside body-layer, this is the right-shaped substitute for the `tuning.py` mechanism, not a
+  departure from it.
+- **Scope**: diff touches only `flight_control.lua` (the one `if`/`else` branch), `flight_profile.
+  lua` (one new field plus comments), the test file, the card, the plan, the implementation note,
+  and one new agent-memory file — matches the required fix's scope exactly, no drift.
+- **Checks**: `ruff format --check`, `ruff check`, `mypy --strict src` and the touched test file,
+  `luac5.1 -p` on every deployed `.lua` file (now available, closing the prior pass's spot-check
+  gap), full suite (1211 passed) — all independently re-run and clean. The two pre-existing
+  `ruff`/`mypy` findings surfaced while running these checks (an unformatted/non-executable
+  research script, several `test_flight_control_api.py`/`test_flight_control_lua.py` mypy errors)
+  predate this commit by `git log -1`, are outside the diff, and are not this pass's to fix.
+
+## Verdict
+
+**APPROVED** — the required fix from the first pass is addressed: the cap now binds through the
+real heading error at every card speed, documented and tested against the real (not idealized)
+numbers, with the one known residual (plant-lag roll-out overshoot) disclosed in three places,
+bounded by a test, and correctly judged acceptable to fly as a first cut rather than something that
+needed fixing before this card is flown.
+
+## Review Confidence
+
+Full read of the diff, the plan's and implementation note's fix-pass sections, and the card.
+Checks and one mutation re-run independently (not taken on report), plus two independent
+first-principles numeric derivations (idealized-shaper peak rate, bank-cap-derived rate) that both
+matched the documents exactly. `luac5.1` was available this pass and run clean, closing the one gap
+the first pass flagged as a spot-check.
