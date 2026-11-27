@@ -108,7 +108,28 @@ footer{text-align:center; font-size:.75rem; color:var(--fg-dim); padding-top:4px
   </div>
 
   <div class="gate">
-    <h2>Re-fly 2026-11-25 (6th) &mdash; speed change and rotor RPM</h2>
+    <h2>Re-fly 2026-11-27 (7th) &mdash; slowing down holds altitude</h2>
+    <div class="block">
+      <div class="expect"><strong>6th re-fly:</strong> speed change accepted. Slowing down lost ~100&nbsp;m (273 &rarr; 108&nbsp;km/h); the 60&nbsp;km/h yaw runaway goes to LV-3. <strong>Now:</strong> &ldquo;less collective when slowing&rdquo; is a bounded nudge the height loop can always override; blade-stall guard moved from 230 to <strong>315&nbsp;km/h</strong> (V<sub>NE</sub> 335 &minus; 20). Simulated dip 3&ndash;4&nbsp;m, was ~40. Speed-change rate unchanged. <code>git pull</code> on both machines.</div>
+
+      <div class="label">1 &middot; Fast slow-down: ~270 &rarr; &ldquo;speed 110&rdquo;</div>
+      <div class="expect">Nose up, collective eases but not to the bottom. Altitude within about &plusmn;10&nbsp;m and back to the start height. Rotor stays below 100%.</div>
+      <div class="chk"><input type="checkbox" data-k="r7a" id="r7a"><label for="r7a">270 &rarr; 110 flown</label></div>
+
+      <div class="label">2 &middot; Slow slow-down: 150 &rarr; &ldquo;speed 80&rdquo;</div>
+      <div class="expect">Same expectations. 80, not 60: the slow-speed yaw is a known LV-3 item.</div>
+      <div class="chk"><input type="checkbox" data-k="r7b" id="r7b"><label for="r7b">150 &rarr; 80 flown</label></div>
+
+      <div class="label">3 &middot; Re-check row 3: 150 &rarr; 250 &rarr; 150</div>
+      <div class="expect">Should feel the same as last time.</div>
+      <div class="chk"><input type="checkbox" data-k="r7c" id="r7c"><label for="r7c">Row 3 re-checked</label></div>
+
+      <div class="record-box"><div class="label">Record</div>How much height did each slow-down lose, lowest point against start? Did it come back? Highest rotor RPM? Anything about how the slow-down looked or felt?</div>
+    </div>
+  </div>
+
+  <div class="gate">
+    <h2>Superseded &mdash; 6th re-fly (speed change and rotor RPM)</h2>
     <div class="block">
       <div class="expect"><strong>5th re-fly:</strong> bank take, climb/descent and level take all passed. Speed change still far too slow &mdash; the speed target itself crept up over ~15&nbsp;s. <strong>Now:</strong> full acceleration within 1&ndash;2&nbsp;s, held, ~5&nbsp;s settle; nose to about &minus;14&deg; in under 2&nbsp;s (limit &minus;15&deg;). RPM gauges calibrated (gauge = raw &times; 110); engine-RPM collective rate <strong>on</strong>; from <strong>88% rotor</strong> he eases the collective (your audio-warning stand-in). <code>git pull</code> on both machines.</div>
 
