@@ -98,7 +98,13 @@ class TestApplyAiPilotWheelGoal:
         assert goal.heading_target_deg == 90.0
         assert console.ai_pilot_goal_transition is None
         assert len(client.ai_pilot_goal_calls) == 1
-        assert client.ai_pilot_goal_calls[0][:2] == (goal.goal_seq, "heading")
+        # `[[BL-B141]]`: the wire value is minted from the one shared
+        # counter, not `goal.goal_seq` (the internal version) -- `1` is
+        # this poll's first draw (the mode-2 dual-write onto the
+        # `flight` channel draws a second, `2`, right after it, since
+        # `_runner`'s default `last_t_sim` makes that send fire too).
+        assert client.ai_pilot_goal_calls[0][0] == 1
+        assert client.ai_pilot_goal_calls[0][1] == "heading"
 
     def test_level_flight_queues_all_three_known_values(self) -> None:
         runner, client = _runner(
@@ -207,7 +213,14 @@ class TestApplyAiPilotWheelGoal:
 
         assert client.ai_pilot_goal_calls == []
 
-    def test_hvrt_step_always_sends_with_a_bumped_goal_seq(self) -> None:
+    def test_hvrt_step_always_sends_with_a_freshly_minted_wire_seq(self) -> None:
+        """`[[BL-B141]]`: the wire value is minted from the one shared
+        counter (here starting at 0, so `1`), not `goal.goal_seq + 1` --
+        and the internal version (`goal.goal_seq`) and `runner.ai_pilot_
+        goal_last_sent_seq` are left untouched by this one-shot send
+        (only the "set" branch writes that cursor now; there is nothing
+        left to keep in sync between the internal version and the wire
+        value once they are decoupled)."""
         goal = AiPilotWheelGoal(
             heading_target_deg=90.0, active_param="heading", goal_seq=3
         )
@@ -220,10 +233,13 @@ class TestApplyAiPilotWheelGoal:
 
         assert len(client.ai_pilot_goal_calls) == 1
         call = client.ai_pilot_goal_calls[0]
-        assert call[0] == 4  # bumped from 3
+        assert call[0] == runner.command_seq == 1
         assert call[-1] == "up"
         assert console.ai_pilot_hvrt_step_transition is None
-        assert runner.ai_pilot_goal_last_sent_seq == 4
+        assert runner.ai_pilot_goal_last_sent_seq == 3
+        new_goal = runner.parked_flight_state.goal
+        assert new_goal is not None
+        assert new_goal.goal_seq == 3  # internal version never bumped
 
     def test_unparking_drops_the_goal_and_the_send_cursor(self) -> None:
         goal = AiPilotWheelGoal(
@@ -406,7 +422,12 @@ class TestCbtmTransitions:
     align_for_launch` pure functions (`test_ai_pilot_wheel.py`'s own
     surface)."""
 
-    def test_align_starts_a_plain_alignment_and_sends_cbtm_seq_1(self) -> None:
+    def test_align_starts_a_plain_alignment_and_sends_a_minted_cbtm_seq(self) -> None:
+        """`[[BL-B141]]`: the ordinary goal "set" send (this module's own
+        docstring: every CBTM-transition call also sends one, on the
+        first poll of any activation) draws `1` from the shared counter
+        first, so the CBTM send itself draws `2` -- not its own
+        independent `1`-based space any more."""
         runner, client = _runner()
         console = CrewConsole(store=ContactStore())
         console.ai_pilot_cbtm_transition = "align"
@@ -417,12 +438,14 @@ class TestCbtmTransitions:
         assert state.align_phase == "aligning"
         assert state.cbtm_action_sent == "align"
         assert console.ai_pilot_cbtm_transition is None
-        assert runner.ai_pilot_cbtm_last_sent_seq == 1
         sent = _cbtm_send(client)
         assert sent[8] == "align"
-        assert sent[9] == 1
+        assert sent[9] == 2
+        assert runner.command_seq == 2
 
-    def test_align_for_launch_captures_a_snapshot_and_sends_cbtm_seq_1(self) -> None:
+    def test_align_for_launch_captures_a_snapshot_and_sends_a_minted_cbtm_seq(
+        self,
+    ) -> None:
         runner, client = _runner(
             held_heading=90.0,
             held_altitude=300.0,
@@ -449,7 +472,7 @@ class TestCbtmTransitions:
         assert state.cbtm_action_sent == "align_for_launch"
         sent = _cbtm_send(client)
         assert sent[8] == "align_for_launch"
-        assert sent[9] == 1
+        assert sent[9] == 2  # 1 goes to the same-poll ordinary goal send
 
     def test_break_left_is_recorded_and_ends_an_outstanding_alignment(self) -> None:
         """The break transition itself carries no `align_phase`
@@ -473,7 +496,7 @@ class TestCbtmTransitions:
         assert state.cbtm_action_sent == "break_left"
         sent = _cbtm_send(client)
         assert sent[8] == "break_left"
-        assert sent[9] == 1
+        assert sent[9] == 2  # 1 goes to the same-poll ordinary goal send
 
     def test_break_away_is_recorded_and_sent(self) -> None:
         runner, client = _runner()
@@ -486,7 +509,7 @@ class TestCbtmTransitions:
         assert state.cbtm_action_sent == "break_away"
         sent = _cbtm_send(client)
         assert sent[8] == "break_away"
-        assert sent[9] == 1
+        assert sent[9] == 2  # 1 goes to the same-poll ordinary goal send
 
     def test_break_left_captures_the_held_heading_at_the_press(self) -> None:
         """Mode-1 batch, Decision 32 -- the held heading right at this
@@ -513,21 +536,68 @@ class TestCbtmTransitions:
 
         assert runner.parked_flight_state.cbtm_break_entry_heading_deg is None
 
-    def test_a_second_cbtm_transition_bumps_its_own_seq_space_again(self) -> None:
-        """`cbtm_seq` is its own distinct sequence space, never `goal_
-        seq` -- a second CBTM trigger bumps from the last *CBTM* seq
-        sent, independent of whatever `goal_seq` is doing."""
+    def test_a_second_cbtm_transition_draws_the_next_shared_counter_value(
+        self,
+    ) -> None:
+        """`[[BL-B141]]` superseded the old independent per-channel
+        `cbtm_seq` space with the one shared body-side counter -- a
+        CBTM send draws the next number from whatever the shared
+        counter already is (simulated here by other commands having
+        already advanced `runner.command_seq`), not its own `+1`-from-
+        its-own-last-value space."""
         runner, client = _runner()
-        runner.ai_pilot_cbtm_last_sent_seq = 5
+        runner.command_seq = 5
         console = CrewConsole(store=ContactStore())
         console.ai_pilot_cbtm_transition = "break_right"
 
         _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
 
-        assert runner.ai_pilot_cbtm_last_sent_seq == 6
         sent = _cbtm_send(client)
         assert sent[8] == "break_right"
-        assert sent[9] == 6
+        assert sent[9] == 7  # 6 goes to the same-poll ordinary goal send
+        assert runner.command_seq == 7
+
+    def test_the_same_poll_goal_send_and_cbtm_send_share_one_counter(self) -> None:
+        """`[[BL-B141]]`'s own worked case: this module's docstring notes
+        every CBTM-transition call also sends an ordinary goal message
+        in the same poll. Both draw from the one shared counter, never
+        collide, and the two wire values are adjacent -- not drawn from
+        two independent per-channel spaces that could coincide."""
+        runner, client = _runner()
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "align"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        ordinary_calls = [
+            call
+            for call in client.ai_pilot_goal_calls
+            if len(call) <= 8 or call[8] is None
+        ]
+        assert len(ordinary_calls) == 1
+        cbtm_call = _cbtm_send(client)
+        assert ordinary_calls[0][0] + 1 == cbtm_call[9]
+        assert runner.command_seq == cbtm_call[9]
+
+    def test_cbtm_seq_well_after_a_mid_session_reset_is_never_the_lua_floor(
+        self,
+    ) -> None:
+        """AC-B22's own worry, mechanically closed: `runner.command_seq`
+        is never reset by `/command/reset` (only a fresh process starts
+        it at 0 -- its own field docstring), so a CBTM send well into a
+        session always carries a value Lua's freshly-zeroed `ai_pilot_
+        cbtm.seq` cannot already hold (`0`), unlike the old independent
+        per-channel `+1`-from-`None` restart behaviour this replaces."""
+        runner, client = _runner()
+        runner.command_seq = 500  # well into a session; a reset already happened
+        console = CrewConsole(store=ContactStore())
+        console.ai_pilot_cbtm_transition = "align"
+
+        _apply_ai_pilot_wheel_goal(runner, console, client)  # type: ignore[arg-type]
+
+        sent = _cbtm_send(client)
+        assert sent[9] not in (0, 1)
+        assert sent[9] == 502  # 501 goes to the same-poll ordinary goal send
 
 
 class TestLatestCommandAlwaysWinsAgainstABreak:

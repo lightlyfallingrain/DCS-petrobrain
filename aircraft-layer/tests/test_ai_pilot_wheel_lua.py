@@ -1689,6 +1689,13 @@ def _run_on_stop(
     goal_hold_cmd: str = "nil",
     hvrt_hold_cmd: str = "nil",
     cbtm_pending_cmd: str = "nil",
+    parked_active: str = "false",
+    mode_text: str = "nil",
+    course_text: str = "nil",
+    alt_text: str = "nil",
+    alt_add_text: str = "nil",
+    speed_text: str = "nil",
+    last_press: str = "nil",
 ) -> dict[str, str]:
     """`AC-B13`'s own test (plan Stage 6): runs the real, extracted
     `on_stop` against a minimal `GetDevice` mock for device 30's
@@ -1699,6 +1706,11 @@ def _run_on_stop(
     `hvrt_hold_cmd` (Stage P2a/P2b's own addition to this fix, same
     proactive-close-the-gap reasoning as `AC-B13` itself) are the
     equivalent presets for `ai_pilot_goal.hold_cmd`/`.hvrt_hold_cmd`.
+    `parked_active`/`mode_text`/`course_text`/`alt_text`/`alt_add_text`/
+    `speed_text`/`last_press` (`BL-B117`'s own addition) are the
+    equivalent presets for the parked flag and the overlay readback
+    text, each a Lua literal -- all default to the value `on_stop`
+    itself would leave them at, so existing callers see no change.
     Returns every printed `key=value` line as a dict."""
     exe = _lua_executable()
     if exe is None:
@@ -1720,6 +1732,17 @@ end
 
 local ai_wheel_pending_release_t = 42.0
 local ai_wheel_pending_cmd = {pending_cmd}
+-- `BL-B117` -- the parked flag and the overlay readback text; each
+-- preset to a non-default probe value by the one new test that wants
+-- to prove `on_stop` resets them, left at `on_stop`'s own default
+-- (`false`/`nil`) by every pre-existing caller of this harness.
+local ai_pilot_parked_active = {parked_active}
+local ai_pilot_mode_text = {mode_text}
+local ai_pilot_course_text = {course_text}
+local ai_pilot_alt_text = {alt_text}
+local ai_pilot_alt_add_text = {alt_add_text}
+local ai_pilot_speed_text = {speed_text}
+local ai_pilot_last_press = {last_press}
 local ai_pilot_takeover = {{
     stage = "correcting_altitude",
     t = 1.0,
@@ -1774,11 +1797,20 @@ local ai_pilot_cbtm = {{
         for path, name in (
             (_CORE_LUA, "safe_call"),
             (_AI_PILOT_WHEEL_LUA, "on_stop"),
+            (_AI_PILOT_WHEEL_LUA, "is_parked"),
         )
     )
     lines.append("on_stop()")
     lines.append(
         'print("press_log=" .. table.concat(press_log, ","))\n'
+        'print("is_parked=" .. tostring(is_parked()))\n'
+        'print("parked_active=" .. tostring(ai_pilot_parked_active))\n'
+        'print("mode_text=" .. tostring(ai_pilot_mode_text))\n'
+        'print("course_text=" .. tostring(ai_pilot_course_text))\n'
+        'print("alt_text=" .. tostring(ai_pilot_alt_text))\n'
+        'print("alt_add_text=" .. tostring(ai_pilot_alt_add_text))\n'
+        'print("speed_text=" .. tostring(ai_pilot_speed_text))\n'
+        'print("last_press=" .. tostring(ai_pilot_last_press))\n'
         'print("pending_release_t=" .. tostring(ai_wheel_pending_release_t))\n'
         'print("pending_cmd=" .. tostring(ai_wheel_pending_cmd))\n'
         'print("stage=" .. tostring(ai_pilot_takeover.stage))\n'
@@ -1906,6 +1938,32 @@ class TestOnStop:
         assert values["press_log"] == ""
         assert values["stage"] == "nil"
         assert values["correction_hold_cmd"] == "nil"
+
+    def test_the_parked_flag_and_overlay_text_are_reset(self) -> None:
+        """`BL-B117`: the second, adjacent gap `on_stop` used to leave --
+        `ai_pilot_parked_active` left `true` across a restart could
+        swallow the next mission's first real takeover (it gates the
+        takeover sequence's rising edge); a stale overlay text field
+        would echo a previous mission's reading in the pushed status
+        line until the first real tick overwrote it."""
+        values = _run_on_stop(
+            "nil",
+            parked_active="true",
+            mode_text='"FLT"',
+            course_text='"090"',
+            alt_text='"+1000"',
+            alt_add_text='"+50"',
+            speed_text='"150"',
+            last_press='"3005"',
+        )
+        assert values["is_parked"] == "false"
+        assert values["parked_active"] == "false"
+        assert values["mode_text"] == "nil"
+        assert values["course_text"] == "nil"
+        assert values["alt_text"] == "nil"
+        assert values["alt_add_text"] == "nil"
+        assert values["speed_text"] == "nil"
+        assert values["last_press"] == "nil"
 
 
 def _run_reset(epoch: int, *, pending_cmd: str = "3005") -> dict[str, str]:

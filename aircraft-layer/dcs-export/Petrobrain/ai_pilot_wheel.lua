@@ -2004,11 +2004,8 @@ end
 -- (BL-16 Batch A's one-shot nudge never needed a stop-hook reset; the
 -- takeover revision widened the window to the 60 s correction-hold
 -- ceiling and `LuaExportStop` was never updated for it -- the AC-B13
--- finding). Deliberately does **not** touch `ai_pilot_parked_active` or
--- the overlay text fields (`ai_pilot_mode_text`/`_course_text`/
--- `_alt_text`/`_alt_add_text`/`_speed_text`/`_last_press`) -- that is a
--- second, adjacent gap the plan found but explicitly scoped out, filed
--- separately as `BL-B117`.
+-- finding). `BL-B117` (below) closes the adjacent gap this function
+-- used to leave: the parked flag and the overlay readback text.
 local function on_stop()
     if ai_wheel_pending_cmd ~= nil then
         safe_call(function()
@@ -2077,6 +2074,21 @@ local function on_stop()
     ai_pilot_cbtm.gap_until_t = nil
     ai_pilot_cbtm.mode_cycle_attempts = 0
     ai_pilot_cbtm.mode_blocked_since_t = nil
+    -- `BL-B117`: the parked flag and the overlay readback text, the
+    -- "second, adjacent gap" this function's own header comment used
+    -- to flag as explicitly out of scope. A `true` parked flag left
+    -- across a restart could swallow the next mission's first real
+    -- takeover (it gates whether the takeover sequence sees a rising
+    -- edge); a stale overlay text field would echo a previous
+    -- mission's reading in the pushed status line until the first
+    -- real tick overwrites it.
+    ai_pilot_parked_active = false
+    ai_pilot_mode_text = nil
+    ai_pilot_course_text = nil
+    ai_pilot_alt_text = nil
+    ai_pilot_alt_add_text = nil
+    ai_pilot_speed_text = nil
+    ai_pilot_last_press = nil
     -- A new mission starts with no seat known: nothing is pressed until
     -- the camera has placed the player in the operator seat.
     ai_pilot_player_seat = nil

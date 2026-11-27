@@ -629,13 +629,14 @@ class ConsolePerceptionRunner:
     #: never every poll. `None` before the first send or right after a
     #: mission reset, same "ordinary init field" reasoning `watch_args_
     #: last_sent_sim`'s own docstring gives.
+    #: `[[BL-B141]]`: holds the *internal* `AiPilotWheelGoal.goal_seq`
+    #: version this process last sent for -- not the wire value, which
+    #: is now minted by `_next_command_seq` from the one shared counter
+    #: below. Written only by `_apply_ai_pilot_wheel_goal`'s "set"
+    #: branch; `hvrt_step` no longer touches it (there is nothing left
+    #: to keep in sync once the wire value is decoupled from this
+    #: internal version).
     ai_pilot_goal_last_sent_seq: int | None = None
-
-    #: Stage P3+P4's own "send on change" cursor for the CBTM channel
-    #: (`write_ai_pilot_goal`'s `cbtm_action`/`cbtm_seq` fields) -- the
-    #: same shape as `ai_pilot_goal_last_sent_seq` immediately above,
-    #: on this channel's own distinct sequence space.
-    ai_pilot_cbtm_last_sent_seq: int | None = None
 
     #: BL-16 sortie 2026-11-20 (`docs/acceptance/
     #: 2026-11-20-sortie-feedback.md`) -- the body-layer process-start
@@ -649,11 +650,13 @@ class ConsolePerceptionRunner:
     #: reset by a mission restart either, see `flight_control.lua`'s/
     #: `ai_pilot_wheel.lua`'s own `reset()`).
     command_reset_epoch: int = field(default_factory=lambda: int(time.time() * 1000))
-    #: BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
-    #: "one body-layer counter, for the whole process", the `flight`
-    #: channel's own mission-wide `seq` source (take/release/set alike).
-    #: Never reset across a mission restart (only a fresh process starts
-    #: it at 0 again) and never reused -- `_next_flight_seq` is the only
+    #: BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5),
+    #: widened by `[[BL-B141]]` -- the one body-layer counter minting
+    #: the wire `seq` for every seq-carrying command to the aircraft
+    #: layer: the `flight` channel's `seq`, `ai_pilot_goal`'s
+    #: `goal_seq`, and the CBTM one-shot's `cbtm_seq` alike. Never reset
+    #: across a mission restart (only a fresh process starts it at 0
+    #: again) and never reused -- `_next_command_seq` is the only
     #: writer.
     command_seq: int = 0
     #: Set once both mode 1's (`crew_console.flight_control_state.lua_
@@ -3892,11 +3895,14 @@ def _apply_ai_pilot_wheel_goal(
     to build") -- applies `crew_console`'s one-shot transition fields to
     `runner.parked_flight_state.goal`/`align_phase`/`pre_align_snapshot`,
     runs the rotation mechanism (`decide_ai_pilot_wheel`), and sends
-    `Export.lua` a fresh `ai_pilot_goal`/CBTM message whenever the
-    resulting `goal_seq`/`cbtm_seq` has moved since the last one actually
-    posted (`runner.ai_pilot_goal_last_sent_seq`/`ai_pilot_cbtm_last_
-    sent_seq`) -- the same "send on change" posture `write_sight_
-    target`'s own call site note describes. Called once per poll, right
+    `Export.lua` a fresh `ai_pilot_goal` message whenever the internal
+    `goal_seq` has moved since the last one actually sent for
+    (`runner.ai_pilot_goal_last_sent_seq`) -- the same "send on change"
+    posture `write_sight_target`'s own call site note describes. The
+    wire value sent is never this internal version directly: `[[BL-B141]]`
+    mints it fresh from `_next_command_seq` every send, on every
+    channel (the ordinary goal "set" send, `hvrt_step`, and the CBTM
+    one-shot alike). Called once per poll, right
     after `advance_parked_flight_state` has refreshed `runner.parked_
     flight_state` this poll, before `crew_console.drain_ai_pilot_wheel_
     speech` (which reads the same state this leaves behind).
@@ -3943,7 +3949,6 @@ def _apply_ai_pilot_wheel_goal(
                 cbtm_action_order=None,
             )
         runner.ai_pilot_goal_last_sent_seq = None
-        runner.ai_pilot_cbtm_last_sent_seq = None
         crew_console.ai_pilot_goal_transition = None
         crew_console.ai_pilot_level_flight_transition = False
         crew_console.ai_pilot_hvrt_transition = None
@@ -4152,9 +4157,14 @@ def _apply_ai_pilot_wheel_goal(
         final_goal is not None
         and final_goal.goal_seq != runner.ai_pilot_goal_last_sent_seq
     ):
+        # `[[BL-B141]]`: the gate above still compares the *internal*
+        # version counter (unchanged), but the wire value is now minted
+        # fresh from the one shared counter every channel draws from --
+        # it is no longer `final_goal.goal_seq` itself.
+        wire_seq = _next_command_seq(runner)
         try:
             aircraft_client.write_ai_pilot_goal(
-                final_goal.goal_seq,
+                wire_seq,
                 goal_param_for_wire(final_goal),
                 final_goal.heading_target_deg,
                 final_goal.altitude_target_m,
@@ -4185,7 +4195,7 @@ def _apply_ai_pilot_wheel_goal(
         if final_goal.speed_target_kmh is not None:
             set_fields["ias_kmh"] = final_goal.speed_target_kmh
         if set_fields and runner.last_t_sim is not None:
-            dual_write_seq = _next_flight_seq(runner)
+            dual_write_seq = _next_command_seq(runner)
             try:
                 aircraft_client.write_flight(
                     runner.command_reset_epoch,
@@ -4222,15 +4232,18 @@ def _apply_ai_pilot_wheel_goal(
     # `hvrt_step` (Stage P2b's own addition to the wire, not the plan's
     # "wire shape" section -- see `AircraftLayerClient.write_ai_pilot_
     # goal`'s docstring) is a one-shot trigger: always its own send with
-    # a freshly-bumped `goal_seq`, even when nothing else in the message
-    # changed, since `Export.lua` acts on it exactly once per distinct
-    # `goal_seq`.
+    # a freshly-minted wire `goal_seq`, even when nothing else in the
+    # message changed, since `Export.lua` acts on it exactly once per
+    # distinct `goal_seq`. `[[BL-B141]]`: minted from the one shared
+    # counter, not `final_goal.goal_seq + 1` -- there is no internal
+    # version to bump or write back any more, since the wire value and
+    # the internal version counter are decoupled.
     step = crew_console.ai_pilot_hvrt_step_transition
     if step is not None:
-        bumped_seq = (final_goal.goal_seq if final_goal is not None else 0) + 1
+        wire_seq = _next_command_seq(runner)
         try:
             aircraft_client.write_ai_pilot_goal(
-                bumped_seq,
+                wire_seq,
                 goal_param_for_wire(final_goal) if final_goal is not None else None,
                 final_goal.heading_target_deg if final_goal is not None else None,
                 final_goal.altitude_target_m if final_goal is not None else None,
@@ -4244,20 +4257,18 @@ def _apply_ai_pilot_wheel_goal(
             logger.warning(
                 "ai-pilot-goal hvrt_step write failed (continuing)", exc_info=True
             )
-        if final_goal is not None:
-            runner.parked_flight_state = replace(
-                runner.parked_flight_state,
-                goal=replace(final_goal, goal_seq=bumped_seq),
-            )
-        runner.ai_pilot_goal_last_sent_seq = bumped_seq
         crew_console.ai_pilot_hvrt_step_transition = None
 
     # Stage P3+P4's own CBTM wire send -- a one-shot trigger, same
-    # "always its own send with a freshly-bumped seq" shape `hvrt_step`
-    # above already has, on this channel's own distinct `cbtm_seq`
-    # space (never `goal_seq`).
+    # "always its own send with a freshly-minted seq" shape `hvrt_step`
+    # above already has. `[[BL-B141]]`: `cbtm_seq` is now minted from the
+    # one shared counter every channel draws from, not an independent
+    # per-channel `+1`-from-`None` counter -- the `goal_seq` argument
+    # just below is unrelated to this mint and is unchanged by this
+    # plan (it still just echoes the current internal goal version, or
+    # `0` with no goal yet).
     if cbtm_transition is not None:
-        bumped_cbtm_seq = (runner.ai_pilot_cbtm_last_sent_seq or 0) + 1
+        wire_cbtm_seq = _next_command_seq(runner)
         try:
             aircraft_client.write_ai_pilot_goal(
                 final_goal.goal_seq if final_goal is not None else 0,
@@ -4269,23 +4280,27 @@ def _apply_ai_pilot_wheel_goal(
                 final_goal.hvrt_direction if final_goal is not None else None,
                 None,
                 cbtm_transition,
-                bumped_cbtm_seq,
+                wire_cbtm_seq,
                 wake=wake,
             )
         except AircraftLayerError:
             logger.warning(
                 "ai-pilot-goal cbtm_action write failed (continuing)", exc_info=True
             )
-        runner.ai_pilot_cbtm_last_sent_seq = bumped_cbtm_seq
         crew_console.ai_pilot_cbtm_transition = None
 
 
-def _next_flight_seq(runner: ConsolePerceptionRunner) -> int:
-    """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5) --
-    `ConsolePerceptionRunner.command_seq` is the one mission-wide counter
-    the whole `flight` channel shares (take/release/set alike), never
-    reset across a mission restart (only a fresh body-layer process
-    starts it at 0) and never reused."""
+def _next_command_seq(runner: ConsolePerceptionRunner) -> int:
+    """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5),
+    widened by `[[BL-B141]]` (`plans/bl-b141-single-command-seq/plan.md`)
+    -- `ConsolePerceptionRunner.command_seq` is the one mission-wide
+    counter every seq-carrying command channel shares (the `flight`
+    channel's take/release/set, `ai_pilot_goal`'s "set"/`hvrt_step`, and
+    the CBTM one-shot alike), never reset across a mission restart (only
+    a fresh body-layer process starts it at 0) and never reused. Each
+    Lua module still dedupes only against values it has itself received
+    on its own channel (U1, settled 2026-11-27: one *source* of numbers,
+    not one shared Lua-side comparison)."""
     runner.command_seq += 1
     return runner.command_seq
 
@@ -4348,7 +4363,7 @@ def _apply_flight_requests(
     transition = crew_console.flight_control_transition
     if transition is not None:
         crew_console.flight_control_transition = None
-        seq = _next_flight_seq(runner)
+        seq = _next_command_seq(runner)
         until = now_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S
         try:
             aircraft_client.write_flight(epoch, seq, until, transition, {})
@@ -4376,7 +4391,7 @@ def _apply_flight_requests(
     goal_request = crew_console.flight_control_goal_transition
     if goal_request is not None:
         crew_console.flight_control_goal_transition = None
-        seq = _next_flight_seq(runner)
+        seq = _next_command_seq(runner)
         until = now_sim + FLIGHT_REQUEST_ACCEPT_WINDOW_S
         fields = goal_request_fields(goal_request)
         try:
