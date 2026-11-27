@@ -1,0 +1,89 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Expected-Area Look Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{--bg:#0c1210;--bg-panel:#141c19;--fg:#e9efe9;--fg-dim:#9fb0a8;--accent:#e8a33d;--record:#4fa3c4;--record-dim:#1c3038;--rule:#263430;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--rule:#dcd6c4;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--rule:#dcd6c4;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;font:17px/1.5 "Source Sans 3",system-ui,sans-serif;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+h1,h2{font-family:"Barlow Condensed",system-ui,sans-serif;margin:0}
+code,pre{font-family:"JetBrains Mono",monospace;font-size:.86em}
+pre{background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:10px;overflow-x:auto;margin:0}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:2.1rem;text-transform:uppercase;color:var(--accent);letter-spacing:.02em}
+header p{margin:0;color:var(--fg-dim)}
+.branch,.card,.note{background:var(--bg-panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.card.prize{border-color:var(--accent)}
+.card h2{font-size:1.35rem}
+.tag{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.branch code{color:var(--accent)}
+.prizetag{font-size:.75rem;background:var(--accent);color:var(--bg);padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.record{background:var(--record-dim);border-left:3px solid var(--record);padding:10px 12px;border-radius:0 6px 6px 0}
+.chk{display:flex;gap:10px;align-items:center}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+</style>
+<div class="wrap">
+  <header>
+    <h1>Expected-Area Look</h1>
+    <p>BL-B111 &mdash; before calling a sighting new, Petrovich glasses where a remembered group should be &mdash; 2026-11-27</p>
+  </header>
+
+  <div class="branch">
+    <span class="tag">Branch</span>
+    <div><code>main</code> &mdash; both machines: <code>git checkout main &amp;&amp; git pull</code>, usual redeploy (the line-of-sight Hook must be in <code>Saved Games\DCS\Scripts\Hooks\</code>; DCS restart if it changed).</div>
+    <span class="tag">Body-layer (Mac, from <code>run-scripts/</code>)</span>
+    <pre>cd run-scripts
+./run-body-layer-debug-view.sh --expected-area-log logs/expected-area.jsonl</pre>
+    <div class="tag">Air start, straight and level, 50–800 m AGL. The eyesight view shows where the binoculars look.</div>
+  </div>
+
+  <div class="note"><span class="tag">What changed</span>A sighting on or beside a group he remembers but can't see now is <strong>held</strong>. He puts the binoculars on that group's expected place, then decides: second group (&ldquo;new contact&rdquo;), the same group (silent, or &ldquo;that group, now &hellip;&rdquo;), or he can't look and calls it new. Point probe confirmed live today.</div>
+
+  <div class="card prize">
+    <h2>1 · Ridge case<span class="prizetag">The prize</span></h2>
+    <div>One group glassed on the <strong>far side of a ridge</strong>, a second, different group nearer on your side on about the same bearing. Fly so the far group drops behind the ridge for a few seconds, then let the near group come into range.</div>
+    <div><span class="tag">Expect</span><br>Binoculars swing to the <strong>far group's last place</strong> first (eyesight view), a short pause, then &ldquo;new contact&rdquo; for the near group only. Far group not re-announced.</div>
+    <div class="record"><span class="tag">Record</span><br>Where did the glass go first? How long was the pause? What did he say?</div>
+    <label class="chk"><input type="checkbox" data-k="c1">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>2 · Parked group, 10+ minutes away</h2>
+    <div>Glass a stationary group once, leave for 10+ minutes, come back on about the same bearing and range.</div>
+    <div><span class="tag">Expect</span><br>No &ldquo;new contact&rdquo;. No &ldquo;that group, now &hellip;&rdquo; unless the clock-hour or 0.5&nbsp;km range bucket really changed.</div>
+    <label class="chk"><input type="checkbox" data-k="c2">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>3 · SAM site after ten minutes</h2>
+    <div>Same as 2 with an air-defence group.</div>
+    <div><span class="tag">Expect</span><br>At most <strong>one</strong> threat line over the whole sequence; never a second &ldquo;new contact&rdquo; for the same site.</div>
+    <label class="chk"><input type="checkbox" data-k="c3">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>4 · Group in a town</h2>
+    <div>Same as 2 with a group parked in or next to a settlement.</div>
+    <div><span class="tag">Expect</span><br>&ldquo;New contact&rdquo; &mdash; he can't see into a town, so he can't confirm the place empty. Silence or a relocation line here is worth reporting.</div>
+    <label class="chk"><input type="checkbox" data-k="c4">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>5 · Busy scene</h2>
+    <div>Several contacts in range together for a few minutes. Nothing specific to hear; the log counts how often the hold-and-look ran.</div>
+    <label class="chk"><input type="checkbox" data-k="c5">Flown</label>
+  </div>
+
+  <div class="note"><span class="tag">Across every case</span>&ldquo;That group, now &hellip;&rdquo; should sound like a position update, never &ldquo;has moved&rdquo;. A sighting that appears in the eyesight view and then is <strong>never</strong> mentioned at all is a bug.</div>
+
+  <div class="record"><span class="tag">Bring back</span><br>Answers per case, and the stamped <code>body-layer/logs/expected-area*.jsonl</code> plus the usual sortie logs. Anything that surprises you is worth more than anything on this list.</div>
+</div>
+<script>
+const KEY='bl-b111-flight-2026-11-27';
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{try{const s=JSON.parse(localStorage.getItem(KEY)||'{}');s[b.dataset.k]=b.checked;localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}});
+});
+</script>
