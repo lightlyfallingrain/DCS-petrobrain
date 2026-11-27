@@ -1,0 +1,99 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>LV-2 Breaks Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{--bg:#0c1210;--bg-panel:#141c19;--fg:#e9efe9;--fg-dim:#9fb0a8;--accent:#e8a33d;--record:#4fa3c4;--record-dim:#1c3038;--warn:#d9684b;--rule:#263430;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;font:17px/1.5 "Source Sans 3",system-ui,sans-serif;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+h1,h2{font-family:"Barlow Condensed",system-ui,sans-serif;margin:0}
+code{font-family:"JetBrains Mono",monospace;font-size:.88em}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:2.1rem;text-transform:uppercase;color:var(--accent);letter-spacing:.02em}
+header p{margin:0;color:var(--fg-dim)}
+.branch{background:var(--bg-panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.tag{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.branch code{color:var(--accent)}
+.note{background:var(--bg-panel);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 6px 6px 0}
+.card{background:var(--bg-panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.card.prize{border-color:var(--accent)}
+.card h2{font-size:1.35rem}
+.prizetag{font-size:.75rem;background:var(--accent);color:var(--bg);padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.record{background:var(--record-dim);border-left:3px solid var(--record);padding:10px 12px;border-radius:0 6px 6px 0}
+.chk{display:flex;gap:10px;align-items:center}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--rule);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--fg-dim);font-weight:600}
+</style>
+<div class="wrap">
+  <header>
+    <h1>LV-2 Breaks</h1>
+    <p>BL-16 lift-vector law &mdash; breaks: steep bank, height gives first, 50&nbsp;m floor &mdash; 2026-11-27</p>
+  </header>
+  <div class="branch"><span class="tag">Branch</span><code>feature/bl16-lift-vector-law</code><span class="tag">both machines: <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, usual redeploy and restarts. No new deploy step. SAU H, K, T <strong>off</strong> before every take. Both debug flags on.</span></div>
+
+  <div class="note"><strong>What changed.</strong> A break flies its own faster approach to the heading, up to a <strong>60° bank cap (~2&nbsp;G)</strong>. When collective lags the roll-in, <strong>height gives first</strong> instead of nose-up and bank easing &mdash; down to never more than 100&nbsp;m lost and never below <strong>50&nbsp;m AGL</strong> (breaks only). Break = heading goal entry&nbsp;±90°, break away 180°.</div>
+
+  <div class="card">
+    <span class="tag">Expected (simulation), 90° break</span>
+    <div class="tbl"><table>
+      <thead><tr><th>entry</th><th>peak bank</th><th>90% of turn</th><th>ordinary turn</th></tr></thead>
+      <tbody>
+        <tr><td>120 km/h</td><td>~56°</td><td>~5.4 s</td><td>~15 s</td></tr>
+        <tr><td>180 km/h</td><td>~63°</td><td>~6.2 s</td><td>~21 s</td></tr>
+        <tr><td>250 km/h</td><td>~64°</td><td>~7.3 s</td><td>~28 s</td></tr>
+      </tbody>
+    </table></div>
+    <div><span class="tag">Known</span><br>Roll-out swings past the break heading by ~5° (90°) or ~7–10° (180°), then <strong>one</strong> clean correction. More than one, or hunting, is new &mdash; say so.</div>
+  </div>
+
+  <div class="card prize">
+    <h2>1–3 · Break left and right at 120, 180, 250<span class="prizetag">The prize</span></h2>
+    <div>Six breaks: &ldquo;break left&rdquo; / &ldquo;break right&rdquo; at each speed.</div>
+    <div><span class="tag">Expect</span><br>Steep bank promptly, <strong>little or no nose-up</strong>, ball centred, speed near entry, height loss ≤&nbsp;100&nbsp;m, roll-out near entry ±90°.</div>
+    <div class="record"><span class="tag">Record</span><br>Does it read as &ldquo;roll-in good, pull-back gone&rdquo;? Rough bank, nose, height lost, roll-out accuracy. Any trace of the old pull-back and violent correction?</div>
+    <label class="chk"><input type="checkbox" data-k="b1">120 both ways</label>
+    <label class="chk"><input type="checkbox" data-k="b2">180 both ways</label>
+    <label class="chk"><input type="checkbox" data-k="b3">250 both ways</label>
+  </div>
+
+  <div class="card">
+    <h2>4 · Break away</h2>
+    <div>&ldquo;Break away&rdquo; (entry + 180°). Same watch items.</div>
+    <label class="chk"><input type="checkbox" data-k="b4">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>5 · Low entry, ~70 m AGL</h2>
+    <div><span class="tag">Expect</span><br>The <strong>50&nbsp;m floor</strong> is the limit (only ~20&nbsp;m to give): he stops sinking near 50&nbsp;m and the turn goes on shallower.</div>
+    <div class="record"><span class="tag">Record</span><br>Lowest height above ground? What gave instead &mdash; bank or speed?</div>
+    <label class="chk"><input type="checkbox" data-k="b5">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>6 · Slow entry, ~100 km/h</h2>
+    <div><span class="tag">Expect</span><br>A gentler roll-in than at 120+, no hand-back.</div>
+    <label class="chk"><input type="checkbox" data-k="b6">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>7 · Break near the rotor warning (88%)</h2>
+    <div>Right after a hard pull or a high-power climb, with rotor near 88%, call a break.</div>
+    <div><span class="tag">Expect</span><br>Rotor does not dip toward 85% during the roll-in.</div>
+    <label class="chk"><input type="checkbox" data-k="b7">Flown</label>
+  </div>
+
+  <div class="record"><span class="tag">Bring back</span><br>Answers above, both logs (<code>aircraft_layer_flight_trace.log</code>, <code>aircraft_layer_debug.log</code>). Anything that surprises you is worth more than anything on this list.</div>
+</div>
+<script>
+const KEY='lv2-breaks-2026-11-27';
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{try{const s=JSON.parse(localStorage.getItem(KEY)||'{}');s[b.dataset.k]=b.checked;localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}});
+});
+</script>
