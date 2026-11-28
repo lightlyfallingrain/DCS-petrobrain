@@ -905,3 +905,88 @@ and Flight M-B's "hold 60 m over rising ground" will show any sag).
   down?
 - **Q6.** At night without NVG, does the look-ahead shrink the way it does in fog, or does only fog
   limit it? *(Low priority.)*
+
+## M3 terrain floor — plan check (2026-11-28)
+
+**Verdict:** CONCERNS
+
+Checked against `plan.md` "## M3 amendment (2026-11-28)" (L2105–2784) at tip `19734a33`, including
+the "Answered 2026-11-28" block under "Decisions Requiring User Input (M3)" (U20 = 10 m/s, U22 =
+"every climb trades speed", not the plan's own earlier recommendations of 5 m/s and "terrain only").
+Design sections A–F, the diagrams, and the Co-moving table were all written or revised to the
+answered values — no stale number or branch survives there. Three spots elsewhere in the same
+amendment still read as if the recommendation, not the answer, had landed; none of them changes the
+law (sections A–D are consistent), but each could mislead an Implementer or Reviewer checking the
+work against the user's actual decision.
+
+| expectation | stage | status |
+|---|---|---|
+| E1 — baro hold toward rising ground | A (floor beneath), C (floor into shaper) | met — card row 3, test (terrain driver, E1) |
+| E2 — low cruise, speed gives first then resumes | B/C/D | met — card row 4, test (terrain driver, E2) |
+| E3 — past the crest, returns without lingering, VRS kept | C (ease-down), Decision 31 | met — card row 5 |
+| E4 — clearance owed where he will be, not everywhere in 1 km | B (Q1→A, per-point clearance), U21 (yes) | met — test ("altitude 60" stays in U21 band, not 150 m), card row 6 |
+| E5 — explicit lower height flown as commanded | A (`F_eff = min(50, AGL goal)`) | met — card rows 2, 7, 8 |
+| E6 — fog limits anticipation | — | deferred → `[[BL-B138]]` (plan.md L2404–2406, L2707; `BL-B138.md`'s own entry names this as its "second consumer," BL-16 M3, verbatim) |
+| E7 — break never below floor | A (break floor = max(F_eff, entry − 100)) | met — card row 10 |
+| E8 — hover/pedal turn does not pump height | B (ground-speed-along-nose gate, `V_f ≥ terrain_min_speed_mps`) | met — card row 9, test |
+| E9 — silence | F ("No speech at all") | met — card row 15 |
+| E10 — mode 2 untouched, no jump at unpark | F, A (unpark seed clamp removed) | met — card row 12, 7 |
+
+### Findings
+
+1. **Risks bullet (plan.md L2697–2698) still describes the superseded U22 recommendation, not the
+   answer** — lens: consistency / crew sense
+   - **Assumption:** "Removing the 5 m/s cap changes every altitude command, not only terrain: big
+     climbs go to available power (U22) and big descents at speed are fast." "Go to available power"
+     is exactly what "terrain only" (the recommendation) would mean — a commanded climb keeps its
+     speed and just climbs as fast as power allows.
+   - **In the sim:** U22 was answered *"every climb trades speed"* — "altitude 500" at 220 km/h with
+     nothing in the way (the plan's own card-row-11 example) now also slows toward U19's ~100 km/h
+     floor before using available power, exactly like a terrain climb.
+   - **The pilot would see:** nothing wrong in the cockpit — this is a Risks-section description, not
+     code — but a reader checking the plan against the Answered block would read this line and
+     conclude ordinary big climbs keep their speed, which is the opposite of what was decided.
+   - **Grounded in:** the Answered block itself, L2747–2750 ("the lead is `w_ref_lead_max_mps` for
+     ordinary commanded climbs too; no terrain-only branch").
+   - **Suggests:** reword to "big climbs also trade speed, down to U19's floor, before using
+     available power (U22)."
+2. **Card row 11 (plan.md L2677) names U22 without saying what it now means** — lens: non-obvious case
+   - **Assumption:** "'Climb 300' at 220 km/h: no 5 m/s cap; speed per U22; no overshoot at the top."
+     "Speed per U22" was written generically enough to cover either answer, and was never updated once
+     U22 landed on the non-recommended side.
+   - **In the sim:** this exact row is the worked example the Answered block uses ("Altitude 500 at
+     220 km/h, nothing in the way"). The pilot flying this row should see the aircraft slow — not just
+     "whatever U22 says" — and come back to 220 after.
+   - **The pilot would see:** a correctly-behaving aircraft, but the card gives whoever flies it no
+     concrete thing to check against, so a real regression (speed *not* giving on an ordinary climb)
+     could pass the card unnoticed.
+   - **Grounded in:** every sibling row (4, 6, 9) states the concrete expected reading; row 11 is the
+     one row that doesn't, and it is the row that most needs to since it is U22's test case.
+   - **Suggests:** "speed falls toward U19's ~100 km/h floor and returns after, per U22's 'every
+     climb' answer."
+3. **Tests section has no explicit assertion for U22's actual case** — lens: non-obvious case
+   - **Assumption:** the "No cap" bullet (plan.md L2636–2638) checks `w_ref − w ≤
+     w_ref_lead_max_mps` under capped authority, and the terrain-driver bullet (L2628, E2) checks
+     `speed_goal_mps` unchanged while speed falls toward a *terrain* climb — but nowhere does a test
+     drive an **ordinary, non-terrain** altitude-step command (no grid demand at all) through capped
+     authority and assert `v_ref` yields the same way. That is exactly the behaviour U22 (as answered)
+     added beyond what "terrain only" would have needed.
+   - **In the sim:** if a future change narrowed the governor's lead back to 0 for a plain climb (the
+     "terrain only" shape the plan almost shipped), no test here would catch it — the terrain-driver
+     test only exercises the terrain-bound case.
+   - **Grounded in:** the Answered block's own framing of U22 as a distinct behavioural case from
+     terrain climbs ("a commanded climb with no terrain in the way").
+   - **Suggests:** add one toy-plant case to the "No cap" bullet: a plain "altitude 500" step, capped
+     climb authority, no terrain grid — assert `v_ref` yields toward `speed_give_floor_kmh` the same
+     way the terrain case does, and returns once the shortfall ends.
+
+Not raised as findings: the ease-down value (10 m/s, U20) is consistent everywhere it is restated —
+no stale "5" survives outside the historical recommendation text under "Decisions Requiring User
+Input," which the project keeps on record below its own "Answered" block by convention (not stale,
+by design). The deferred rows (E6) correctly name `[[BL-B138]]`, whose own roadmap entry already
+mentions this plan's M3 as its "second consumer" — the deferral has a tracked home.
+
+### Questions for the user
+
+None — the three Findings are text the main loop can correct directly before Implementer; no
+decision beyond what is already on record (U18–U22) is needed to fix them.
