@@ -542,3 +542,13 @@ Main-loop reading:
 - **At the floor mid-break: collective comes back up and the turn slows** — ground clearance
   outranks turn rate.
 
+**Goal check's six questions (`alignment.md`, "Goal check — 2026-11-28 — LV-2 rework"), user,
+verbatim (2026-11-28):** *"break questions: as recommended"*. So:
+1. After roll-out: **level at the height reached** (no climb back to the pre-break height).
+2. No height to spare: **level turn at 30° bank**, steeper than the ordinary 20° cap, height held.
+3. **The collective drop shrinks continuously as the height left to spend shrinks** — "no altitude
+   to spare → normal turn" and "more collective, slower turn" are the two ends of one rule.
+4. Slow entry (100–120 km/h): **about half the collective drop.**
+5. Pedal in the break: **ball centred** (coordinated turn), not the 2026-11-20 extra pedal.
+6. Break away: **30° for now**, decide after the flight.
+
