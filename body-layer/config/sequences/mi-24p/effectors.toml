@@ -89,6 +89,15 @@ values = { on = 1.0, off = 0.0 }
 source_element = "PEDAL-DAMPER-COVER-PTR-PTR"    # arg 289
 values = { open = 1.0, closed = 0.0 }
 
+[effectors.p_spuu_power]
+source_element = "SPUU-ON-OFF-PTR"    # arg 270, device 19 SPUU_52
+values = { on = 1.0, off = 0.0 }
+# The adjustable stops' power toggle ("ON / ADJUST STOPS" on the AFCS
+# strip) -- a 2-position toggle, so its arg is the persisted state and
+# the engine's self-check reads it. The stops' own red OFF button
+# (SPUU-OFF-PTR, arg 275), knob (arg 276) and P/t switch (arg 277) are
+# not wired yet: their behaviour is being researched (2026-11-28).
+
 [effectors.p_sau_b_channel_on]
 source_element = "SAU-B-ON-PTR"    # arg 255
 values = { on = 1.0, off = 0.0 }

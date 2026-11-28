@@ -515,7 +515,7 @@ rather than from this dump).
 | `SPUU-CONTROL-PTR` | SPUU Control Switch P/NONE/T | pilot (defaulted) | springloaded_3_pos_tumb | [3007, 3006] | [277] |  | -1/0/1 momentary |  |
 | `SPUU-KNOB-PTR` | SPUU Adjustment Knob | pilot (defaulted) | default_axis | [3003] | [276] |  | 0 to 1 continuous (gain 0.166667) |  |
 | `SPUU-OFF-PTR` | SPUU OFF (that's a button but acts like a switch) | pilot (defaulted) | default_position_tumb | [3001] | [275] |  | 0/1 |  |
-| `SPUU-ON-OFF-PTR` | SPUU Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [270] |  | 0/1 |  |
+| `SPUU-ON-OFF-PTR` | SPUU Power ON/OFF | pilot (defaulted) | default_2_position_tumb | [3010] | [270] |  | 0/1 | `p_spuu_power` |
 
 ## Device 23 -- INT_LIGHTS_SYSTEM
 
