@@ -10,3 +10,4 @@
 | | p_sau_h_channel_on | on | | H = heading channel, on for the player on every handover, any cause |
 | | p_sau_k_channel_on | on | | K = bank channel, on for the player on every handover, any cause |
 | | p_sau_t_channel_on | on | | T = pitch channel, on for the player on every handover, any cause |
+| | p_spuu_power | on | | adjustable stops (SPUU-52) back on for the player on every handover (user, 2026-11-28, option 2) |

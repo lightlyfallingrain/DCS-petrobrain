@@ -133,6 +133,17 @@ Consequences:
   the collective — a further confound alongside H/K/T, unknown whether it engaged.
 - The "stops off" phase of the hand-flown sortie was the real adjustable stops, not channel B.
 
+### Pedal-stops probe and the stops decision (2026-11-28)
+
+Probe flown twice (`aircraft-layer/research/2026-11-28-mi24p-pedal-stops.md`, "Probe flown"): only the
+SPUU-52 power switch moves the right-pedal cap (on −0.566, off −0.678, flat 14–140 km/h); the knob,
+OFF button and P/t switch do nothing measurable. User: *"OAT ~13 C, same mission as earlier hover
+logs, to same OAT"*.
+
+Options put to the user: (1) stops off below ~80 km/h, on above; (2) off for as long as Petrovich
+flies, back on at hand-back; (3) always on. User, verbatim: *"2"*. Built: `controls-to-petrovich.md`
+switches `p_spuu_power` off, `controls-to-player.md` switches it back on.
+
 ## Mode-2 fixes card (`2026-11-27-mode2-fixes-card.md`)
 
 User's words (verbatim):

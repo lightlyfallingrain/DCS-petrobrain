@@ -7802,20 +7802,24 @@ def test_shipped_controls_to_petrovich_sequence_turns_every_sau_channel_off() ->
     the raw axes, H, K, T **and B (altitude)** are pressed OFF -- B is the
     altitude channel, not the adjustable stops (user, 2026-11-28: "alt
     channel - set off on take"), so an altitude hold never fights the
-    law's own collective."""
+    law's own collective -- and the adjustable stops (SPUU-52) power is
+    switched OFF for the extra right pedal (user, 2026-11-28, option 2)."""
     sequences, _registry, had_errors, _polled = body_module._load_effector_config()
     assert had_errors is False
 
     sequence = sequences[("Mi-24P", "copilot", "controls-to-petrovich")]
-    assert {row.effector for row in sequence.rows if isinstance(row, SwitchRow)} == {
-        "p_sau_h_channel_off",
-        "p_sau_k_channel_off",
-        "p_sau_t_channel_off",
-        "p_sau_b_channel_off",
+    rows = {
+        row.effector: row.value for row in sequence.rows if isinstance(row, SwitchRow)
+    }
+    assert rows == {
+        "p_sau_h_channel_off": "on",
+        "p_sau_k_channel_off": "on",
+        "p_sau_t_channel_off": "on",
+        "p_sau_b_channel_off": "on",
+        "p_spuu_power": "off",
     }
     for row in sequence.rows:
         assert isinstance(row, SwitchRow)
-        assert row.value == "on"
         assert row.condition is None
         assert row.petrovich_says == ""
 
@@ -7831,11 +7835,12 @@ def test_shipped_controls_to_player_sequence_targets_the_sau_channels() -> None:
 
     sequence = sequences[("Mi-24P", "copilot", "controls-to-player")]
     # B is the altitude channel (user, 2026-11-28): left off at hand-back,
-    # so the hand-back never presses it.
+    # so the hand-back never presses it. The adjustable stops come back on.
     assert {row.effector for row in sequence.rows if isinstance(row, SwitchRow)} == {
         "p_sau_h_channel_on",
         "p_sau_k_channel_on",
         "p_sau_t_channel_on",
+        "p_spuu_power",
     }
     for row in sequence.rows:
         assert isinstance(row, SwitchRow)
