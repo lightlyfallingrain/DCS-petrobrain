@@ -10,4 +10,4 @@
 | | p_sau_h_channel_off | on | | H = heading channel, off while Petrovich flies mode 1 |
 | | p_sau_k_channel_off | on | | K = bank channel, off while Petrovich flies mode 1 |
 | | p_sau_t_channel_off | on | | T = pitch channel, off while Petrovich flies mode 1 |
-| | p_sau_b_channel_on | on | | B = adjustable-stops channel, kept on; never assume what the player left it |
+| | p_sau_b_channel_off | on | | B = altitude channel, off while Petrovich flies mode 1 (user, 2026-11-28: "set off on take") |

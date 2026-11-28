@@ -92,6 +92,15 @@ values = { open = 1.0, closed = 0.0 }
 [effectors.p_sau_b_channel_on]
 source_element = "SAU-B-ON-PTR"    # arg 255
 values = { on = 1.0, off = 0.0 }
+# B is the ALTITUDE channel (В = высота), not the adjustable stops --
+# user, 2026-11-28 (`docs/acceptance/2026-11-28-sortie-feedback.md`,
+# "Correction: SAU channel B is the ALTITUDE channel").
+
+[effectors.p_sau_b_channel_off]
+source_element = "SAU-B-OFF-PTR"    # arg 254
+values = { on = 1.0, off = 0.0 }
+# The altitude channel's own OFF button -- same momentary OFF-button
+# shape as p_sau_h_channel_off below.
 
 [effectors.p_sau_h_channel_on]
 source_element = "SAU-H-ON-PTR"    # arg 237

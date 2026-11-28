@@ -338,7 +338,7 @@ rather than from this dump).
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `OP-STICK-TRIMMER-PTR` | Autopilot Trimmer Button | pilot (defaulted) | stick_button | [3028] | [855] |  | 0/1 momentary |  |
 | `SAU-AZ-PTR` | Autopilot Route Azimuth | pilot (defaulted) | default_axis | [3030] | [262] |  | 0 to 1 continuous (gain 0.166667) |  |
-| `SAU-B-OFF-PTR` | Autopilot B Channel OFF | pilot (defaulted) | default_button | [3015] | [254] |  | 0/1 momentary |  |
+| `SAU-B-OFF-PTR` | Autopilot B Channel OFF | pilot (defaulted) | default_button | [3015] | [254] |  | 0/1 momentary | `p_sau_b_channel_off` |
 | `SAU-B-ON-PTR` | Autopilot B Channel ON | pilot (defaulted) | default_button | [3013] | [255] |  | 0/1 momentary | `p_sau_b_channel_on` |
 | `SAU-B-SWITCH-PTR` | Autopilot Altitude Control | pilot (defaulted) | springloaded_3_pos_tumb | [3019, 3017] | [253] |  | -1/0/1 momentary |  |
 | `SAU-BRIGHT-DIM-PTR` | Buttons Lighting BRIGHT/DIM | pilot (defaulted) | default_2_position_tumb | [3070] | [267] |  | 0/1 |  |

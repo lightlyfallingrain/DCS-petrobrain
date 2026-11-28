@@ -7797,6 +7797,29 @@ def test_shipped_effector_config_loads_without_errors() -> None:
     assert had_errors is False
 
 
+def test_shipped_controls_to_petrovich_sequence_turns_every_sau_channel_off() -> None:
+    """The real shipped `controls-to-petrovich.md`: on Petrovich taking
+    the raw axes, H, K, T **and B (altitude)** are pressed OFF -- B is the
+    altitude channel, not the adjustable stops (user, 2026-11-28: "alt
+    channel - set off on take"), so an altitude hold never fights the
+    law's own collective."""
+    sequences, _registry, had_errors, _polled = body_module._load_effector_config()
+    assert had_errors is False
+
+    sequence = sequences[("Mi-24P", "copilot", "controls-to-petrovich")]
+    assert {row.effector for row in sequence.rows if isinstance(row, SwitchRow)} == {
+        "p_sau_h_channel_off",
+        "p_sau_k_channel_off",
+        "p_sau_t_channel_off",
+        "p_sau_b_channel_off",
+    }
+    for row in sequence.rows:
+        assert isinstance(row, SwitchRow)
+        assert row.value == "on"
+        assert row.condition is None
+        assert row.petrovich_says == ""
+
+
 def test_shipped_controls_to_player_sequence_targets_the_sau_channels() -> None:
     """The one content check on the real shipped `controls-to-player.md`
     (`plans/flight-lift-vector/explore-notes.md`, "SAU in mode 1") --
@@ -7807,11 +7830,12 @@ def test_shipped_controls_to_player_sequence_targets_the_sau_channels() -> None:
     assert had_errors is False
 
     sequence = sequences[("Mi-24P", "copilot", "controls-to-player")]
+    # B is the altitude channel (user, 2026-11-28): left off at hand-back,
+    # so the hand-back never presses it.
     assert {row.effector for row in sequence.rows if isinstance(row, SwitchRow)} == {
         "p_sau_h_channel_on",
         "p_sau_k_channel_on",
         "p_sau_t_channel_on",
-        "p_sau_b_channel_on",
     }
     for row in sequence.rows:
         assert isinstance(row, SwitchRow)
