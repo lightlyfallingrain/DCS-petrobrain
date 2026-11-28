@@ -260,3 +260,118 @@ cause of the slow recovery, a mutation run against required-fix-1's test, and a 
 run to confirm the law itself converges quickly once `shortfall` genuinely ends. Not re-walked:
 the ~4000 pre-existing lines of toy-plant fixtures untouched by this fix pass (covered by the
 full-suite pass instead, 1318/1318 green, matching the implementer's count).
+
+## Re-review (fix pass 2)
+
+Commit `bf753c88` (branch `fix/bl16-flight-epoch-bound`, pushed `feature/bl16-lift-vector-law`),
+diff `b06dca5f..bf753c88` (2 files, test-only: `test_flight_control_law.py`,
+`implementation-m3.md`). Fast-forwarded cleanly into this worktree from `a29eff71` (strict
+ancestor, clean tree).
+
+**Checks (re-run, not re-trusting the implementer's log):** `ruff format --check` clean, `ruff
+check` clean (both from inside `aircraft-layer/`, main checkout's `.venv`); `mypy src` 0 issues/29
+files (only the test file changed, no production source touched — correctly no mypy difference);
+`luac5.1 -p` on every touched Lua file — none touched this pass, correctly not re-run; `pytest
+tests -q` → **1318 passed**, same count as fix pass 1 (no test added or removed, one test's body
+changed), matching `implementation-m3.md`.
+
+**1. The recovery half now genuinely verifies what it claims.** Read
+`TestM3OrdinaryClimbTradesSpeedNoTerrain._run_scenario` and its assertions directly: both loops
+now advance `measured.w_mps`/`measured.h_m` from `state.w_ref` each step, and the new assertions
+are `shortfall_recovered == 0.0` (the premise the re-review required, checked rather than assumed)
+and `abs(v_ref_recovered - speed_goal_mps) < 1.0` with `speed_goal_mps` read back from the scenario
+itself rather than retyped. Ran the single test directly: passes
+(`1 passed in 0.06s`). **Mutation, re-run independently** (not re-trusting the implementer's own
+mutation claim): patched a local copy of `flight_control.lua` to gate the section-D speed-give
+block behind `state.terrain_return` (the same mutant required-fix-1 and fix-pass-2's own log both
+used) and re-ran this one test against it — fails, at the floor-phase assertion
+(`33.3 m/s` short of the floor instead of `< 1e-6`), confirming the test still catches the
+regression it exists to catch. File restored immediately after, `git status --porcelain` clean
+throughout.
+
+Is `1.0` m/s an acceptable tolerance, or should the scenario be reshaped for tighter convergence?
+**Acceptable, not a required fix.** It replaces a trend-only `+5.0` margin with a real numeric
+convergence check at a fixed 60 s horizon, and the implementer's own 60.36 vs 61.11 m/s gap (here
+reproduced structurally — see below) comes from a second, genuine power-limited saturation
+partway through this test's 500 m AGL step, not from a loose model — tightening the scenario
+(smaller climb, longer window) would mostly be trading one arbitrary number for another rather
+than closing a real gap. Optional refinement only: a reader of this test five years from now has
+no way to tell, from the assertion alone, that "within 1.0 m/s at 60 s" is "genuinely still
+climbing out of a second saturation" rather than "a loose tolerance papering over a slow law" —
+one sentence in the docstring citing the 60.36/61.11 figures (which the fix-pass log already
+states, but the test file does not) would close that reading gap for free.
+
+**2. The ~27 m/s `w_ref` overshoot and ~13 s second saturation are a toy-driver artifact, not
+something the real law would command in flight when power is actually capped — confirmed by
+direct execution against the production profile, not inferred from the formula.**
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_profile.lua`'s `PROFILES["Mi-24P"]` carries the
+  *exact same* values this test's own toy `PROFILE`/`LIMITS` tables use for every constant that
+  drives this scenario's vertical dynamics: `alt_accel_cap_mps2 = 1.0`, `omega_alt = 0.5`,
+  `law_zeta = 1.0`, `k_vs_error = 0.3`, `k_alt_error = 0.05`, `w_ref_lead_max_mps = 2.0`,
+  `speed_give_floor_kmh = 100.0`, `terrain_ease_down_mps = 10.0` — grepped both files directly, no
+  divergence. So this is not a case of the toy plant using gentler numbers than the real aircraft
+  would see; the test's dynamics and the shipped law's dynamics are the same function evaluated at
+  the same gains.
+- Ran the real `flight_profile.lua` Mi-24P profile through the same 650 m-goal-from-150 m scenario
+  this test uses, with the test's own perfect-tracking driver (`measured.w_mps = state.w_ref` each
+  step): `max_w_ref = 27.82` m/s at `t = 27.9` s, saturation (`u_c >= 0.999` or `shortfall > 0`)
+  from `t = 9.7` s to `t = 27.85` s (~18 s) — the same magnitude the implementer's log and the
+  original re-review both reported, confirmed with the shipped profile rather than the test's copy
+  of it.
+- Re-ran the identical scenario with `measured.w_mps` instead approaching `state.w_ref` through a
+  first-order lag (`tau = 2.0` s) capped at a representative Mi-24P climb rate (`8.0` m/s) — a crude
+  stand-in for "the rotor/engine genuinely cannot deliver the commanded rate," which is exactly the
+  condition `profile.w_ref_lead_max_mps`'s power governor exists to react to. Under that lag,
+  `w_ref` never exceeds `10.0` m/s (the `8.0` m/s deliverable rate plus the `2.0` m/s lead,
+  bit-exact), and the lead over measured never exceeds `2.0` m/s — the governor binds as designed
+  and the 27 m/s spike does not occur.
+- **The mechanism is explicit in the code, not just the two runs above**: `collective_was_capped`
+  (`flight_control.lua` ~L1313) gates the governor's `min(next_state.w_ref, measured.w_mps +
+  profile.w_ref_lead_max_mps)` clamp — but the clamp is checked **against `measured.w_mps`**, and
+  this test's driver sets `measured.w_mps` to the *already-computed* `state.w_ref` every step
+  (perfect tracking by construction), so the lead condition is always trivially satisfied
+  regardless of whether the gate itself is open. Nothing in the driver can ever make the real
+  aircraft "unable to keep up," so the one mechanism meant to prevent exactly this overshoot never
+  gets exercised by this scenario, for a structural reason, not a tuning one.
+
+**Not a required fix.** This does not contradict the plan: M3's own text states the power governor
+is feedback-only, driven by *measured* lag (`plan.md` section C, "`w_ref = max(w_shaper, w_floor),
+approached at the accel cap`" and the governor keyed on "LAST frame's own `dbg_shortfall`/saturated
+`u_c`") — it was never claimed to bound the reference in a scenario that defines away the very lag
+it reacts to. The gap is in what this one toy driver can demonstrate, not in the law. **Flight-card
+information, not a defect**: a real 500 m climb step at 220 km/h may show the collective pinned and
+`v_ref` yielding speed for longer than card row 11 reads at a glance ("no overshoot at the top") —
+worth a specific eye on row 11 in flight for whether `w_ref`/collective settle smoothly once real
+power-limited lag is present, rather than assuming the toy plant's shape. This is the Optional
+Refinements list, not a blocker: the law itself is correctly built against the plan's own stated
+design, and the artifact is confined to one test's recovery-phase numbers, not to anything that
+ships.
+
+**Everything else from the prior re-review unaffected** — 2b's magnitude bound and required-fix-1's
+floor/never-below/terrain-only-regression coverage were not touched by this pass and were already
+confirmed; nothing in this pass found a new issue with them.
+
+## Verdict (re-review, fix pass 2)
+
+**APPROVED.** The one required fix from "Re-review (fix pass)" is correctly closed: the recovery
+assertion now demonstrates genuine convergence (`shortfall == 0.0`, `v_ref` within 1.0 m/s of the
+scenario's own commanded speed, read back rather than retyped), verified here by direct re-run and
+independent mutation rather than taken on the implementer's word. The `w_ref`/saturation-duration
+question from the task brief is resolved as a toy-driver artifact specific to this one scenario's
+perfect-tracking shortcut, confirmed against the shipped `flight_profile.lua` values and by
+reproducing a bounded result once realistic measured lag is modeled — it does not contradict the
+plan and is recorded above as flight-card information (row 11) rather than a required fix. No new
+Required or Optional items beyond the one docstring suggestion above (tolerance provenance), which
+is itself optional.
+
+## Re-review Confidence (fix pass 2)
+
+**Full read** of the test diff (the only production-relevant diff — `implementation-m3.md` is the
+implementer's own log) and direct, independent verification of both settled questions: the test
+itself (re-run plus an independent mutation run, not re-trusting the implementer's mutation claim)
+and the `w_ref` overshoot (two direct `luajit` executions of the shipped `flight_profile.lua`
+against reconstructed scenarios — one reproducing the reported ~27 m/s/~18 s figures with the
+real profile, one with a physically-motivated lagged sensor showing the governor binds and bounds
+it). Not re-walked: the ~4000 pre-existing toy-plant lines untouched by this pass (covered by the
+full-suite pass, 1318/1318, zero regressions).
