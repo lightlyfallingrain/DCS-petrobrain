@@ -6,9 +6,11 @@ from __future__ import annotations
 import pytest
 
 from schema.line_of_sight import (
+    MAX_TERRAIN_POINTS,
     LineOfSightParseError,
     LineOfSightSnapshot,
     ProbeAnswers,
+    TerrainAnswers,
 )
 
 
@@ -268,3 +270,106 @@ def test_to_dict_probes_is_none_when_absent() -> None:
         received_wall_clock_s=1000.0,
     )
     assert snapshot.to_dict()["probes"] is None
+
+
+# --- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- terrain
+# points. Mirrors the probes tests above, same "sibling op on the same
+# mechanism" shape.
+
+
+def test_terrain_absent_when_no_terrain_raw_given() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.terrain is None
+
+
+def test_terrain_absent_when_terrain_raw_is_empty_string() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        terrain_raw="",
+    )
+    assert snapshot.terrain is None
+
+
+def test_terrain_parses_well_formed_sub_wire() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        terrain_raw="7|0:123.5;1:0;2:",
+    )
+    assert snapshot.terrain is not None
+    assert snapshot.terrain.seq == 7
+    assert snapshot.terrain.dcs_model_time_s == 1234.5
+    assert snapshot.terrain.heights[0] == 123.5
+    assert snapshot.terrain.heights[1] == 0.0
+    assert snapshot.terrain.heights[2] is None
+    assert snapshot.terrain.heights[3] is None
+    assert len(snapshot.terrain.heights) == MAX_TERRAIN_POINTS
+
+
+def test_terrain_malformed_sub_wire_drops_terrain_only_not_the_snapshot() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        terrain_raw="not_an_int|0:1.0",
+    )
+    assert snapshot.terrain is None
+    assert snapshot.verdicts["Heli-1"].building_clear is True
+
+
+def test_terrain_out_of_range_index_raises_in_from_wire_directly() -> None:
+    with pytest.raises(LineOfSightParseError):
+        TerrainAnswers.from_wire(f"1|{MAX_TERRAIN_POINTS}:1.0", dcs_model_time_s=1.0)
+
+
+def test_terrain_bad_height_raises_in_from_wire_directly() -> None:
+    with pytest.raises(LineOfSightParseError):
+        TerrainAnswers.from_wire("1|0:notanumber", dcs_model_time_s=1.0)
+
+
+def test_terrain_non_finite_height_becomes_missing_not_a_value() -> None:
+    """A NaN/Infinity height is a missing point, never a guessed value --
+    the standing non-finite rule, applied even though the Hook's own
+    `land.getHeight` pcall already guards it."""
+    answers = TerrainAnswers.from_wire("1|0:nan;1:inf;2:-inf", dcs_model_time_s=1.0)
+    assert answers.heights[0] is None
+    assert answers.heights[1] is None
+    assert answers.heights[2] is None
+
+
+def test_terrain_zero_height_is_not_dropped() -> None:
+    """A `0 m` terrain height is a real, valid reading (sea level) and
+    must survive, unlike the Hook's own `clearToken`-empty convention
+    for a *failed* read -- `0.0 != None`."""
+    answers = TerrainAnswers.from_wire("1|0:0.0", dcs_model_time_s=1.0)
+    assert answers.heights[0] == 0.0
+
+
+def test_terrain_to_dict_round_trips() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1234.5|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+        terrain_raw="3|0:42.0",
+    )
+    as_dict = snapshot.to_dict()["terrain"]
+    assert as_dict["seq"] == 3
+    assert as_dict["dcs_model_time_s"] == 1234.5
+    assert as_dict["heights"][0] == 42.0
+    assert as_dict["heights"][1] is None
+
+
+def test_to_dict_terrain_is_none_when_absent() -> None:
+    snapshot = LineOfSightSnapshot.from_wire(
+        "1|1|1|0|45|1.0|Heli-1:1:0",
+        bridge_call_ms=0.5,
+        received_wall_clock_s=1000.0,
+    )
+    assert snapshot.to_dict()["terrain"] is None

@@ -271,6 +271,23 @@ docstring's "never as an eighth pipe-delimited field") -- an old collector
 talking to a new Hook simply never reads the new key, and the reverse
 (new collector, old Hook) sees no `"probes"` key at all and reads that as
 "no check open," both correct.
+
+**Terrain points (`plans/flight-lift-vector/plan.md`, "M3 amendment",
+BL-16).** A third inbound op on this same 7797 listener, `terrain_points`,
+"a sibling op on the same mechanism" as `probe_points`: `{"op":
+"terrain_points","seq":n,"points": [ [x,z], ... ]}`, at most `MAX_TERRAIN_
+POINTS` points, `land.getHeight` only (no `land.isVisible` -- this op asks
+only "how high is the ground here", never a sightline). Same coalescing,
+same fixed-shape `%d`-template splice (`SET_TERRAIN_TEMPLATE`), same
+fail-closed posture as the probe answers: a failed or non-finite `land.
+getHeight` answers an empty token ("unknown"), never `0` (a `0 m` reading
+would silently read as low ground and suppress a climb). The answer rides
+as its own `"terrain"` envelope key, `"<seq>|<i>:<h>;..."`, carried on a
+*second* `"\2"`-delimited segment of the same `dostring_in` return (the
+probes segment stays `"\1"`-delimited as before; `pollAndSend` splits on
+both in order) -- an old collector reading a new Hook, and the reverse,
+both see no `"terrain"` key and read that as "no grid this poll," the
+same backward-compatible shape `probes` already established.
 --]]
 
 log.write("PetrobrainLineOfSight", log.INFO, "Loading - Petrobrain line of sight")
@@ -398,6 +415,64 @@ local SET_PROBES_TEMPLATE = "PB_PROBE_SEQ=%d\nPB_PROBE_N=%d\n"
 local PROBE_COORD_ABS_MAX = 2000000
 local PROBE_SEQ_MAX = 2147483647
 
+
+--: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- "a
+--: sibling op on the same mechanism" as `probe_points` above. Matches
+--: `schema.line_of_sight.MAX_TERRAIN_POINTS` exactly (collector-side
+--: validation caps `points` at this length too).
+local MAX_TERRAIN_POINTS = 32
+
+--: Same target-height convention as `PROBE_TARGET_HEIGHT_M`, but unused
+--: by the terrain-height query itself (`land.getHeight` answers bare
+--: ground height, no target offset) -- kept only so a probe-style
+--: convention is not silently reinvented under a different name.
+
+--: A third runtime-value splice into the mission-scripting state, same
+--: safety argument as `SET_PROBES_TEMPLATE` above. Exactly
+--: `2 + 2*MAX_TERRAIN_POINTS` `%d` conversions (seq, N, then MAX_
+--: TERRAIN_POINTS (x, z) pairs, flat) and no other `%` specifier --
+--: `test_line_of_sight_hook_lua.py` asserts this mechanically, the same
+--: guard `SET_PROBES_TEMPLATE` already has.
+local SET_TERRAIN_TEMPLATE = "PB_TERRAIN_SEQ=%d\nPB_TERRAIN_N=%d\n"
+    .. "PB_TERRAIN_X_1=%d\nPB_TERRAIN_Z_1=%d\n"
+    .. "PB_TERRAIN_X_2=%d\nPB_TERRAIN_Z_2=%d\n"
+    .. "PB_TERRAIN_X_3=%d\nPB_TERRAIN_Z_3=%d\n"
+    .. "PB_TERRAIN_X_4=%d\nPB_TERRAIN_Z_4=%d\n"
+    .. "PB_TERRAIN_X_5=%d\nPB_TERRAIN_Z_5=%d\n"
+    .. "PB_TERRAIN_X_6=%d\nPB_TERRAIN_Z_6=%d\n"
+    .. "PB_TERRAIN_X_7=%d\nPB_TERRAIN_Z_7=%d\n"
+    .. "PB_TERRAIN_X_8=%d\nPB_TERRAIN_Z_8=%d\n"
+    .. "PB_TERRAIN_X_9=%d\nPB_TERRAIN_Z_9=%d\n"
+    .. "PB_TERRAIN_X_10=%d\nPB_TERRAIN_Z_10=%d\n"
+    .. "PB_TERRAIN_X_11=%d\nPB_TERRAIN_Z_11=%d\n"
+    .. "PB_TERRAIN_X_12=%d\nPB_TERRAIN_Z_12=%d\n"
+    .. "PB_TERRAIN_X_13=%d\nPB_TERRAIN_Z_13=%d\n"
+    .. "PB_TERRAIN_X_14=%d\nPB_TERRAIN_Z_14=%d\n"
+    .. "PB_TERRAIN_X_15=%d\nPB_TERRAIN_Z_15=%d\n"
+    .. "PB_TERRAIN_X_16=%d\nPB_TERRAIN_Z_16=%d\n"
+    .. "PB_TERRAIN_X_17=%d\nPB_TERRAIN_Z_17=%d\n"
+    .. "PB_TERRAIN_X_18=%d\nPB_TERRAIN_Z_18=%d\n"
+    .. "PB_TERRAIN_X_19=%d\nPB_TERRAIN_Z_19=%d\n"
+    .. "PB_TERRAIN_X_20=%d\nPB_TERRAIN_Z_20=%d\n"
+    .. "PB_TERRAIN_X_21=%d\nPB_TERRAIN_Z_21=%d\n"
+    .. "PB_TERRAIN_X_22=%d\nPB_TERRAIN_Z_22=%d\n"
+    .. "PB_TERRAIN_X_23=%d\nPB_TERRAIN_Z_23=%d\n"
+    .. "PB_TERRAIN_X_24=%d\nPB_TERRAIN_Z_24=%d\n"
+    .. "PB_TERRAIN_X_25=%d\nPB_TERRAIN_Z_25=%d\n"
+    .. "PB_TERRAIN_X_26=%d\nPB_TERRAIN_Z_26=%d\n"
+    .. "PB_TERRAIN_X_27=%d\nPB_TERRAIN_Z_27=%d\n"
+    .. "PB_TERRAIN_X_28=%d\nPB_TERRAIN_Z_28=%d\n"
+    .. "PB_TERRAIN_X_29=%d\nPB_TERRAIN_Z_29=%d\n"
+    .. "PB_TERRAIN_X_30=%d\nPB_TERRAIN_Z_30=%d\n"
+    .. "PB_TERRAIN_X_31=%d\nPB_TERRAIN_Z_31=%d\n"
+    .. "PB_TERRAIN_X_32=%d\nPB_TERRAIN_Z_32=%d\n"
+    .. "return \"ok\""
+
+--: Same coordinate/seq bounds as the probe points above -- one grid,
+--: one coordinate domain.
+local TERRAIN_COORD_ABS_MAX = 2000000
+local TERRAIN_SEQ_MAX = 2147483647
+
 --: Enumerates every live unit **and every static object** across all
 --: three coalition sides within
 --: `PLAYER_BUBBLE_RADIUS_M` of ownship's own true position, filters those
@@ -447,6 +522,8 @@ local LOS_CODE = "local MAX_SIGHTLINES = "
     .. string.format("%.17g", PLAYER_BUBBLE_RADIUS_M)
     .. "\nlocal MAX_PROBES = "
     .. string.format("%d", MAX_PROBE_POINTS)
+    .. "\nlocal MAX_TERRAIN = "
+    .. string.format("%d", MAX_TERRAIN_POINTS)
     .. "\n"
     .. [[
 local hour = PB_LOOK_HOUR or 0
@@ -751,6 +828,42 @@ local probesPayload = probeN > 0
     and (tostring(probeSeq) .. "|" .. table.concat(probeParts, ";"))
     or ""
 
+-- `plans/flight-lift-vector/plan.md`, "M3 amendment", section E: up to
+-- `PB_TERRAIN_N` terrain-height points, evaluated after the probe loop
+-- (this file's own "after" placement). Reads the mission-scripting
+-- globals `_applyTerrainPoints` (below) writes. `PB_TERRAIN_N`/`PB_
+-- TERRAIN_SEQ` default to 0 when no terrain command has ever arrived
+-- this mission-scripting-state lifetime, same `or 0` pattern as `PB_
+-- PROBE_N` above. `land.getHeight` only -- no `land.isVisible`, this
+-- op asks only "how high is the ground here".
+local terrainSeq = PB_TERRAIN_SEQ or 0
+local terrainN = PB_TERRAIN_N or 0
+if terrainN > MAX_TERRAIN then terrainN = MAX_TERRAIN end
+local terrainParts = {}
+for i = 1, terrainN do
+    local px = _G["PB_TERRAIN_X_" .. tostring(i)]
+    local pz = _G["PB_TERRAIN_Z_" .. tostring(i)]
+    local heightToken = ""
+    if type(px) == "number" and type(pz) == "number" then
+        local okH, groundH = pcall(land.getHeight, { x = px, y = pz })
+        -- Fail closed, same posture as the probe loop above: a missing
+        -- point ("unknown"), never a guessed `0` -- a `0 m` reading
+        -- would read as low ground and suppress a climb (E11/E5's own
+        -- reasoning, extended to a height rather than a clear flag).
+        -- `groundH == groundH` rejects a NaN the pcall itself returned
+        -- successfully (the standing non-finite rule).
+        if okH and type(groundH) == "number" and groundH == groundH then
+            heightToken = tostring(groundH)
+        end
+    end
+    terrainParts[#terrainParts + 1] = tostring(i - 1) .. ":" .. heightToken
+end
+-- `N == 0` means no grid is open -- same "empty string, never `<seq>|`
+-- with zero entries" shape as `probesPayload` above.
+local terrainPayload = terrainN > 0
+    and (tostring(terrainSeq) .. "|" .. table.concat(terrainParts, ";"))
+    or ""
+
 -- The units-vs-statics breakdown cannot cross the `dostring_in` boundary
 -- (one scalar return, and the wire format is fixed by
 -- `aircraft-layer/src/schema/line_of_sight.py`), so it goes to `dcs.log`
@@ -786,7 +899,7 @@ return tostring(objectsInBubble) .. "|" .. tostring(objectsInWedge) .. "|"
     .. tostring(sightlinesComputed) .. "|" .. tostring(hour) .. "|"
     .. tostring(fovHalfDeg) .. "|" .. tostring(timer.getTime()) .. "|"
     .. table.concat(parts, ";")
-    .. "\1" .. probesPayload
+    .. "\1" .. probesPayload .. "\2" .. terrainPayload
 ]]
 
 local petrobrainLineOfSight = {}
@@ -913,20 +1026,57 @@ local function _applyProbePoints(decoded)
     end
 end
 
+--: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- clamps
+--: and applies one `terrain_points` datagram, same shape and same
+--: "no error path leaves a stale value silently in place" posture as
+--: `_applyProbePoints` above.
+local function _applyTerrainPoints(decoded)
+    local pointsRaw = decoded.points
+    local n = 0
+    if type(pointsRaw) == "table" then
+        n = #pointsRaw
+    end
+    if n > MAX_TERRAIN_POINTS then n = MAX_TERRAIN_POINTS end
+
+    local args = {}
+    args[1] = _safeClampInt(decoded.seq, 0, TERRAIN_SEQ_MAX, 0)
+    args[2] = n
+    for i = 1, MAX_TERRAIN_POINTS do
+        local px, pz = 0, 0
+        if i <= n then
+            local point = pointsRaw[i]
+            if type(point) == "table" then
+                px = _safeClampInt(point[1], -TERRAIN_COORD_ABS_MAX, TERRAIN_COORD_ABS_MAX, 0)
+                pz = _safeClampInt(point[2], -TERRAIN_COORD_ABS_MAX, TERRAIN_COORD_ABS_MAX, 0)
+            end
+        end
+        args[#args + 1] = px
+        args[#args + 1] = pz
+    end
+
+    local snippet = string.format(SET_TERRAIN_TEMPLATE, unpack(args))
+    local ok, result = dostring("scripting", snippet)
+    if ok then
+        logi("terrain points set: seq=" .. tostring(args[1]) .. " n=" .. tostring(n))
+    else
+        logi("terrain points set failed: " .. tostring(result))
+    end
+end
+
 --: Drains up to `MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME` pending
 --: datagrams off the one shared inbound socket, applying only the last
 --: successfully-decoded datagram **of each op** this frame -- Security
 --: review Finding 5/required fix 2's coalescing rule, now extended to a
---: second op sharing the same listener (`plans/expected-area-look/
---: plan.md` Stage 1: "the existing 7797 listener"). Renamed from
---: `pollLookDirection` -- it now polls for either op, not only
---: `look_direction`.
+--: third op sharing the same listener (BL-16 M3: "the existing 7797
+--: listener"). Renamed from `pollLookDirection` -- it now polls for any
+--: of the three ops, not only `look_direction`.
 local function pollInbound()
     if listenSocket == nil then
         return
     end
     local latestLook = nil
     local latestProbes = nil
+    local latestTerrain = nil
     for _ = 1, MAX_LOOK_DIRECTION_DATAGRAMS_PER_FRAME do
         local data, _err = listenSocket:receivefrom()
         if data == nil then
@@ -938,6 +1088,8 @@ local function pollInbound()
                 latestLook = decoded
             elseif decoded.op == "probe_points" then
                 latestProbes = decoded
+            elseif decoded.op == "terrain_points" then
+                latestTerrain = decoded
             end
         end
     end
@@ -947,21 +1099,27 @@ local function pollInbound()
     if latestProbes ~= nil then
         _applyProbePoints(latestProbes)
     end
+    if latestTerrain ~= nil then
+        _applyTerrainPoints(latestTerrain)
+    end
 end
 
---: `probes`, when non-empty, rides as its own JSON key -- never folded
---: into `payload` (file header's "Point probes" section; `schema.
---: line_of_sight`'s matching docstring). Omitted from the envelope
---: entirely when empty, so an old collector's parser (which never looks
---: for this key) and a new one (which treats a missing key as "no probe
---: answers") both read the same thing.
-local function sendPayload(payload, bridgeCallMs, probes)
+--: `probes`/`terrain`, when non-empty, ride as their own JSON keys --
+--: never folded into `payload` (file header's "Point probes"/"Terrain
+--: points" sections; `schema.line_of_sight`'s matching docstrings).
+--: Omitted from the envelope entirely when empty, so an old collector's
+--: parser (which never looks for either key) and a new one (which
+--: treats a missing key as "no answers") both read the same thing.
+local function sendPayload(payload, bridgeCallMs, probes, terrain)
     if sendSocket == nil then
         sendSocket = socket.udp()
     end
     local envelope = { payload = payload, bridge_call_ms = bridgeCallMs }
     if probes ~= nil and probes ~= "" then
         envelope.probes = probes
+    end
+    if terrain ~= nil and terrain ~= "" then
+        envelope.terrain = terrain
     end
     local encoded = JSON:encode(envelope)
     local ok, err = sendSocket:sendto(encoded, LOS_SEND_HOST, LOS_SEND_PORT)
@@ -982,17 +1140,23 @@ local function pollAndSend()
         logi("LOS poll error: " .. result)
         return
     end
-    -- `plans/expected-area-look/plan.md` Stage 1: split off the probes
-    -- sub-wire (file header's "\1" separator) before anything below
-    -- touches `result` -- every observability match/log line downstream
-    -- must see exactly the pre-Stage-1 LOS payload, not a string with the
-    -- probes answer still appended to it.
-    local losPayload, probesPayload = result:match("^(.*)\1(.*)$")
+    -- `plans/expected-area-look/plan.md` Stage 1 / BL-16 M3: split off
+    -- the probes sub-wire (file header's "\1" separator) and, inside
+    -- that tail, the terrain sub-wire (its own "\2" separator) before
+    -- anything below touches `result` -- every observability match/log
+    -- line downstream must see exactly the pre-Stage-1 LOS payload, not
+    -- a string with either sub-wire still appended to it.
+    local losPayload, tail = result:match("^(.*)\1(.*)$")
     if losPayload == nil then
         losPayload = result
-        probesPayload = ""
+        tail = "\2"
     end
     result = losPayload
+    local probesPayload, terrainPayload = tail:match("^(.*)\2(.*)$")
+    if probesPayload == nil then
+        probesPayload = tail
+        terrainPayload = ""
+    end
     -- Pull the observability triad out of the result's own leading fields
     -- rather than leaving it inside a truncated `result_head=`. A
     -- `string.match` pattern, not a format splice -- nothing is spliced
@@ -1027,7 +1191,7 @@ local function pollAndSend()
                 .. " farthest candidates)"
         )
     end
-    sendPayload(result, bridgeCallMs, probesPayload)
+    sendPayload(result, bridgeCallMs, probesPayload, terrainPayload)
 end
 
 function petrobrainLineOfSight.onSimulationStart()

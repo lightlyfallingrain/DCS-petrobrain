@@ -402,7 +402,25 @@ class TestSendFlightLease:
                 "op": "flight_lease",
                 "epoch": 42,
                 "limits": {"arm_lease_s": 3.0},
+                "terrain": None,
             }
+        finally:
+            receiver.close()
+
+    def test_delivers_terrain_field_when_given(self) -> None:
+        """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E)."""
+        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(2.0)
+        port = receiver.getsockname()[1]
+
+        try:
+            with CommandSender(host="127.0.0.1", port=port) as sender:
+                sender.send_flight_lease(42, None, "5|100,200,50.0")
+
+            data, _addr = receiver.recvfrom(4096)
+            decoded = json.loads(data.decode("utf-8"))
+            assert decoded["terrain"] == "5|100,200,50.0"
         finally:
             receiver.close()
 
@@ -426,7 +444,7 @@ class _RecordingCommandSender:
     def __init__(self, *, raise_on_send: bool = False) -> None:
         self.sent: list[tuple[int, int, float, str, dict[str, object]]] = []
         self.reset_sent: list[int] = []
-        self.lease_sent: list[tuple[int, object]] = []
+        self.lease_sent: list[tuple[int, object, object]] = []
         self.raise_on_send = raise_on_send
 
     def send_flight(
@@ -449,14 +467,19 @@ class _RecordingCommandSender:
             raise CommandSendError("simulated failure")
         self.reset_sent.append(epoch)
 
-    def send_flight_lease(self, epoch: int, limits: dict[str, float] | None) -> None:
+    def send_flight_lease(
+        self,
+        epoch: int,
+        limits: dict[str, float] | None,
+        terrain: str | None = None,
+    ) -> None:
         """BL-16 Stage 2 (`plans/flight-desired-state/plan.md`,
         refinement 3) -- `POST /command/flight_lease`'s own forwarding
         target, replacing the old `send_flight_control(..., "arm", ...)`
-        call."""
+        call. `terrain` (BL-16 M3) is the relayed grid string."""
         if self.raise_on_send:
             raise CommandSendError("simulated failure")
-        self.lease_sent.append((epoch, limits))
+        self.lease_sent.append((epoch, limits, terrain))
 
 
 @pytest.fixture
@@ -755,7 +778,7 @@ class TestFlightLeaseCommandEndpoint:
         status, resp_body = _post(server, "/command/flight_lease", body)
         assert status == 200
         assert resp_body == {"ok": True}
-        assert sender.lease_sent == [(7, {"min_ias_kmh": 80.0})]
+        assert sender.lease_sent == [(7, {"min_ias_kmh": 80.0}, None)]
 
     def test_missing_epoch_returns_400(
         self,
@@ -783,7 +806,44 @@ class TestFlightLeaseCommandEndpoint:
         server, sender = running_server_with_sender
         status, _body = _post(server, "/command/flight_lease", {"epoch": 1})
         assert status == 200
-        assert sender.lease_sent == [(1, None)]
+        assert sender.lease_sent == [(1, None, None)]
+
+    def test_a_well_formed_terrain_field_forwards(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E)."""
+        server, sender = running_server_with_sender
+        body = {"epoch": 1, "terrain": "5|100,200,50.25;300,400,60"}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(1, None, "5|100,200,50.25;300,400,60")]
+
+    def test_a_malformed_terrain_field_drops_terrain_only_not_the_lease(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """ "a bad terrain drops terrain only, never the lease or its
+        limits" -- unlike `limits`, a malformed `terrain` is NOT a
+        whole-message reject."""
+        server, sender = running_server_with_sender
+        body = {"epoch": 1, "limits": {"max_turn_bank_deg": 10.0}, "terrain": "garbage"}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(1, {"max_turn_bank_deg": 10.0}, None)]
+
+    def test_an_empty_terrain_field_forwards_as_empty(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        server, sender = running_server_with_sender
+        status, _body = _post(
+            server, "/command/flight_lease", {"epoch": 1, "terrain": ""}
+        )
+        assert status == 200
+        assert sender.lease_sent == [(1, None, "")]
 
     def test_unconfigured_sender_returns_503(self) -> None:
         cache = TelemetryCache()

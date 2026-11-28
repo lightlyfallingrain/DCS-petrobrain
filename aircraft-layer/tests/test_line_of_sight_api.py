@@ -38,6 +38,8 @@ class _RecordingLookDirectionSender(LookDirectionSender):
         self.raise_on_send = False
         self.probes_sent: list[tuple[int, list[tuple[int, int]]]] = []
         self.raise_on_probes_send = False
+        self.terrain_sent: list[tuple[int, list[tuple[int, int]]]] = []
+        self.raise_on_terrain_send = False
 
     def send_look_direction(self, hour: int, fov_half_deg: int) -> None:  # type: ignore[override]
         if self.raise_on_send:
@@ -50,6 +52,13 @@ class _RecordingLookDirectionSender(LookDirectionSender):
         if self.raise_on_probes_send:
             raise CommandSendError("simulated failure")
         self.probes_sent.append((seq, points))
+
+    def send_terrain_points(  # type: ignore[override]
+        self, seq: int, points: list[tuple[int, int]]
+    ) -> None:
+        if self.raise_on_terrain_send:
+            raise CommandSendError("simulated failure")
+        self.terrain_sent.append((seq, points))
 
 
 @pytest.fixture
@@ -336,6 +345,136 @@ def test_probe_points_send_failure_returns_500(
     server, sender = running_server_with_sender
     sender.raise_on_probes_send = True
     status, body = _post(server, "/command/probe_points", {"seq": 1, "points": []})
+    assert status == 500
+    assert isinstance(body, dict)
+    assert "error" in body
+
+
+# --- POST /command/terrain_points (BL-16 M3, `plans/flight-lift-vector/ --
+# --- plan.md`, section E) -- mirrors probe_points above, same sender ---
+
+
+def test_terrain_points_valid_forwards_to_sender(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    status, body = _post(
+        server,
+        "/command/terrain_points",
+        {"seq": 1, "points": [[100, -200], [300, 400]]},
+    )
+    assert status == 200
+    assert body == {"ok": True}
+    assert sender.terrain_sent == [(1, [(100, -200), (300, 400)])]
+
+
+def test_terrain_points_empty_points_forwards_empty_list(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    status, body = _post(server, "/command/terrain_points", {"seq": 0, "points": []})
+    assert status == 200
+    assert body == {"ok": True}
+    assert sender.terrain_sent == [(0, [])]
+
+
+def test_terrain_points_missing_fields_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    status, body = _post(server, "/command/terrain_points", {"seq": 1})
+    assert status == 400
+    assert isinstance(body, dict)
+    assert "error" in body
+    assert sender.terrain_sent == []
+
+
+@pytest.mark.parametrize("seq", [-1, 1.5, "1", True, 2**31])
+def test_terrain_points_invalid_seq_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+    seq: object,
+) -> None:
+    server, sender = running_server_with_sender
+    status, _body = _post(server, "/command/terrain_points", {"seq": seq, "points": []})
+    assert status == 400
+    assert sender.terrain_sent == []
+
+
+def test_terrain_points_too_many_points_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    status, _body = _post(
+        server,
+        "/command/terrain_points",
+        {"seq": 1, "points": [[0, 0]] * 33},
+    )
+    assert status == 400
+    assert sender.terrain_sent == []
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        [0],  # wrong arity
+        [0, 0, 0],
+        ["0", 0],
+        [0.5, 0],
+        [True, 0],
+        [2_000_001, 0],
+        [0, -2_000_001],
+    ],
+)
+def test_terrain_points_invalid_point_returns_400(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+    point: object,
+) -> None:
+    server, sender = running_server_with_sender
+    status, _body = _post(
+        server, "/command/terrain_points", {"seq": 1, "points": [point]}
+    )
+    assert status == 400
+    assert sender.terrain_sent == []
+
+
+def test_terrain_points_without_configured_sender_returns_503() -> None:
+    cache = TelemetryCache()
+    server = TelemetryAPIServer(cache, host="127.0.0.1", port=0)
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(
+            server, "/command/terrain_points", {"seq": 1, "points": []}
+        )
+        assert status == 503
+        assert isinstance(body, dict)
+        assert "error" in body
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+
+def test_terrain_points_send_failure_returns_500(
+    running_server_with_sender: tuple[
+        TelemetryAPIServer, _RecordingLookDirectionSender
+    ],
+) -> None:
+    server, sender = running_server_with_sender
+    sender.raise_on_terrain_send = True
+    status, body = _post(server, "/command/terrain_points", {"seq": 1, "points": []})
     assert status == 500
     assert isinstance(body, dict)
     assert "error" in body

@@ -66,19 +66,21 @@ TAKEOVER_LEVEL_BANK_DEG: Final[float] = tuning.real(
     status="agreed-guess",
 )
 
-#: The terrain floor mode 1 holds once M3 builds the climb-for-terrain
-#: logic (the user's own Q5 number, reused here -- mode 2 never declared
-#: it, see the plan's "Behaviour constants" section: "P4 is unbuilt...
-#: mode 1 declares its own constants with those defaults"). Not acted on
-#: by `Export.lua` in Stage M1 (no shaper yet to hold a floor against);
-#: sent in `limits` now so the wire channel does not need a reshape when
-#: M3 lands.
+#: The one effective floor mode 1 holds above bare ground, lowered only
+#: by an AGL height the pilot explicitly commanded (`F_eff = min(this,
+#: AGL goal)`, `Export.lua`'s own `flight_control.lua`) -- `plans/
+#: flight-lift-vector/plan.md`'s "M3 amendment", section A. **Raised
+#: 40 -> 50 (M3)**: the old 40 m value only ever clamped a *spoken* AGL
+#: height at the unpark seed (M3's own "What reading the code turned
+#: up" finding 1: no ordinary-flight floor existed in the law at all);
+#: this is the user's own "one floor is better, use 50 m", replacing
+#: both the old 40 m clamp and LV-2's separate `break_floor_agl_m`.
 FLOOR_AGL_M: Final[float] = tuning.real(
     "belief.flight_control.FLOOR_AGL_M",
-    40.0,
+    50.0,
     lo=0.0,
     hi=500.0,
-    status="agreed-guess",
+    status="user",
 )
 
 #: BL-16 lift-vector law, Stage LV-1 (`plans/flight-lift-vector/
@@ -120,17 +122,13 @@ MAX_TURN_BANK_DEG: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: The altitude channel's own vertical-speed ceiling -- M0-A's
-#: reference manoeuvre flew a "5 m/s climb and descent of 100 m",
-#: reused here as the shaper's own rate limit rather than measured for
-#: this purpose.
-MAX_CLIMB_VS_MPS: Final[float] = tuning.real(
-    "belief.flight_control.MAX_CLIMB_VS_MPS",
-    5.0,
-    lo=1.0,
-    hi=15.0,
-    status="judgement",
-)
+#: BL-16 lift-vector law, M3 (`plans/flight-lift-vector/plan.md`,
+#: section C): `MAX_CLIMB_VS_MPS` is removed entirely, not widened --
+#: "no number limit, limit comes from available power" (the user's own
+#: words). A power governor inside `Export.lua`'s law replaces it
+#: (`w_ref_lead_max_mps`, a `flight_profile.lua` loop constant, never
+#: wire-carried); Decision 31's VRS guard (below 50 km/h) is unaffected
+#: and stays wire-carried below.
 
 #: The speed channel's own along-track acceleration ceiling. Raised
 #: 1.0 -> 2.0 by the LV-1 amendment (2026-11-24, fourth re-fly, Q2
@@ -520,13 +518,15 @@ def release_controls(*, overlay_flying: bool, flying_axes: bool) -> dict[str, ob
 
 
 def clamp_altitude(m: float, ref: AltitudeRef) -> float:
-    """Decision 21's "Clamped at the floor" -- only meaningful for the
-    AGL reference (a barometric floor cannot be derived without knowing
-    terrain height, which Stage M1 has no shaper to track; see `Export.
-    lua`'s own module docstring on what Stage M3 adds). A barometric
-    target passes through unclamped."""
-    if ref == "agl" and m < FLOOR_AGL_M:
-        return FLOOR_AGL_M
+    """BL-16 lift-vector law, M3 (`plans/flight-lift-vector/plan.md`,
+    section A): the AGL floor clamp is gone -- "allow player to command
+    any altitude and then accept it." An AGL goal is clamped only to
+    `>= 0` (a negative height is not an altitude); the floor itself
+    (`FLOOR_AGL_M`) is applied inside `Export.lua`'s law, against the
+    goal, never here. A barometric target passes through unclamped,
+    same as before."""
+    if ref == "agl" and m < 0.0:
+        return 0.0
     return m
 
 
@@ -561,7 +561,6 @@ def flight_control_limits(on_ground_agl_threshold_m: float) -> dict[str, float]:
         # M2 additions -- the shaper's own rate limits and A9's bands,
         # read by `Export.lua`'s control law, never acted on here.
         "max_turn_bank_deg": MAX_TURN_BANK_DEG,
-        "max_climb_vs_mps": MAX_CLIMB_VS_MPS,
         "max_accel_mps2": MAX_ACCEL_MPS2,
         "speed_band_frac": SPEED_BAND_FRAC,
         "alt_band_frac": ALT_BAND_FRAC,

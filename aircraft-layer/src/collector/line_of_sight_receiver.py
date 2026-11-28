@@ -135,12 +135,19 @@ class LineOfSightReceiver:
         if not isinstance(probes_raw, str):
             probes_raw = None
 
+        # BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
+        # same optional-envelope-key posture as `probes_raw` above.
+        terrain_raw = envelope.get("terrain")
+        if not isinstance(terrain_raw, str):
+            terrain_raw = None
+
         try:
             snapshot = LineOfSightSnapshot.from_wire(
                 payload,
                 bridge_call_ms=float(bridge_call_ms),
                 received_wall_clock_s=time.time(),
                 probes_raw=probes_raw,
+                terrain_raw=terrain_raw,
             )
         except LineOfSightParseError:
             logger.debug("dropping malformed line of sight payload: %r", payload)

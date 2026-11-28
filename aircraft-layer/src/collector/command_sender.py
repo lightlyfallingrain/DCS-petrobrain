@@ -409,20 +409,33 @@ class CommandSender:
                 f"failed to send flight seq={seq!r} kind={kind!r}: {exc}"
             ) from exc
 
-    def send_flight_lease(self, epoch: int, limits: dict[str, float] | None) -> None:
-        """Send `{"op": "flight_lease", "epoch": epoch, "limits": limits}`
-        to `Export.lua`'s command listener -- BL-16 Stage 2's own
-        unnumbered lease (`plans/flight-desired-state/plan.md`,
-        refinement 3), replacing the old `send_flight_control(...,
-        "arm", ...)` send. `Export.lua`'s `flight_control.lua` self-arms
-        on a park edge while this lease is fresh; body-layer never
-        states the mode. Same `CommandSendError` posture as `send_
+    def send_flight_lease(
+        self,
+        epoch: int,
+        limits: dict[str, float] | None,
+        terrain: str | None = None,
+    ) -> None:
+        """Send `{"op": "flight_lease", "epoch": epoch, "limits": limits,
+        "terrain": terrain}` to `Export.lua`'s command listener -- BL-16
+        Stage 2's own unnumbered lease (`plans/flight-desired-state/
+        plan.md`, refinement 3), replacing the old `send_flight_control(
+        ..., "arm", ...)` send. `Export.lua`'s `flight_control.lua`
+        self-arms on a park edge while this lease is fresh; body-layer
+        never states the mode. Same `CommandSendError` posture as `send_
         flight_control`: a dropped lease means the next park may not
         self-arm, a real behavioural gap.
 
         **No `seq` field, same reasoning as `send_reset`** -- this op is
         deliberately unnumbered and sent every poll, never rejected as
         stale.
+
+        `terrain` (BL-16 M3, `plans/flight-lift-vector/plan.md`, section
+        E) is the relayed grid string, or `None`/`""` for "nothing to
+        relay this poll" -- `Export.lua`'s own regex-based extraction
+        reads it by key regardless of where it sits in the JSON object,
+        so it travels nested alongside `limits` the same way that field
+        already does (`extract_json_number_field`/the new raw-string
+        extractor scan the whole message text, not a decoded tree).
 
         **No validation happens here** -- same division of labour as
         every other `send_*` method's own docstring."""
@@ -432,7 +445,12 @@ class CommandSender:
         assert sock is not None  # `open()` above always sets it
 
         payload = json.dumps(
-            {"op": "flight_lease", "epoch": epoch, "limits": limits}
+            {
+                "op": "flight_lease",
+                "epoch": epoch,
+                "limits": limits,
+                "terrain": terrain,
+            }
         ).encode("utf-8")
         try:
             sock.sendto(payload, (self._host, self._port))
@@ -668,4 +686,41 @@ class LookDirectionSender:
             )
             raise CommandSendError(
                 f"failed to send probe points seq={seq!r} points={points!r}: {exc}"
+            ) from exc
+
+    def send_terrain_points(self, seq: int, points: list[tuple[int, int]]) -> None:
+        """Send `{"op": "terrain_points", "seq": seq, "points": [[x, z],
+        ...]}` to the **same** inbound listener `send_look_direction`/
+        `send_probe_points` above target (BL-16 M3, `plans/
+        flight-lift-vector/plan.md`, section E -- "a sibling op on the
+        same mechanism") -- a third op on the same socket, not a third
+        channel. No validation here, same division of labour as every
+        other `send_*` method: `api.server`'s `POST /command/
+        terrain_points` handler validates shape/bounds/count before
+        this is ever called, and the Hook script clamps a second time.
+        Raises `CommandSendError` on send failure, same raise-on-failure
+        posture as every write this class already has -- a dropped
+        terrain push means the look-ahead loses one poll's worth of
+        fresh grid, which the law's own `terrain_max_age_s` already
+        degrades gracefully from (never a crash, never a stale-guessed
+        height)."""
+        if self._socket is None:
+            self.open()
+        sock = self._socket
+        assert sock is not None  # `open()` above always sets it
+
+        payload = json.dumps(
+            {"op": "terrain_points", "seq": seq, "points": [list(p) for p in points]}
+        ).encode("utf-8")
+        try:
+            sock.sendto(payload, (self._host, self._port))
+        except OSError as exc:
+            logger.warning(
+                "terrain-points command send failed: seq=%r points=%r",
+                seq,
+                points,
+                exc_info=True,
+            )
+            raise CommandSendError(
+                f"failed to send terrain points seq={seq!r} points={points!r}: {exc}"
             ) from exc

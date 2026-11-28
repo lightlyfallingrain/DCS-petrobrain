@@ -52,17 +52,18 @@ def _extract_template() -> str:
     return match.group(1)
 
 
-def _extract_los_code_prefix() -> tuple[str, str, str]:
-    """The `LOS_CODE` chunk's load-time splice -- the three string-concat
-    lines that prepend `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M`/`MAX_PROBES`
-    assignments ahead of the bridged `[[ ... ]]` body, mirroring
-    `_extract_template`'s approach rather than inventing a second
-    extraction strategy. The third line (`MAX_PROBES`,
+def _extract_los_code_prefix() -> tuple[str, str, str, str]:
+    """The `LOS_CODE` chunk's load-time splice -- the four string-concat
+    lines that prepend `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M`/`MAX_PROBES`/
+    `MAX_TERRAIN` assignments ahead of the bridged `[[ ... ]]` body,
+    mirroring `_extract_template`'s approach rather than inventing a
+    second extraction strategy. The third line (`MAX_PROBES`,
     `plans/expected-area-look/plan.md` Stage 1) joined the first two
-    2026-11-11 -- the bridged chunk runs in a different Lua state via
-    `net.dostring_in` and cannot see this file's own `local
-    MAX_PROBE_POINTS`, so its own clamp bound needs the same splice
-    treatment `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` already get."""
+    2026-11-11, and the fourth (`MAX_TERRAIN`, BL-16 M3) joined all
+    three -- the bridged chunk runs in a different Lua state via `net.
+    dostring_in` and cannot see this file's own `local MAX_PROBE_
+    POINTS`/`MAX_TERRAIN_POINTS`, so each clamp bound needs the same
+    splice treatment `MAX_SIGHTLINES`/`BUBBLE_RADIUS_M` already get."""
     text = _LUA_PATH.read_text(encoding="utf-8")
     match = re.search(
         r'local LOS_CODE = "local MAX_SIGHTLINES = "\n'
@@ -70,11 +71,13 @@ def _extract_los_code_prefix() -> tuple[str, str, str]:
         r'\s*\.\. "\\nlocal BUBBLE_RADIUS_M = "\n'
         r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", PLAYER_BUBBLE_RADIUS_M\)\n"
         r'\s*\.\. "\\nlocal MAX_PROBES = "\n'
-        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", MAX_PROBE_POINTS\)",
+        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", MAX_PROBE_POINTS\)\n"
+        r'\s*\.\. "\\nlocal MAX_TERRAIN = "\n'
+        r"\s*\.\. string\.format\(\"((?:[^\"\\]|\\.)*)\", MAX_TERRAIN_POINTS\)",
         text,
     )
     assert match is not None, "LOS_CODE's load-time splice not found in the Lua file"
-    return match.group(1), match.group(2), match.group(3)
+    return match.group(1), match.group(2), match.group(3), match.group(4)
 
 
 def _extract_probes_template() -> str:
@@ -84,6 +87,17 @@ def _extract_probes_template() -> str:
         text,
     )
     assert match is not None, "SET_PROBES_TEMPLATE literal not found in the Lua file"
+    pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1))
+    return "".join(pieces)
+
+
+def _extract_terrain_template() -> str:
+    text = _LUA_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        r'local SET_TERRAIN_TEMPLATE = ((?:"(?:[^"\\]|\\.)*"\s*(?:\.\.)?\s*)+)',
+        text,
+    )
+    assert match is not None, "SET_TERRAIN_TEMPLATE literal not found in the Lua file"
     pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1))
     return "".join(pieces)
 
@@ -148,7 +162,7 @@ def test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g() -> None
     -- the chunk is rebuilt at module load from these `string.format`
     calls, so a widened conversion set changes what can be injected into a
     `dostring_in`-bridged script."""
-    max_sightlines_spec, bubble_radius_spec, max_probes_spec = (
+    max_sightlines_spec, bubble_radius_spec, max_probes_spec, max_terrain_spec = (
         _extract_los_code_prefix()
     )
     assert _PRINTF_DIRECTIVE_RE.findall(max_sightlines_spec) == ["%d"], (
@@ -163,22 +177,28 @@ def test_los_code_prefix_has_exactly_one_percent_d_and_one_percent_17g() -> None
         "MAX_PROBE_POINTS's format spec must be exactly one '%d' and "
         f"nothing else -- found {max_probes_spec!r}."
     )
+    assert _PRINTF_DIRECTIVE_RE.findall(max_terrain_spec) == ["%d"], (
+        "MAX_TERRAIN_POINTS's format spec must be exactly one '%d' and "
+        f"nothing else -- found {max_terrain_spec!r}."
+    )
 
 
 def test_los_code_prefix_sets_all_globals_the_bridged_chunk_reads() -> None:
     """The bridged chunk cannot see this file's own `local`s -- that is
     *why* the splice exists -- so a guard that the splice actually sets
     the names the chunk reads (`MAX_SIGHTLINES`, `BUBBLE_RADIUS_M`,
-    `MAX_PROBES`) is load-bearing, not decoration: a typo here would
-    silently leave the chunk reading a nil global."""
+    `MAX_PROBES`, `MAX_TERRAIN`) is load-bearing, not decoration: a typo
+    here would silently leave the chunk reading a nil global."""
     text = _LUA_PATH.read_text(encoding="utf-8")
     assert 'local LOS_CODE = "local MAX_SIGHTLINES = "' in text
     assert '.. "\\nlocal BUBBLE_RADIUS_M = "' in text
     assert '.. "\\nlocal MAX_PROBES = "' in text
+    assert '.. "\\nlocal MAX_TERRAIN = "' in text
     # And the bridged body actually reads every name back.
     assert "MAX_SIGHTLINES" in text
     assert "BUBBLE_RADIUS_M" in text
     assert "MAX_PROBES" in text
+    assert "MAX_TERRAIN" in text
 
 
 def test_set_probes_template_has_exactly_fourteen_percent_d_and_nothing_else() -> None:
@@ -204,6 +224,31 @@ def test_set_probes_template_sets_the_expected_globals() -> None:
         assert f"PB_PROBE_Z_{i}=%d" in template
 
 
+def test_set_terrain_template_has_exactly_sixty_six_percent_d_and_nothing_else() -> (
+    None
+):
+    """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E):
+    `SET_TERRAIN_TEMPLATE` must carry exactly `2 + 2*MAX_TERRAIN_POINTS`
+    (== 66, for `MAX_TERRAIN_POINTS == 32`) `%d` conversions and no other
+    format specifier -- the same safety argument, and the same mechanical
+    guard, as `SET_PROBES_TEMPLATE` above."""
+    template = _extract_terrain_template()
+    directives = _FORMAT_DIRECTIVE_RE.findall(template)
+    assert directives == ["%d"] * 66, (
+        "SET_TERRAIN_TEMPLATE must carry exactly sixty-six '%d' conversions "
+        f"and no other format specifier -- found {len(directives)!r}."
+    )
+
+
+def test_set_terrain_template_sets_the_expected_globals() -> None:
+    template = _extract_terrain_template()
+    assert "PB_TERRAIN_SEQ=%d" in template
+    assert "PB_TERRAIN_N=%d" in template
+    for i in range(1, 33):
+        assert f"PB_TERRAIN_X_{i}=%d" in template
+        assert f"PB_TERRAIN_Z_{i}=%d" in template
+
+
 def test_los_code_evaluates_probes_fail_closed() -> None:
     """E11/E5: an unanswered probe (failed `getHeight`/`isVisible`, or a
     non-number coordinate) must emit the empty "unknown" token, never a
@@ -215,13 +260,15 @@ def test_los_code_evaluates_probes_fail_closed() -> None:
 
 def test_pollinbound_coalesces_both_ops_to_one_setter_call_each() -> None:
     """The look-direction op's own coalescing guard (Security review
-    Finding 5/required fix 2) extended to the second op sharing the one
-    listener -- each of `_applyLookDirection`/`_applyProbePoints` must be
-    called at most once per frame, from the single drain loop."""
+    Finding 5/required fix 2) extended to each op sharing the one
+    listener -- each of `_applyLookDirection`/`_applyProbePoints`/
+    `_applyTerrainPoints` (BL-16 M3) must be called at most once per
+    frame, from the single drain loop."""
     text = _LUA_PATH.read_text(encoding="utf-8")
     assert "local function pollInbound()" in text
     assert text.count("_applyLookDirection(") == 2  # def + the one call site
     assert text.count("_applyProbePoints(") == 2  # def + the one call site
+    assert text.count("_applyTerrainPoints(") == 2  # def + the one call site
     assert "pcall(pollInbound)" in text
 
 

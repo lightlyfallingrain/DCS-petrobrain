@@ -387,7 +387,7 @@ from collector.command_sender import (
 )
 from collector.firing_receiver import EmitterTracker
 from schema import MAX_WATCHED_ARG_NUMBER, MAX_WATCHED_ARGS
-from schema.line_of_sight import MAX_PROBE_POINTS
+from schema.line_of_sight import MAX_PROBE_POINTS, MAX_TERRAIN_POINTS
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +416,7 @@ _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _COMMAND_LOOK_DIRECTION_PATH = "/command/look_direction"
 _COMMAND_PROBE_POINTS_PATH = "/command/probe_points"
+_COMMAND_TERRAIN_POINTS_PATH = "/command/terrain_points"
 _COMMAND_COCKPIT_SWITCH_PATH = "/command/cockpit_switch"
 _COMMAND_WATCH_ARGS_PATH = "/command/watch_args"
 _QUERY_READ_ARGS_PATH = "/query/read_args"
@@ -452,6 +453,27 @@ _LOOK_DIRECTION_FOV_MAX_DEG = 180
 _PROBE_POINTS_MAX_POINTS = MAX_PROBE_POINTS
 _PROBE_POINTS_COORD_ABS_MAX = 2_000_000
 _PROBE_POINTS_SEQ_MAX = 2**31 - 1
+
+#: `POST /command/terrain_points`'s own validation (BL-16 M3, `plans/
+#: flight-lift-vector/plan.md`, section E) -- "a sibling op on the same
+#: mechanism" as `probe_points` above, same three-deep-defense posture
+#: and the same coordinate/seq bounds (the Hook's own `_safeClampInt`
+#: reuses the identical constants under its own names).
+_TERRAIN_POINTS_MAX_POINTS = MAX_TERRAIN_POINTS
+_TERRAIN_POINTS_COORD_ABS_MAX = 2_000_000
+_TERRAIN_POINTS_SEQ_MAX = 2**31 - 1
+
+#: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- the
+#: `flight_lease`'s own optional `terrain` relay field: `"<seq>|x,z,h;
+#: x,z,h;..."`, body-layer's own encoding of the newest answered grid.
+#: Generous sanity bounds, same posture as every other wire clamp in
+#: this file -- `_TERRAIN_POINTS_MAX_POINTS` points, each coordinate/
+#: height a finite number, comma/semicolon-delimited.
+_TERRAIN_RELAY_MAX_LEN = 4096
+_TERRAIN_RELAY_PATTERN = re.compile(
+    r"^-?\d+\|(-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?)"
+    r"(;-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?)*$"
+)
 
 #: `/audio/play`'s optional `correlation_id` field (`plans/
 #: voice-latency-instrumentation/plan.md` Stage 4) -- the capture side
@@ -582,8 +604,13 @@ _FLIGHT_CONTROL_LIMITS_BOUNDS: dict[str, tuple[float, float]] = {
     # **No `max_bank_deg` entry any more** (mode-1 batch, F-M1: "remove
     # the 30 degree limit") -- removed key-for-key with `Export.lua`'s
     # own `FC_LIMIT_BOUNDS` and body-layer's `tuning.py`, not widened.
+    # BL-16 lift-vector law, M3 (`plans/flight-lift-vector/plan.md`,
+    # section C) -- `max_climb_vs_mps` removed entirely, not widened,
+    # key-for-key with `Export.lua`'s own `FC_LIMIT_BOUNDS` and
+    # body-layer's `tuning.py` ("no number limit, limit comes from
+    # available power"). A field this dict does not name is silently
+    # dropped by the loop below, never forwarded.
     "max_turn_bank_deg": (0.0, 60.0),
-    "max_climb_vs_mps": (0.0, 20.0),
     "max_accel_mps2": (0.0, 10.0),
     "speed_band_frac": (0.0, 1.0),
     "alt_band_frac": (0.0, 1.0),
@@ -893,6 +920,9 @@ def _make_handler(
             if path == _COMMAND_PROBE_POINTS_PATH:
                 self._handle_command_probe_points()
                 return
+            if path == _COMMAND_TERRAIN_POINTS_PATH:
+                self._handle_command_terrain_points()
+                return
             if path == _AUDIO_PLAY_PATH:
                 self._handle_audio_play()
                 return
@@ -1108,6 +1138,96 @@ def _make_handler(
 
             try:
                 look_direction_sender.send_probe_points(seq, points)
+            except CommandSendError as exc:
+                self._respond_json(500, {"error": str(exc)})
+                return
+            self._respond_json(200, {"ok": True})
+
+        def _handle_command_terrain_points(self) -> None:
+            """`POST /command/terrain_points` -- BL-16 M3 (`plans/
+            flight-lift-vector/plan.md`, section E), "a sibling op on
+            the same mechanism" as `probe_points`: forwards to the same
+            `LookDirectionSender` instance. `{"seq": int, "points":
+            [[x, z], ...]}`; at most `MAX_TERRAIN_POINTS` points, each
+            an integer pair with `|x|, |z| <= _TERRAIN_POINTS_COORD_
+            ABS_MAX`. An empty `points` list is valid."""
+            if look_direction_sender is None:
+                self._respond_json(503, {"error": "look direction not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            seq = data.get("seq")
+            if (
+                isinstance(seq, bool)
+                or not isinstance(seq, int)
+                or not (0 <= seq <= _TERRAIN_POINTS_SEQ_MAX)
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            f"'seq' must be an integer in [0, {_TERRAIN_POINTS_SEQ_MAX}], "
+                            f"got {seq!r}"
+                        )
+                    },
+                )
+                return
+
+            points_raw = data.get("points")
+            if not isinstance(points_raw, list) or len(points_raw) > (
+                _TERRAIN_POINTS_MAX_POINTS
+            ):
+                self._respond_json(
+                    400,
+                    {
+                        "error": (
+                            "'points' must be a list of at most "
+                            f"{_TERRAIN_POINTS_MAX_POINTS} [x, z] pairs, got "
+                            f"{points_raw!r}"
+                        )
+                    },
+                )
+                return
+
+            points: list[tuple[int, int]] = []
+            for point in points_raw:
+                if (
+                    not isinstance(point, list)
+                    or len(point) != 2
+                    or any(isinstance(coord, bool) for coord in point)
+                    or not all(isinstance(coord, int) for coord in point)
+                    or not all(
+                        -_TERRAIN_POINTS_COORD_ABS_MAX
+                        <= coord
+                        <= _TERRAIN_POINTS_COORD_ABS_MAX
+                        for coord in point
+                    )
+                ):
+                    self._respond_json(
+                        400,
+                        {
+                            "error": (
+                                "each point must be an [x, z] integer pair with "
+                                f"|x|, |z| <= {_TERRAIN_POINTS_COORD_ABS_MAX}, got "
+                                f"{point!r}"
+                            )
+                        },
+                    )
+                    return
+                points.append((point[0], point[1]))
+
+            try:
+                look_direction_sender.send_terrain_points(seq, points)
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})
                 return
@@ -1862,9 +1982,27 @@ def _make_handler(
                         return
                     limits[field] = float(value)
 
+            # BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
+            # the relayed terrain grid, validated on its own: "a bad
+            # terrain drops terrain only, never the lease or its
+            # limits" (the whole-message-reject-on-bad-field posture
+            # above is deliberately NOT extended to this field). An
+            # absent or malformed `terrain` simply sends no terrain this
+            # poll -- the law's own `terrain_max_age_s` already
+            # degrades a missing grid to "floor beneath only".
+            terrain_raw = data.get("terrain")
+            terrain: str | None = None
+            if isinstance(terrain_raw, str):
+                if terrain_raw == "":
+                    terrain = ""
+                elif len(terrain_raw) <= _TERRAIN_RELAY_MAX_LEN and (
+                    _TERRAIN_RELAY_PATTERN.match(terrain_raw)
+                ):
+                    terrain = terrain_raw
+
             try:
                 command_sender.send_flight_lease(
-                    epoch_raw, limits if limits_raw is not None else None
+                    epoch_raw, limits if limits_raw is not None else None, terrain
                 )
             except CommandSendError as exc:
                 self._respond_json(500, {"error": str(exc)})

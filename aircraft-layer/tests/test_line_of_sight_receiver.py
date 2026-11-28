@@ -186,3 +186,68 @@ def test_non_string_probes_key_is_treated_as_absent_not_dropped() -> None:
     snapshot = cache.latest()
     assert snapshot is not None
     assert snapshot.probes is None
+
+
+# --- Terrain points (BL-16 M3, `plans/flight-lift-vector/plan.md`) ---------
+
+
+def test_terrain_key_is_parsed_and_pushed() -> None:
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|1|1|0|45|1234.5|Truck-1:1:0",
+            "bridge_call_ms": 1.0,
+            "terrain": "5|0:123.5;1:0",
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.terrain is not None
+    assert snapshot.terrain.seq == 5
+    assert snapshot.terrain.heights[0] == 123.5
+    assert snapshot.terrain.heights[1] == 0.0
+
+
+def test_absent_terrain_key_is_a_pre_m3_hook_and_leaves_terrain_none() -> None:
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {"payload": "1|1|1|0|45|1234.5|Truck-1:1:0", "bridge_call_ms": 1.0},
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.terrain is None
+
+
+def test_non_string_terrain_key_is_treated_as_absent_not_dropped() -> None:
+    cache = LineOfSightCache()
+    receiver = LineOfSightReceiver(cache, host="127.0.0.1", port=0)
+    receiver.open()
+    port = receiver.port
+
+    _send(
+        port,
+        {
+            "payload": "1|1|1|0|45|1234.5|Truck-1:1:0",
+            "bridge_call_ms": 1.0,
+            "terrain": 12345,
+        },
+    )
+    _run_receiver_briefly(receiver)
+
+    snapshot = cache.latest()
+    assert snapshot is not None
+    assert snapshot.terrain is None

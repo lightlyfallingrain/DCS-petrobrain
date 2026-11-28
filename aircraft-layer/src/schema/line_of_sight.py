@@ -101,6 +101,7 @@ snapshot's own `dcs_model_time_s` (`LineOfSightReceiver` passes it in)."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -118,6 +119,17 @@ class LineOfSightParseError(ValueError):
 #: a behaviour-affecting tunable (root `CLAUDE.md`'s tuning policy: this
 #: bounds a fixed-shape template, it does not change what Petrovich does).
 MAX_PROBE_POINTS = 6
+
+#: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- the
+#: collector-side cap on an inbound `terrain_points` command's own
+#: `points` list, matched by the Hook's own `_safeClampInt`-bounded
+#: `PB_TERRAIN_N` and by `SET_TERRAIN_TEMPLATE`'s fixed `2 + 2*32` `%d`
+#: conversions -- same "protocol constant, not a behaviour tunable"
+#: status as `MAX_PROBE_POINTS` above. The M3 default grid (1 + 5*3 =
+#: 16 points) never reaches this cap; it exists so a wider
+#: `TERRAIN_LOOKAHEAD_M`/narrower `TERRAIN_STEP_M` override cannot
+#: overflow the fixed-shape Hook template.
+MAX_TERRAIN_POINTS = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +216,82 @@ class ProbeAnswers:
 
 
 @dataclass(frozen=True, slots=True)
+class TerrainAnswers:
+    """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
+    `land.getHeight` answers for a `terrain_points` command, `seq`-
+    matched against the composer's own sent points the same way
+    `ProbeAnswers` is. Rides the envelope as its own `"terrain"` key,
+    never folded into `payload` -- same reasoning as `probes` (module
+    docstring's "never as an eighth pipe-delimited field").
+
+    `heights` is a tuple indexed exactly like the wire's own `<i>`
+    token, length `MAX_TERRAIN_POINTS`, `None` at every index the wire
+    did not mention *or* whose height was non-finite -- a failed or
+    non-finite `land.getHeight` answers missing, never `0.0` (a `0 m`
+    reading would silently read as low ground and suppress a climb)."""
+
+    seq: int
+    #: This poll's own `dcs_model_time_s` (`LineOfSightSnapshot`'s, not a
+    #: second wire field), same posture as `ProbeAnswers.dcs_model_
+    #: time_s`.
+    dcs_model_time_s: float
+    heights: tuple[float | None, ...]
+
+    @staticmethod
+    def from_wire(raw: str, *, dcs_model_time_s: float) -> TerrainAnswers:
+        """Parse one `"<seq>|<i>:<h>;..."` sub-wire string. Raises
+        `LineOfSightParseError` on a malformed string -- same "malformed
+        -> dropped, never guessed" posture as `ProbeAnswers.from_wire`;
+        the caller (`LineOfSightReceiver`) drops the whole envelope's
+        `terrain` field on that, never the rest of the snapshot."""
+        seq_str, _, entries_str = raw.partition("|")
+        seq = _parse_int(seq_str, "terrain.seq")
+        heights: list[float | None] = [None] * MAX_TERRAIN_POINTS
+        for entry in entries_str.split(";"):
+            if not entry:
+                continue
+            index_str, _, height_str = entry.partition(":")
+            try:
+                index = int(index_str)
+            except ValueError as exc:
+                raise LineOfSightParseError(
+                    f"terrain entry index must be an integer, got {entry!r}"
+                ) from exc
+            if not (0 <= index < MAX_TERRAIN_POINTS):
+                raise LineOfSightParseError(
+                    f"terrain entry index {index} out of range in {entry!r}"
+                )
+            if height_str == "":
+                heights[index] = None
+                continue
+            try:
+                height = float(height_str)
+            except ValueError as exc:
+                raise LineOfSightParseError(
+                    f"terrain entry height must be a number or empty, got {entry!r}"
+                ) from exc
+            # Non-finite standing rule (root `CLAUDE.md`) -- a NaN/Inf
+            # height is a missing point, never a guessed value, enforced
+            # here too even though the Hook's own `land.getHeight` pcall
+            # already guards it (defence against a future Lua change or
+            # a hand-crafted datagram).
+            if not math.isfinite(height):
+                heights[index] = None
+                continue
+            heights[index] = height
+        return TerrainAnswers(
+            seq=seq, dcs_model_time_s=dcs_model_time_s, heights=tuple(heights)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seq": self.seq,
+            "dcs_model_time_s": self.dcs_model_time_s,
+            "heights": list(self.heights),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class LineOfSightVerdict:
     """One unit's building/terrain LOS verdict for one poll. Two
     independently-computed fields, never pre-combined -- see the module
@@ -247,6 +335,10 @@ class LineOfSightSnapshot:
     #: this poll, or a pre-Stage-1 Hook). See module docstring's "Point
     #: probes" section.
     probes: ProbeAnswers | None = None
+    #: BL-16 M3 -- `None` when the envelope carried no `terrain` key, or
+    #: an empty one (no terrain command sent yet, or a pre-M3 Hook). Same
+    #: optional-field contract as `probes` above.
+    terrain: TerrainAnswers | None = None
 
     @staticmethod
     def from_wire(
@@ -255,18 +347,19 @@ class LineOfSightSnapshot:
         bridge_call_ms: float,
         received_wall_clock_s: float,
         probes_raw: str | None = None,
+        terrain_raw: str | None = None,
     ) -> LineOfSightSnapshot:
         """Parse one compact wire string (module docstring) into a typed
         snapshot. `entries` may be empty (nothing in the queried wedge this
         poll).
 
-        `probes_raw` is the envelope's own separate `"probes"` key
-        (**not** part of `payload` -- module docstring's "never as an
-        eighth pipe-delimited field"), passed through by
-        `LineOfSightReceiver`. `None` or `""` both mean "no probe answers
-        this poll" and leave `probes` at `None`; anything else is parsed
-        via `ProbeAnswers.from_wire`, sharing this snapshot's own
-        `dcs_model_time_s`."""
+        `probes_raw`/`terrain_raw` are the envelope's own separate
+        `"probes"`/`"terrain"` keys (**not** part of `payload` -- module
+        docstring's "never as an eighth pipe-delimited field"), passed
+        through by `LineOfSightReceiver`. `None` or `""` both mean "no
+        answers this poll" and leave the matching field at `None`;
+        anything else is parsed via the matching `from_wire`, sharing
+        this snapshot's own `dcs_model_time_s`."""
         parts = payload.split("|", 6)
         if len(parts) != 7:
             raise LineOfSightParseError(
@@ -317,6 +410,16 @@ class LineOfSightSnapshot:
             except LineOfSightParseError:
                 probes = None
 
+        # Same "dropped on its own" posture as `probes_raw` above.
+        terrain: TerrainAnswers | None = None
+        if terrain_raw:
+            try:
+                terrain = TerrainAnswers.from_wire(
+                    terrain_raw, dcs_model_time_s=dcs_model_time_s
+                )
+            except LineOfSightParseError:
+                terrain = None
+
         return LineOfSightSnapshot(
             dcs_model_time_s=dcs_model_time_s,
             received_wall_clock_s=received_wall_clock_s,
@@ -328,6 +431,7 @@ class LineOfSightSnapshot:
             bridge_call_ms=bridge_call_ms,
             verdicts=verdicts,
             probes=probes,
+            terrain=terrain,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -344,6 +448,7 @@ class LineOfSightSnapshot:
                 name: verdict.to_dict() for name, verdict in self.verdicts.items()
             },
             "probes": self.probes.to_dict() if self.probes is not None else None,
+            "terrain": self.terrain.to_dict() if self.terrain is not None else None,
         }
 
 
