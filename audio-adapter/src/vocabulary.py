@@ -275,6 +275,9 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         # body-layer side rather than four.
         "radio_check",
         "greeting",
+        # Testing aid (2026-11-28): "launch" -> body-layer presses Fire
+        # Shturm for 0.5 s, to test whether the write lands. Unbenched.
+        "launch",
         # "where is it?" (`plans/attack-run-los/plan.md` F3) -- a plain,
         # slot-free phrase, matching `drop_target`/`disengage`'s own
         # posture. **Voice only** (Decision 3, user: "voice only") --
@@ -683,6 +686,8 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `drop_target`'s posture: one exact wording, no recorded ambiguity to
     # hedge against yet.
     "radio_check": ("radio check",),
+    # Testing aid (2026-11-28) -- one exact word, the user's own.
+    "launch": ("launch",),
     # `good <morning|day|evening|night> petrovich` -- like `follow`/
     # `report`, the slot (`time_of_day`) is parsed
     # (`command_matcher.py`'s greeting-slot branch), never enumerated as
