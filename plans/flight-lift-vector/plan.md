@@ -1483,6 +1483,10 @@ against these measured figures.
 
 ## LV-2 rework amendment (2026-11-28)
 
+**Diagrams approved (user, verbatim, 2026-11-28):** *"break plan ok"* — reviewed as the throwaway
+artifact https://claude.ai/artifact/HPQAEpYd11UibGVcc5SqE5 (this section's two diagrams plus a
+by-channel change table).
+
 Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `feature/bl16-lift-vector-law`),
 tip `7773b8ef`. Supersedes the collective/vertical-channel design of "LV-2 amendment (2026-11-27)"
 section C and the bank cap of section B — the first LV-2 card flew and failed
