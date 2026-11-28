@@ -1894,12 +1894,139 @@ pattern) — that comparison is this card's real pass/fail criterion, more than 
 None — every open question from the goal check (`alignment.md`, "Goal check — 2026-11-28 — LV-2
 rework", Questions 1–6) was answered "as recommended" before this pass began, and Findings 1–6 are
 each addressed above: Finding 1 (roll-out climbs back) by E; Finding 2 ("more turn rate" collapsing
-to an ordinary turn) by B's fixed 30° regardless of margin; Finding 3 (floor reaction re-engaging
-too late) by D.1's sink-rate lead; Finding 4 (30° spends more height per degree) carried forward as
-a Risk and a card measurement, not a design change (the user chose 30° "for now"); Finding 5 (slow
-entry) by D.3's speed schedule; Finding 6 (right breaks and the pedal cap) named in Risks, out of
-this amendment's scope. The task brief's own two "out of scope, name the dependency" items (pedal
-cap, λ-from-ground-speed) are named in Risks, not decided here.
+to an ordinary turn) by B's fixed 30° regardless of margin — **refined by the BE6 amendment below**:
+bank now also eases transiently while a developed sink is actively being arrested, so "regardless of
+margin" holds as stated only for the steady-state/no-sink case (BE7), not for BE6's mid-break
+recovery; Finding 3 (floor reaction re-engaging too late) by D.1's sink-rate lead; Finding 4 (30°
+spends more height per degree) carried forward as a Risk and a card measurement, not a design change
+(the user chose 30° "for now"); Finding 5 (slow entry) by D.3's speed schedule; Finding 6 (right
+breaks and the pedal cap) named in Risks, out of this amendment's scope. The task brief's own two
+"out of scope, name the dependency" items (pedal cap, λ-from-ground-speed) are named in Risks, not
+decided here.
+
+### LV-2 rework — BE6 amendment (2026-11-28)
+
+**Plan check CONCERNS, settled (user, verbatim): *"go with 'A, ease bank too:'"*** — restated from
+the top of this section. `alignment.md`'s "Plan check — 2026-11-28 — LV-2 rework" Finding 1: as
+written, Section B's bank stayed at 30° "regardless of margin, full stop," and the only thing that
+could ever ease it was D.4's `phi_scale`/`effective_shortfall` safety net — which the plan itself
+calls "the exception path, not the common one," engaging only when the collective-rate limiter is
+provably the bottleneck. So on the ordinary approach to the floor (BE6: flew most of the break
+released, margin now running out), the pilot would see collective visibly come up but the turn keep
+going at the same rate — not *"more collective, slower turn"* (user, `explore-notes.md` line 527),
+which pairs the two as one instruction, not collective-only.
+
+**The fix must not undo BE7.** BE7 (`alignment.md` Goal check answer 2, *"as recommended"*) is a
+different case: a break called with **no margin from the first frame** flies a level turn **at 30°**
+the whole time, steeper than the ordinary 20° cap — it is not "fly a normal turn," and bank must not
+ease there just because margin is low. The two cases differ in exactly one thing: BE7 never develops
+a sink to arrest (`a_u_d` is already the ordinary, height-tracking value from frame 1, so `state.
+w_ref` stays near zero throughout); BE6 has been sinking by design (`a_u_d = 0` while `break_release
+= 1`) and only *now*, as `break_release` falls, does the vertical loop have an actual sink rate to
+claw back. **So the easing signal has to be the sink actually being arrested, not the height margin
+itself** — margin alone (`break_release`) is exactly the "low height" signal the task brief warns
+off; a signal built only from margin would fire identically in BE7 and wrongly ease a turn that was
+never sinking in the first place.
+
+**B (revised). Bank is 30° unless an actual sink is being clawed back.** `break_max_bank_deg` (30°,
+unchanged) is still the commanded target and the rate-cap mechanism is still untouched — this
+amendment adds a second, independent scale on the realised bank, alongside D.4's existing one, not a
+replacement for either:
+
+```
+-- new, D.4a: eases bank in proportion to the sink rate actually being arrested, scaled by how far
+-- recovery has progressed (break_release) -- NOT by margin alone, so BE7 (no sink ever develops) is
+-- untouched and RELEASED (sinking by design, break_release = 1) is untouched too.
+local sink_being_arrested_mps = math.max(0.0, -(state.w_ref or 0.0))
+local recovery_phi_scale = 1.0
+if class == "break" then
+    recovery_phi_scale = law_clamp(
+        1.0 - profile.k_phi_recovery_ease * sink_being_arrested_mps * (1.0 - break_release),
+        limits.max_turn_bank_deg / profile.break_max_bank_deg,   -- floor: no steeper-than-ordinary
+        1.0)                                                     --        easing below the 20 deg cap
+end
+phi_scale = math.min(phi_scale, recovery_phi_scale)   -- D.4's own phi_scale, untouched above this line
+```
+
+This sits immediately after D.4's existing `phi_scale` computation (today's ~L1671–1675) and
+combines with it by `math.min` — **D.4's own formula, and the M3 terrain-binding override, are not
+touched by a single character.** Reading the product: at `break_release = 1` (RELEASED, sinking by
+design) the `(1.0 - break_release)` factor is zero regardless of sink rate, so `recovery_phi_scale =
+1.0` — bank stays at 30° while the aircraft sinks, exactly as designed. In BE7 (`break_release = 0`
+from frame 1, but `a_u_d` already ordinary so no sink ever develops) `sink_being_arrested_mps ≈ 0`,
+so again `recovery_phi_scale ≈ 1.0` — bank stays at 30° throughout, BE7 unchanged. In BE6 (margin
+falling *and* a real sink rate built up from flying released) both factors are non-zero together,
+`recovery_phi_scale` drops below 1, and `phi_scale` eases the coordinated bank — the turn genuinely
+slows while collective comes up, down to a floor of the ordinary 20° cap's share of 30°
+(`limits.max_turn_bank_deg / profile.break_max_bank_deg ≈ 0.667`), never further; below that floor
+only D.4's own safety net (unchanged, a provable collective-rate shortfall) can ease it more. **Bank
+returns to 30° on its own, with no separate "recovered" check**, because the same `w_ref` that drives
+the easing is what the vertical loop is clawing to zero — once the sink is arrested (`w_ref → 0`),
+`sink_being_arrested_mps → 0`, `recovery_phi_scale → 1.0`, and the aircraft is left flying BE7's own
+steady state: level, height-held, 30° bank. RECOVERING and HELD converge to the same place; this
+amendment only changes what happens while they are not yet there.
+
+**Regime diagram, RECOVERING node revised** (replaces the `RECOV` node and the edge into `EASE` in
+"Design Overview (diagrams)" diagram 1 above):
+
+```mermaid
+flowchart TB
+  ENTRY["break left/right commanded<br/>(axes_break_turn, UNCHANGED)"] --> REL["break_release (D.1)<br/>height_margin_m / effective_band_m<br/>(band widened by sink-rate lead)"]
+  REL -->|"= 1, height to spare"| FREE["RELEASED<br/>bank: 30 deg (recovery_phi_scale = 1, no sink yet)<br/>pitch: holds entry-ish speed (C, unchanged)<br/>a_u_d = 0 -- no climb/descent demand (D.2)<br/>collective: level trim MINUS break_drop (D.3)<br/>-> aircraft sinks, by design"]
+  REL -->|"fading toward 0, near floor/budget"| RECOV["RECOVERING<br/>a_u_d fades back to ordinary height-tracking (D.2)<br/>break_drop fades to 0 (D.3)<br/>bank EASES too (D.4a, NEW): recovery_phi_scale falls with<br/>sink_being_arrested_mps * (1 - break_release), floored at<br/>the ordinary 20 deg cap's share of 30 deg<br/>-> collective comes up AND the turn genuinely slows"]
+  REL -->|"= 0 from frame 1 (BE7, called low, no sink ever develops)"| HELD["HELD FROM ENTRY<br/>bank: still 30 deg (D.4a reads ~1: w_ref stays ~0, nothing to arrest)<br/>a_u_d = ordinary (height held) from the start<br/>-> a level turn, steeper than ordinary, height held"]
+  RECOV -->|"sink arrested (w_ref -> 0): D.4a's own ease -> 0"| HELD
+  RECOV -->|"shortfall still persists despite D.4a (collective genuinely can't keep up, rare)<br/>(effective_shortfall, D.4, SAFETY NET, kept unchanged)"| EASE["phi_scale eases bank further, below the 20 deg floor<br/>theta_speed_give pitches back<br/>-- the EXCEPTION path (BE6's under-recovered tail), not scheduled"]
+  TERRAIN{"M3 terrain_binding?"} -.->|"yes, at any regime"| FREE
+  TERRAIN -.-> RECOV
+  TERRAIN -.-> HELD
+  TERRAIN -->|"overrides release outright (D.2)"| GROUND["a_u_d = full ordinary, break_drop = 0<br/>ground/terrain safety first, always"]
+  FREE --> SETTLE["heading reached: settle (UNCHANGED)<br/>+ alt_goal_m := height reached (E, NEW)<br/>-> level at the height reached, no climb back"]
+  RECOV --> SETTLE
+  HELD --> SETTLE
+```
+
+(Diagram 2, "Who owns what, by channel," is unaffected — it contrasts the superseded design's
+collective-only chase against this rework's attitude manoeuvre and does not break out the bank-ease
+detail; no change needed there.)
+
+**Implementation Plan, revised** (inserts one step; steps 5–7 above are renumbered 6–8):
+
+5. **Bank easing in recovery (D.4a, new)**: immediately after D.4's `phi_scale` computation
+   (today's ~L1671–1675), compute `recovery_phi_scale` from `state.w_ref` and `break_release` as
+   above and fold it in via `phi_scale = math.min(phi_scale, recovery_phi_scale)`. Gated on
+   `class == "break"` exactly like D.4's own term; no change to D.4's formula, to the M3
+   terrain-binding override, or to anything outside this one `phi_scale` line. One new tuning
+   constant (`k_phi_recovery_ease`).
+
+**Tuning constants — one addition** to the table above:
+
+| constant | first cut | role |
+|---|---|---|
+| `k_phi_recovery_ease` | 0.1 (s/m) | D.4a's gain on sink-rate-being-arrested × `(1 − break_release)`; first cut only, the card is where this is measured — too low and BE6 will read like today's plan (collective recovers, bank barely moves); too high and ordinary turbulence-scale `w_ref` noise during a long released sink could flicker the bank near the floor of RECOVERING unnecessarily |
+
+**Tests — two additions** to "Tests (real-Lua toy-plant harness)" above:
+
+- **Recovery bank-ease (BE6, the new behaviour):** a break flown released long enough to build a real
+  sink rate, then margin run down so `break_release` falls toward 0 while `w_ref` is still clearly
+  negative — measured bank visibly eases below 30° (reading the realised `phi_ff * phi_scale`, not
+  the commanded target) while `a_u_d`/collective are also recovering (D.2/D.3, unchanged), turn rate
+  drops with it (`r_ref` falls off the 30°-derived ceiling as realised bank falls), and the plant
+  never crosses below the floor. Then, once `w_ref` returns to ~0 (sink arrested, height held),
+  measured bank returns to 30° on its own, with no separate "recovered" transition in the test's own
+  assertions — it is read off the same `recovery_phi_scale` formula settling back to 1.
+- **HELD-from-entry still flies flat 30° (BE7, regression against this amendment):** the existing
+  "BE7, no margin from entry" scenario above, re-asserted with `recovery_phi_scale` read every frame
+  — it stays at (or indistinguishably close to) 1.0 for the scenario's whole duration, since `w_ref`
+  never develops a meaningful sink to arrest when `a_u_d` is already the ordinary value from frame 1;
+  measured bank holds flat at 30°, not easing toward the 20° floor the way the BE6 case above does.
+
+**Card, low-entry row revised** ("One break started at 55–70 m AGL..." in "LV-2 card" above):
+
+> One break started at **55–70 m AGL** (BE7: watch for a level turn held flat at ~30° from the first
+> second, not a sink-then-recover pump, **and not an easing bank either** — this row has no sink to
+> arrest, so unlike the 120/180/250 rows above it if they run the margin down late in the turn, bank
+> here should stay visibly steady throughout, not come off).
 
 ## LV-3 amendment (2026-11-27)
 
