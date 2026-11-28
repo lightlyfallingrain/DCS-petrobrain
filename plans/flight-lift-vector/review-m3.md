@@ -144,3 +144,119 @@ confirm the Required Fix's absence (a negative claim, checked by grep for the sp
 name across the whole file) but not a line-by-line audit of every pre-existing test's continued
 correctness, which the full-suite pass (3927/1313 green, zero new failures) already covers more
 reliably than a manual read would.
+
+## Re-review (fix pass)
+
+Commit `57f965d5` (branch `fix/bl16-flight-epoch-bound`, pushed `feature/bl16-lift-vector-law`),
+diff `6d789b38..57f965d5` (4 files: `flight_control.lua`, two test files,
+`implementation-m3.md`). That branch tip could not be checked out in this worktree (it was already
+checked out in another worktree, `/Users/sg/Code/DCS-petrobrain-epochfix`), so this re-review was
+done against an isolated `git archive 57f965d5` snapshot, with every check run from inside that
+snapshot's own `aircraft-layer/` directory (this project's checked-out
+`aircraft-layer/.venv` for `ruff`/`mypy`/`pytest`, Homebrew `luac5.1`/`luajit`).
+
+**Checks (re-run, not re-trusting the implementer's log):** `ruff format --check` clean, `ruff
+check` clean on both touched test files; `mypy src` (from inside the snapshot's `aircraft-layer/`)
+0 issues/29 files; `luac5.1 -p flight_control.lua` clean; `pytest tests -q` → **1318 passed**
+(matches `implementation-m3.md`'s count, 1313 + 5 new). No `body-layer` file touched, correctly not
+re-run.
+
+**2b (terrain height magnitude bound) — confirmed correct.** `parse_terrain_relay` drops a
+height outside `|h| < 1e5` by simply never appending the point (`if ... then points[#points+1]
+= ... end`, no `else`) — an out-of-bound height is excluded from the grid entirely, never
+substituted with `0`. Re-ran `TestTerrainRelayMagnitudeBound` directly: a grid of one in-range
+and two out-of-range heights reports `fc_terrain_n = 1` (not 3, not a 0-height point counted);
+an all-out-of-range grid reports `0`. Matches "missing, never 0."
+
+**Required fix 1's own test, verified by mutation.** Patched a local copy of `flight_control.lua`
+to gate the section-D speed-give block behind `state.terrain_return` (simulating exactly the
+"narrowed to terrain climbs only" regression plan-aligner's Finding 3 and required-fix-1 both
+named) and re-ran `TestM3OrdinaryClimbTradesSpeedNoTerrain` against the mutant: it fails
+(`v_ref_floor_phase` stays at the commanded 61.1 m/s instead of settling at the 27.78 m/s floor).
+So the test the implementer added does close the exact gap required-fix-1 asked for, for the part
+it actually exercises (yield toward the floor, never below it, on a plain non-terrain climb).
+
+**The recovery half of the same test is not actually verified — required fix.** The task's own
+suspicion (`omega_speed` 0.15 is far too fast a filter to still be 34.7/40.6 m/s short of 61.1 m/s
+after 60 s/300 s) is correct, but the cause is neither the filter nor (as the implementer's log
+claims) "`omega_speed` is deliberately slow" — it is that **`shortfall` never actually reaches
+zero in this scenario**, for a reason that is a test-driver defect, not a law defect:
+
+- Traced `state.dbg_shortfall`, `state.u_c`, `state.h_ref`, `state.w_ref` and `measured.h_m`
+  frame-by-frame through the exact scenario (reconstructed driver, `luajit`, against the real
+  `flight_control.lua`). After the RPM/speed recovery the RPM-caused shortfall does end
+  (`shortfall = 0` at t≈1–5 s), but the sustained 500 m altitude error (goal 650 m, `measured.h_m`
+  pinned at 150 the whole run — the test never advances it) saturates the collective again by
+  t≈15 s (`u_c = 1.0`) and `shortfall` **never returns to 0 for the rest of the run** — it is
+  still 2.0 and *rising* at t = 600 s, long after the law's own internal reference `state.h_ref`
+  has already reached the 650 m goal (`h_ref = 650.000` by t = 300 s). The driving term is
+  `k_alt_error · (h_ref − measured.h_m)` in the collective command: because `measured.h_m` is
+  never updated, this gap only grows, so the collective stays pinned at max and
+  `next_state.dv_ref = min(dv_ref, 0.0)` (the shortfall-driven clamp, section D) keeps re-zeroing
+  every frame. The slow ~0.02–0.03 m/s² per-frame creep visible in the recovered numbers
+  (27.8 → 34.7 → 40.6 → 46.5 m/s at 60/300/600 s) is a side effect of statement order (the
+  ordinary shaper computes a small tentative increase before the override re-clamps it down each
+  frame), not genuine convergence — `shortfall` is never actually zero when those numbers are
+  sampled.
+- Confirmed this is a driver artifact, not a law defect, two ways. First, with the same scenario
+  but a much smaller, achievable climb (`alt_goal_m = 200` instead of `650`), `state.h_ref`
+  reaches the goal by t ≈ 30 s and `shortfall` still never drops below ≈0.2 and keeps climbing —
+  same mechanism, same cause (`measured.h_m` frozen), ruling out "the climb itself is just too
+  big." Second, re-running the same scenario with `measured.h_m` integrated one frame-order term
+  behind `state.w_ref` (i.e. a sensor that actually reports the climb happening, the one change
+  that makes the scenario physically consistent) makes `shortfall` hit exactly `0.0` within
+  ~1 s of the RPM/speed recovery and `v_ref` reach the commanded `61.111` m/s (not just
+  "`> floor + 5`") well inside the test's own 60 s window. So the law's own recovery path is not
+  slow and not broken — the merged toy plant simply never lets the shortfall end, because it
+  never advances the one measured field (`measured.h_m`) the collective's altitude-error term
+  reads, while the law's own internal reference (`h_ref`) is allowed to run ahead of it forever.
+- This matters because it is exactly the plan's own stated requirement for this test (`plan.md`,
+  Tests, U22 row): *"... and return to the commanded speed once the shortfall ends — so a
+  regression to 'terrain only' fails a test."* The merged test's assertion
+  (`v_ref_recovered > v_ref_floor_phase + 5.0`) and its own docstring ("once the shortfall ends,
+  `v_ref` returns toward the commanded speed ... not asserted at full convergence, only that it
+  is clearly moving back up") both describe a shortfall-ends-then-recovers case that this
+  scenario never reaches — `shortfall` is still 2.0 and rising at the point the test samples
+  `v_ref_recovered`. The weak `+5.0` margin happens to pass regardless, via the per-frame leak
+  above, so a future change that broke the *actual* resumption path (e.g. a sign error making
+  `v_ref` never resume at all once `shortfall` genuinely ends) would not be caught by this
+  assertion — the same class of gap required-fix-1 itself was written to close, now one level
+  deeper. **Required fix 2**: give the scenario a way for `shortfall` to actually reach and stay
+  at `0.0` (the cheapest form: advance `measured.h_m` toward `state.w_ref`/`state.h_ref` each
+  step, matching the technique this file's own bank/heading toy-plant tests already use, or pick
+  an altitude goal and a point in the run where the collective genuinely un-saturates) and assert
+  `v_ref` actually converges toward `speed_goal_mps` (not merely `> floor + 5.0`) once `shortfall`
+  is observed to be `0.0`. Until then, U22's "resume at the commanded speed" half is unverified by
+  any test, even though the plan, the original review, and this test's own docstring all state it
+  is.
+
+**Everything else from the original review unaffected.** 2a (ease-down cap, direct) and the rest
+of the M3 build were not touched by this fix pass beyond what `implementation-m3.md` discloses,
+and nothing in this re-review found a new issue with them.
+
+## Verdict (re-review)
+
+**CHANGES REQUESTED.**
+
+1. **Fix the recovery assertion in `TestM3OrdinaryClimbTradesSpeedNoTerrain`.** The test's
+   recovery check does not exercise what it claims to (U22's "returns to the commanded speed once
+   the shortfall ends") because `shortfall` never reaches `0.0` in the scenario as built — a test
+   construction gap (`measured.h_m` never advances), not a defect in `flight_control.lua`. Make
+   the scenario reach a genuine `shortfall == 0.0` state (advance `measured.h_m` with the climb,
+   or otherwise let the collective un-saturate) and assert convergence toward `speed_goal_mps`,
+   not just `v_ref_recovered > v_ref_floor_phase + 5.0`. Also correct the test's own docstring/
+   comment, which currently asserts a recovery that is not actually demonstrated.
+
+Everything else re-checked in this pass — 2b's magnitude bound (missing, never 0, confirmed),
+required-fix-1's floor/never-below/terrain-only-regression coverage (confirmed by mutation), and
+the full `aircraft-layer` suite (1318 passed, format/lint/type clean) — is sound.
+
+## Re-review Confidence
+
+**Full read** of the Lua diff and both new test files, plus direct reconstruction and execution
+of the merged scenario against the real `flight_control.lua` outside pytest (`luajit`, with
+per-frame tracing of `dbg_shortfall`/`u_c`/`h_ref`/`w_ref`/`measured.h_m`) to establish the actual
+cause of the slow recovery, a mutation run against required-fix-1's test, and a corrected-plant
+run to confirm the law itself converges quickly once `shortfall` genuinely ends. Not re-walked:
+the ~4000 pre-existing lines of toy-plant fixtures untouched by this fix pass (covered by the
+full-suite pass instead, 1318/1318 green, matching the implementer's count).
