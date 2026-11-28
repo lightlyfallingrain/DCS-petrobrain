@@ -285,3 +285,63 @@ out-of-range heights reports `fc_terrain_n = 1`; an all-out-of-range grid report
   slow"` (this subproject has no `slow`-marked tests).
 
 No `body-layer` file was touched by this fix pass, so its suite was not re-run.
+
+## Fix pass 2 (review-m3.md "Re-review (fix pass)" required fix)
+
+The re-review found that `TestM3OrdinaryClimbTradesSpeedNoTerrain`'s recovery half never actually
+exercised U22's "returns to the commanded speed once the shortfall ends": `measured.h_m` was never
+advanced during the 60 s recovery loop, so the altitude-error term driving the collective
+(`k_alt_error * (h_ref - measured.h_m)`) grew without bound against a frozen sensor, kept the
+collective saturated, and `shortfall` never genuinely returned to `0.0` — the old assertion
+(`v_ref_recovered > v_ref_floor_phase + 5.0`) passed anyway through a per-frame statement-order
+leak, not real recovery.
+
+**Fix**, confirmed by running the driver under `luajit` (per-frame traces, not assumed from the
+formula) before writing any assertion: both loops in `_run_scenario` now advance `measured.w_mps`
+and `measured.h_m` from `state.w_ref` each step — the same "sensor reports the climb" technique
+this file's own bank/heading toy-plant scenarios already use (e.g.
+`TestOvershootPastTheStoppingHeightStaysInsideTheBand`'s `measured.h_m = measured.h_m +
+measured.w_mps * dt`), rather than a new closed-loop plant. With this change, `shortfall` reaches
+`0.0` almost immediately after the RPM/speed recovery (measured: 0.05 s into the 60 s window, well
+inside the review's own "~1 s" estimate), though a second, genuine power-limited saturation
+recurs partway through the climb (this test's 500 m AGL step is large relative to the toy
+`PROFILE`'s `alt_accel_cap_mps2` of 1.0 — a real, not artifactual, overshoot-then-recover of the
+law's own altitude shaper) before `shortfall` settles at exactly `0.0` by the end of the 60 s
+window. `v_ref` reaches `60.362485510` m/s against a `speed_goal_mps` of `61.111111111` m/s by then
+— within 1.0 m/s, nowhere near the old +5.0 m/s margin a broken resumption path would still clear.
+
+**New/changed assertions**: `shortfall_recovered == 0.0` (the premise U22's wording and the
+original test's own docstring both assumed but never checked), `speed_goal_mps` read back from the
+scenario itself (rather than retyped as a literal, so a future change to the take seed cannot
+silently decouple the assertion from what the scenario actually commands), and `v_ref_recovered`
+within `1.0` m/s of `speed_goal_mps` (a real convergence check, replacing the old "`> floor + 5.0`"
+trend-only assertion). The floor-phase assertions are unchanged and unaffected (confirmed: floor
+phase values are bit-identical to the prior pass, since the altitude error during that 1 s phase is
+too small to move `measured.h_m` meaningfully).
+
+**Mutation check, re-run**: patched a local copy of `flight_control.lua` to gate the section-D
+speed-give block behind `state.terrain_return` (required-fix-1's own mutant) and re-ran the
+updated test against it — still fails, at the floor-phase assertion (`v_ref_floor_phase` resolves
+to the commanded `61.111` m/s instead of the `27.778` m/s floor, since the mutant disables the
+give entirely for a non-terrain climb). The mutant is caught by the pre-existing floor-phase
+assertions, which this fix pass does not touch; the new recovery assertions were not the ones this
+particular mutant was aimed at catching (required-fix-1's own regression target), so no additional
+mutant was built for them beyond the convergence tolerance itself.
+
+Docstring corrected: the class-level docstring now records this fix pass and why the recovery
+half needed it; the method's own recovery comment no longer claims the old assertion was "not
+asserted at full convergence, only... moving back up" as a deliberate design choice — it now
+explains the convergence check and cites the measured gap to `speed_goal_mps`.
+
+**Checks**, run from this worktree (no local `.venv`, so the main checkout's `aircraft-layer/
+.venv` was used; `luajit`/`luac5.1` from Homebrew, confirmed present):
+
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `mypy src` (from inside `aircraft-layer/`): pass, 0 issues in 29 source files (no production
+  source touched — only the test file).
+- `pytest tests -q`: **1318 passed**, same count as fix pass 1 (no test added or removed, only one
+  test's own body changed), zero regressions.
+- `luac5.1 -p`: not re-run — no Lua file was touched by this fix pass.
+
+Only `aircraft-layer/tests/test_flight_control_law.py` changed in this pass.

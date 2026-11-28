@@ -4149,10 +4149,22 @@ class TestM3OrdinaryClimbTradesSpeedNoTerrain:
     loop plant. `measured.terrain` is never assigned anywhere in this
     scenario, so a future regression that re-adds a terrain-only gate
     around the speed-give branch (section D) fails this test even
-    though it never sets a grid."""
+    though it never sets a grid.
+
+    Re-review fix pass 2 (review-m3.md "Re-review (fix pass)" required
+    fix): the recovery phase now advances `measured.h_m`/`measured.
+    w_mps` from `state.w_ref` each step (the same technique this
+    file's own bank/heading toy-plant scenarios already use), so the
+    altitude-error term driving the collective (`k_alt_error * (h_ref
+    - measured.h_m)`) does not grow without bound against a frozen
+    sensor. Without this, `shortfall` never actually returns to `0.0`
+    in this scenario -- confirmed by the re-review's own frame-by-frame
+    trace -- so the old assertion (`v_ref_recovered > v_ref_floor_phase
+    + 5.0`) passed only via a per-frame leak in a still-saturated
+    state, not genuine recovery."""
 
     @staticmethod
-    def _run_scenario() -> tuple[float, float, float, float]:
+    def _run_scenario() -> tuple[float, float, float, float, float, float]:
         driver = (
             """
 local measured = {measured}
@@ -4169,6 +4181,12 @@ measured.ias_mps = 70.0 / 3.6
 measured.v_t_mps = 70.0 / 3.6
 for i = 1, 20 do
     state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+    -- Advance the measured climb from the law's own vertical-speed
+    -- reference, so the altitude-error term the collective reads
+    -- (`k_alt_error * (h_ref - measured.h_m)`) does not run away
+    -- against a frozen sensor (review-m3.md re-review, required fix).
+    measured.w_mps = state.w_ref
+    measured.h_m = measured.h_m + measured.w_mps * 0.05
 end
 local v_ref_floor_phase = state.v_ref
 local shortfall_floor_phase = state.dbg_shortfall
@@ -4179,12 +4197,17 @@ measured.ias_mps = 220.0 / 3.6
 measured.v_t_mps = 220.0 / 3.6
 for i = 1, 1200 do
     state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+    measured.w_mps = state.w_ref
+    measured.h_m = measured.h_m + measured.w_mps * 0.05
 end
 local v_ref_recovered = state.v_ref
+local shortfall_recovered = state.dbg_shortfall
 print(string.format("%.9f", v_ref_before))
 print(string.format("%.9f", v_ref_floor_phase))
 print(string.format("%.9f", shortfall_floor_phase))
 print(string.format("%.9f", v_ref_recovered))
+print(string.format("%.9f", shortfall_recovered))
+print(string.format("%.9f", state.speed_goal_mps))
 """
         ).replace(
             "{measured}",
@@ -4197,17 +4220,34 @@ print(string.format("%.9f", v_ref_recovered))
             ),
         )
         lines = _run(driver)
-        v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered = (
-            float(x) for x in lines
+        (
+            v_ref_before,
+            v_ref_floor_phase,
+            shortfall_floor_phase,
+            v_ref_recovered,
+            shortfall_recovered,
+            speed_goal_mps,
+        ) = (float(x) for x in lines)
+        return (
+            v_ref_before,
+            v_ref_floor_phase,
+            shortfall_floor_phase,
+            v_ref_recovered,
+            shortfall_recovered,
+            speed_goal_mps,
         )
-        return v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered
 
     def test_ordinary_climb_with_no_terrain_data_trades_speed_toward_the_floor(
         self,
     ) -> None:
-        v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered = (
-            self._run_scenario()
-        )
+        (
+            v_ref_before,
+            v_ref_floor_phase,
+            shortfall_floor_phase,
+            v_ref_recovered,
+            shortfall_recovered,
+            speed_goal_mps,
+        ) = self._run_scenario()
         # Baseline: the take seeds `v_ref` at the commanded 220 km/h,
         # no shortfall yet.
         assert abs(v_ref_before - 220.0 / 3.6) < 1e-6
@@ -4220,11 +4260,24 @@ print(string.format("%.9f", v_ref_recovered))
         assert abs(v_ref_floor_phase - floor_mps) < 1e-6
         # Never below the floor, in either direction.
         assert v_ref_floor_phase >= floor_mps - 1e-6
-        # Once the shortfall ends, `v_ref` returns toward the commanded
-        # speed through the ordinary S-curve (slow, `omega_speed` is
-        # small by design -- not asserted at full convergence, only
-        # that it is clearly moving back up, not pinned at the floor).
-        assert v_ref_recovered > v_ref_floor_phase + 5.0
+        # Once `measured.h_m` genuinely tracks the climb, the shortfall
+        # this scenario forced actually ends (U22's "once the
+        # shortfall ends" premise, verified rather than assumed).
+        assert shortfall_recovered == 0.0
+        # `speed_goal_mps` is the 220 km/h take seed, read back rather
+        # than retyped, so a future change to the take seed cannot
+        # silently decouple this assertion from the scenario's own
+        # commanded speed.
+        assert abs(speed_goal_mps - 220.0 / 3.6) < 1e-6
+        # `v_ref` converges back toward the commanded speed once the
+        # shortfall ends -- a real convergence check, not merely
+        # "clearly moving back up" (the gap this re-review closed:
+        # measured, bit-exact for this scenario, ~0.75 m/s short of
+        # `speed_goal_mps` at the end of this same 60 s window, well
+        # inside a 1.0 m/s tolerance and nowhere near the old +5.0 m/s
+        # margin, which the next regression this test is meant to
+        # catch would still clear).
+        assert abs(v_ref_recovered - speed_goal_mps) < 1.0
 
 
 class TestM3EaseDownCapDirect:
