@@ -515,3 +515,30 @@ keeps it coordinated, and height is *not* held: the vertical channel is released
 the sortie's root cause (collective chasing a sinking height reference). With no height to spare,
 the break degrades to an ordinary height-holding turn at a higher commanded turn rate.
 
+**Answers to the main loop's five follow-up questions (user, verbatim, 2026-11-28):**
+
+> Break
+>
+> 1 - let's settle for 30 degree bank for now
+> 2 - depend on speed. goal is to maintain speed
+> 3 - 20-30% of the collective travel. That's just my feeling of how much I pushed it down. On roll
+> out, restore to whatever is needed for level flight.
+> 4 - agreed.
+> 5 - more collective, slower turn. Not hitting the ground is priority.
+
+The questions, for reading the numbers: (1) what picks 30 vs 60° bank; (2) −10° pitch at every
+speed, or speed-dependent; (3) 20–30 % of what, and when the collective is restored; (4) keep the
+existing budgets (≤ 100 m lost, never below 50 m AGL) and fly the faster ordinary turn when they
+cannot cover a break; (5) what he does on reaching the floor mid-break.
+
+Main-loop reading:
+- **Bank 30°** (a profile value, "for now").
+- **Pitch is whatever holds entry speed** — the speed loop keeps its job; −10° is the user's
+  typical result, not a target.
+- **Collective: lowered by 20–30 % of lever travel at break entry** (first cut 25 %), held for the
+  turn; **on roll-out, back to the ordinary level-flight law**, which finds what is needed.
+- **Height is let go**, inside the existing budgets (≤ 100 m from entry, ≥ 50 m AGL); if they
+  cannot cover the break at entry, fly the ordinary height-holding turn at a higher turn rate.
+- **At the floor mid-break: collective comes back up and the turn slows** — ground clearance
+  outranks turn rate.
+
