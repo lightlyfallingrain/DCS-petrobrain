@@ -118,3 +118,14 @@ H/K/T/ALT being on; see the sortie feedback.)
 - Phase boundaries inferred from the trace, not marked by the user in flight.
 - Phase C has SAU on: its hydraulic inputs are not in the stick args, so C's stick positions are the
   pilot's share only.
+- **Air density not recorded.** User, verbatim (2026-11-28): *"For hover, ambient air temperature
+  and altitude play a big role. At colder air and lower altitude, there is more control and right
+  pedal is more effective. Higher up and/or hot air, the opposite."* So every hover number above
+  (collective +0.50, pedal −0.56, the margin to the stop) holds for this sortie's conditions only:
+  the mission's field elevation was ~925 m ASL (sortie-1 `LoGetSelfData` at mission start);
+  temperature unknown. A colder or lower mission has more margin; a hot or high one may have none.
+  Petrovich's limits must therefore come from what he measures in flight (where the pedal is
+  against the stop), not from these fixed values.
+- **Possible link to the stops panel:** the SPUU-52 "P ←→ t" switch reads as pressure ↔
+  temperature — the adjustable stops may be set for ambient air density, which would make the
+  ceiling itself condition-dependent. Unverified; being researched.
