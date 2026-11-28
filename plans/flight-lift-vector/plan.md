@@ -2636,6 +2636,10 @@ parse helper. `law_update` gains at most two upvalues (the helper and nothing el
 - No cap: `max_climb_vs_mps` absent from `fc_limits`/`FC_LIMIT_BOUNDS`; a 300 m climb with authority
   to spare is not held to 5 m/s; with authority capped, `w_ref − w ≤ w_ref_lead_max_mps`; the VRS
   test stays green.
+- U22 "every climb" (answered 2026-11-28): an **ordinary commanded climb with no terrain data**
+  ("climb 300" at 220 km/h) driven through capped climb authority makes `v_ref` yield toward
+  `speed_give_floor_kmh`, never below it, and return to the commanded speed once the shortfall
+  ends — so a regression to "terrain only" fails a test.
 - Regression: with no terrain data and the floor not binding, every pre-M3 scenario whose climbs
   never reached 5 m/s is bit-identical (the cap and the floor were not involved).
 - Harness hygiene: new fields, `fc_terrain`, getters in the extraction tuples and parity tests;
@@ -2674,7 +2678,9 @@ lift at low speed.
 9. **Hover 300 m behind a ridge (E8):** pedal turns ±90°: no climb, no pumping; then "speed 20"
    toward it: a gentle climb only as he closes.
 10. **Break at 70 m AGL (E7):** never below 50.
-11. **"Climb 300" at 220 km/h:** no 5 m/s cap; speed per U22; no overshoot at the top. **"Descend
+11. **"Climb 300" at 220 km/h:** no 5 m/s cap; if the climb rate is not there at 220, speed falls
+    (toward U19's ~100 km/h floor, never below) and returns to 220 afterwards (U22, every climb); no
+    overshoot at the top. **"Descend
     200" at cruise:** no rate cap; then **"speed 40", "descend 100":** at most 4 m/s (VRS kept).
 12. **Mode 2 near terrain (E10):** nothing from M3 while parked.
 13. **Forest:** 50 m AGL over forest edge: note radar AGL against the terrain beneath (Risks).
@@ -2695,7 +2701,9 @@ lift at low speed.
 - **Steeper than the aircraft can climb at the speed floor**: not guaranteed (D). U19's choice
   decides how much margin a cliff gets.
 - **Removing the 5 m/s cap changes every altitude command**, not only terrain: big climbs go to
-  available power (U22) and big descents at speed are fast (~16 m/s peak for 200 m). Row 11.
+  available power, and big climbs also trade speed down to U19's floor when the rate is not there
+  (U22, every climb — so "climb 300" at 220 km/h may cost speed); big descents at speed are fast
+  (~16 m/s peak for 200 m). Row 11.
 - **Radar over trees**: if the radar altimeter reads to the canopy, the floor beneath flies higher
   than 50 m over bare ground (conservative); the look-ahead uses bare ground (`land.getHeight`; trees
   are not scenery objects and no `land.*` call sees them). The user's *"My 40 m floor includes tree
