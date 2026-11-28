@@ -845,6 +845,61 @@ class TestFlightLeaseCommandEndpoint:
         assert status == 200
         assert sender.lease_sent == [(1, None, "")]
 
+    def test_an_overlong_xz_decimal_literal_drops_terrain_only(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """R1-c (`security-m3.md` finding 1) -- the shape regex alone
+        accepts an `x`/`z` value that is a huge-but-finite decimal
+        literal (the mechanism the review traced: a long enough
+        all-digit string overflows IEEE-754 double parsing to `+-math.
+        huge` on the Lua side, which the pre-existing `h`-only
+        magnitude bound never covered). `_terrain_relay_passes_bounds`
+        now rejects it at this layer too -- the same "drop terrain
+        only, never the lease" posture as any other malformed
+        `terrain` field."""
+        server, sender = running_server_with_sender
+        overlong_x = "9" * 400
+        body = {"epoch": 1, "terrain": f"5|{overlong_x},200,50"}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(1, None, None)]
+
+    def test_more_than_the_cap_points_drops_terrain_only(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """R1-c (`security-m3.md` finding 2) -- the shape regex alone
+        places no limit on the number of `;`-separated entries; this
+        layer now rejects a `terrain` string whose entry count exceeds
+        `_TERRAIN_POINTS_MAX_POINTS` (32) instead of forwarding it
+        unbounded."""
+        server, sender = running_server_with_sender
+        entries = ";".join(f"{i},0,10" for i in range(1, 34))
+        body = {"epoch": 1, "terrain": f"5|{entries}"}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(1, None, None)]
+
+    def test_exactly_the_cap_points_still_forwards(
+        self,
+        running_server_with_sender: tuple[TelemetryAPIServer, _RecordingCommandSender],
+    ) -> None:
+        """The boundary case of the cap above: exactly 32 points is
+        still a valid, forwarded `terrain` field -- the user's own
+        default geometry (16 points) is nowhere near this cap, so this
+        is purely a boundary check on the new validation, not a
+        realistic grid size."""
+        server, sender = running_server_with_sender
+        entries = ";".join(f"{i},0,10" for i in range(1, 33))
+        body = {"epoch": 1, "terrain": f"5|{entries}"}
+        status, resp_body = _post(server, "/command/flight_lease", body)
+        assert status == 200
+        assert resp_body == {"ok": True}
+        assert sender.lease_sent == [(1, None, f"5|{entries}")]
+
     def test_unconfigured_sender_returns_503(self) -> None:
         cache = TelemetryCache()
         server = TelemetryAPIServer(cache, host="127.0.0.1", port=0)

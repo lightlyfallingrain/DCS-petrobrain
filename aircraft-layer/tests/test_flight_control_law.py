@@ -232,6 +232,7 @@ local PROFILE = {
     terrain_lookahead_enabled = true,
     w_ref_lead_max_mps = 2.0,
     speed_give_floor_kmh = 100.0,
+    speed_give_max_delta_kmh = 50.0,
     terrain_ease_down_mps = 10.0,
 }
 """
@@ -4164,11 +4165,15 @@ class TestM3OrdinaryClimbTradesSpeedNoTerrain:
     state, not genuine recovery."""
 
     @staticmethod
-    def _run_scenario() -> tuple[float, float, float, float, float, float]:
+    def _run_scenario(
+        *, speed_kmh: float = 220.0, dropped_speed_kmh: float = 70.0
+    ) -> tuple[float, float, float, float, float, float]:
         driver = (
             """
 local measured = {measured}
-local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = 650.0, speed_kmh = 220.0 }, PROFILE)
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = 650.0, speed_kmh = """
+            + repr(speed_kmh)
+            + """ }, PROFILE)
 local v_ref_before = state.v_ref
 -- Rotor RPM warning guard forces a real, large collective-rate
 -- shortfall (the climb demand above ensures the nominal rate is
@@ -4177,8 +4182,12 @@ local v_ref_before = state.v_ref
 -- itself, so the clamp's `max(v_m, floor)` settles on the floor, not
 -- on `v_m` -- the strongest form of "never below it".
 measured.rotor_rpm_pct = 80.0
-measured.ias_mps = 70.0 / 3.6
-measured.v_t_mps = 70.0 / 3.6
+measured.ias_mps = """
+            + repr(dropped_speed_kmh)
+            + """ / 3.6
+measured.v_t_mps = """
+            + repr(dropped_speed_kmh)
+            + """ / 3.6
 for i = 1, 20 do
     state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
     -- Advance the measured climb from the law's own vertical-speed
@@ -4193,8 +4202,12 @@ local shortfall_floor_phase = state.dbg_shortfall
 -- Shortfall ends: RPM and measured speed both recover to the
 -- commanded value.
 measured.rotor_rpm_pct = 100.0
-measured.ias_mps = 220.0 / 3.6
-measured.v_t_mps = 220.0 / 3.6
+measured.ias_mps = """
+            + repr(speed_kmh)
+            + """ / 3.6
+measured.v_t_mps = """
+            + repr(speed_kmh)
+            + """ / 3.6
 for i = 1, 1200 do
     state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
     measured.w_mps = state.w_ref
@@ -4212,8 +4225,8 @@ print(string.format("%.9f", state.speed_goal_mps))
         ).replace(
             "{measured}",
             _measured(
-                ias_mps=220.0 / 3.6,
-                v_t_mps=220.0 / 3.6,
+                ias_mps=speed_kmh / 3.6,
+                v_t_mps=speed_kmh / 3.6,
                 h_m=150.0,
                 asl_m=150.0,
                 rotor_rpm_pct=100.0,
@@ -4253,13 +4266,17 @@ print(string.format("%.9f", state.speed_goal_mps))
         assert abs(v_ref_before - 220.0 / 3.6) < 1e-6
         # The RPM-warning guard really is producing a shortfall.
         assert shortfall_floor_phase > 0.3
-        # `v_ref` yields toward `speed_give_floor_kmh` (100 km/h =
-        # 27.777... m/s) -- settles exactly there since the measured
-        # speed this phase (70 km/h) is itself below the floor.
-        floor_mps = 100.0 / 3.6
+        # R1-a: `v_ref` yields toward `speed_goal_mps -
+        # speed_give_max_delta_kmh` (220 - 50 = 170 km/h = 47.222... m/s),
+        # not the absolute `speed_give_floor_kmh` (100) -- settles
+        # exactly there since the measured speed this phase (70 km/h)
+        # is itself below the relative floor.
+        floor_mps = 170.0 / 3.6
         assert abs(v_ref_floor_phase - floor_mps) < 1e-6
-        # Never below the floor, in either direction.
+        # Never below the relative floor, in either direction.
         assert v_ref_floor_phase >= floor_mps - 1e-6
+        # ...and never below the absolute floor either (100 km/h).
+        assert v_ref_floor_phase >= 100.0 / 3.6 - 1e-6
         # Once `measured.h_m` genuinely tracks the climb, the shortfall
         # this scenario forced actually ends (U22's "once the
         # shortfall ends" premise, verified rather than assumed).
@@ -4278,6 +4295,46 @@ print(string.format("%.9f", state.speed_goal_mps))
         # margin, which the next regression this test is meant to
         # catch would still clear).
         assert abs(v_ref_recovered - speed_goal_mps) < 1.0
+
+    def test_absolute_floor_binds_below_the_relative_delta(self) -> None:
+        """R1-a's second worked case (plan "Tests"): a commanded speed
+        of 130 km/h minus the 50 km/h relative delta would be 80 km/h,
+        but the absolute `speed_give_floor_kmh` (100) is higher and
+        wins -- `max(130 - 50, 100) == 100`, not 80."""
+        (
+            v_ref_before,
+            v_ref_floor_phase,
+            shortfall_floor_phase,
+            _v_ref_recovered,
+            _shortfall_recovered,
+            _speed_goal_mps,
+        ) = self._run_scenario(speed_kmh=130.0, dropped_speed_kmh=70.0)
+        assert abs(v_ref_before - 130.0 / 3.6) < 1e-6
+        assert shortfall_floor_phase > 0.3
+        floor_mps = 100.0 / 3.6
+        assert abs(v_ref_floor_phase - floor_mps) < 1e-6
+        assert v_ref_floor_phase >= floor_mps - 1e-6
+
+    def test_commanded_speed_at_or_below_the_absolute_floor_gives_none(self) -> None:
+        """R1-a's third worked case: a commanded speed at or below the
+        absolute `speed_give_floor_kmh` (100) gives no speed at all --
+        `max(100 - 50, 100) == 100`, equal to the commanded speed
+        itself, so `v_ref` cannot fall below it even under a real
+        shortfall. Height gives instead (not under test here)."""
+        (
+            v_ref_before,
+            v_ref_floor_phase,
+            shortfall_floor_phase,
+            _v_ref_recovered,
+            _shortfall_recovered,
+            _speed_goal_mps,
+        ) = self._run_scenario(speed_kmh=100.0, dropped_speed_kmh=70.0)
+        assert abs(v_ref_before - 100.0 / 3.6) < 1e-6
+        assert shortfall_floor_phase > 0.3
+        # No speed give at all: `v_ref` stays at the commanded speed
+        # throughout the shortfall, even though measured speed (70
+        # km/h) is well below it.
+        assert abs(v_ref_floor_phase - 100.0 / 3.6) < 1e-6
 
 
 class TestM3EaseDownCapDirect:

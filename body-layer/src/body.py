@@ -787,6 +787,22 @@ class ConsolePerceptionRunner:
     )
     _terrain_seq: int = field(default=0, init=False, repr=False)
 
+    #: R1-b (`plans/flight-lift-vector/performance-m3.md`, finding 2) --
+    #: `GET /line_of_sight/latest` is fetched by two independent call
+    #: sites within one poll (`_resolve_expected_area_checks` and `_
+    #: compose_and_relay_terrain`, both via `_get_line_of_sight_cached`
+    #: below) for the identical cached collector snapshot. Keyed by the
+    #: poll's own sim-time stamp (`ownship.t_sim`/`runner.last_t_sim`,
+    #: the same value at both call sites this poll) rather than a
+    #: separate "fetched this poll" flag, so a stale entry from a
+    #: previous poll is simply a cache miss, never a correctness risk.
+    #: Caches a failed fetch too (`None`) so the second call site does
+    #: not retry a request the first one already found unreachable this
+    #: poll.
+    _los_cache: tuple[float, dict[str, object] | None] | None = field(
+        default=None, init=False, repr=False
+    )
+
     #: `plans/expected-area-check/plan.md` Stage 1 (Co-moving Fields,
     #: "external: scan command issued or cancelled") -- the previous
     #: poll's `ScanPlan.command_t_sim`, compared by identity change
@@ -1019,6 +1035,14 @@ class ConsolePerceptionRunner:
         # above; `_terrain_seq` (a plain `default=0`, same trap as `_last_
         # probe_seq` above) needs this explicit line.
         self._terrain_seq = 0
+        # R1-b (`plans/flight-lift-vector/performance-m3.md` finding 2) --
+        # `_los_cache` (a plain `default=None`, same `init=False` trap as
+        # `_terrain_seq`/`_last_probe_seq` above) needs this explicit line
+        # too: a cached snapshot from the mission that just ended must
+        # never be read as this poll's answer under the new mission's own
+        # sim-time stamps (which can coincide with the old ones after a
+        # restart).
+        self._los_cache = None
 
     def run_once(self, *, flying: bool = False) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -1858,6 +1882,32 @@ def _cannot_look_cause(evidence: LookEvidence | None) -> str:
     return "probe_blocked"
 
 
+def _get_line_of_sight_cached(
+    runner: ConsolePerceptionRunner,
+    aircraft_client: AircraftLayerClient,
+    poll_stamp: float,
+) -> dict[str, object] | None:
+    """R1-b (`plans/flight-lift-vector/performance-m3.md`, finding 2) --
+    `GET /line_of_sight/latest` shared across this poll's two
+    independent consumers (`_resolve_expected_area_checks`'s probe
+    answers and `_compose_and_relay_terrain`'s terrain answer), rather
+    than each issuing its own fetch of the identical cached collector
+    snapshot. `poll_stamp` is the caller's own `ownship.t_sim`/`now_sim`
+    for this poll -- the same value at both call sites a single poll
+    ever runs with, so a cache entry from any OTHER poll is a plain
+    miss, never read as this poll's answer. A failed fetch is cached as
+    `None` too, so the second call site this poll does not repeat a
+    request the first one already found unreachable."""
+    if runner._los_cache is not None and runner._los_cache[0] == poll_stamp:
+        return runner._los_cache[1]
+    try:
+        los = aircraft_client.get_line_of_sight_latest()
+    except AircraftLayerError:
+        los = None
+    runner._los_cache = (poll_stamp, los)
+    return los
+
+
 def _resolve_expected_area_checks(
     runner: ConsolePerceptionRunner, ownship: OwnshipState
 ) -> None:
@@ -1951,10 +2001,7 @@ def _resolve_expected_area_checks(
                 }
             )
 
-    try:
-        los = runner.aircraft_client.get_line_of_sight_latest()
-    except AircraftLayerError:
-        los = None
+    los = _get_line_of_sight_cached(runner, runner.aircraft_client, ownship.t_sim)
     probes = los.get("probes") if los is not None else None
 
     look_evidence: dict[str, LookEvidence] = {}
@@ -4325,6 +4372,7 @@ _TERRAIN_SENT_KEEP = 8
 def _compose_and_relay_terrain(
     runner: ConsolePerceptionRunner,
     aircraft_client: AircraftLayerClient,
+    now_sim: float,
 ) -> str:
     """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
     composes this poll's own grid from the current ownship position/
@@ -4339,7 +4387,15 @@ def _compose_and_relay_terrain(
     `Export.lua`'s own `terrain_max_age_s` already treats a missing/
     stale grid as "floor beneath only," never a crash or a guessed
     value, the same fail-soft posture every other best-effort push in
-    this loop has."""
+    this loop has.
+
+    `now_sim` is this poll's own sim-time stamp (`runner.last_t_sim`,
+    the caller's own `_apply_flight_requests` argument), passed through
+    to `_get_line_of_sight_cached` (R1-b, performance-m3.md finding 2)
+    so this call shares the one `GET /line_of_sight/latest` fetch with
+    `_resolve_expected_area_checks`'s own call this same poll, rather
+    than issuing a second, independent request for the identical
+    snapshot."""
     ownship = runner.last_ownship_state
     if ownship is None:
         return ""
@@ -4357,10 +4413,7 @@ def _compose_and_relay_terrain(
     except AircraftLayerError:
         logger.warning("terrain-points push failed (continuing)", exc_info=True)
 
-    try:
-        los = aircraft_client.get_line_of_sight_latest()
-    except AircraftLayerError:
-        los = None
+    los = _get_line_of_sight_cached(runner, aircraft_client, now_sim)
     if los is None:
         return ""
     terrain_answer = los.get("terrain")
@@ -4513,7 +4566,7 @@ def _apply_flight_requests(
     # send/relay the terrain grid before the lease it rides on. Never
     # raises on its own (every failure degrades to `""`, "nothing to
     # relay").
-    terrain_relay = _compose_and_relay_terrain(runner, aircraft_client)
+    terrain_relay = _compose_and_relay_terrain(runner, aircraft_client, now_sim)
 
     # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
     # 3) -- the lease. Sent every poll this function runs.

@@ -345,3 +345,213 @@ explains the convergence check and cites the measured gap to `speed_goal_mps`.
 - `luac5.1 -p`: not re-run — no Lua file was touched by this fix pass.
 
 Only `aircraft-layer/tests/test_flight_control_law.py` changed in this pass.
+
+## R1 (2026-11-28) — speed-give delta, performance finding 1, security findings 1/2
+
+Built per `plan.md`'s "## M3 revision R1 (2026-11-28)" in full — all three parts, one batch, per
+the orchestrator's task. Target branch tip confirmed: `git rev-parse HEAD` matched the expected
+`9d7ffdb2` exactly (already at tip, no merge needed — the worktree had been fast-forwarded to it
+before this task started).
+
+### R1-a — `speed_give_max_delta_kmh`
+
+`flight_profile.lua` gains `speed_give_max_delta_kmh = 50.0` (loop value, beside the existing
+`speed_give_floor_kmh`, same home — both are per-aircraft loop gains the law reads, not a `tuning.py`
+constant: `speed_give_floor_kmh` already lived in `flight_profile.lua`, not `tuning.py`, so this
+follows the existing split rather than starting a second one). `flight_control.lua`'s section-D
+speed-give block (`law_update`, ~L1627) now computes
+`v_floor_mps = max(state.speed_goal_mps - speed_give_max_delta_kmh/3.6, speed_give_floor_kmh/3.6)`
+instead of the old bare `speed_give_floor_kmh/3.6` — the relative delta, floored by the absolute
+100 km/h. `state.speed_goal_mps` (already read elsewhere in `law_update`, e.g. the speed-band
+check) is what "commanded speed" means here, not `desired.ias_kmh` directly — consistent with the
+rest of this block's own comment ("`speed_goal_mps`/`desired.ias_kmh` are never touched").
+
+**Verified under `luajit` before asserting** (per the task's own instruction), using the existing
+toy-plant driver in `TestM3OrdinaryClimbTradesSpeedNoTerrain`: with `speed_goal_mps` = 220 km/h and
+measured speed dropped to 70 km/h during a forced shortfall, `v_ref` now settles at
+`max(220-50, 100) = 170` km/h (47.222 m/s), not the old absolute 100 km/h floor — confirmed by
+running the updated test and reading the printed Lua values before writing the assertion, not the
+reverse.
+
+**Tests updated/added** (`test_flight_control_law.py`,
+`TestM3OrdinaryClimbTradesSpeedNoTerrain` — `_run_scenario` parameterised on `speed_kmh`/
+`dropped_speed_kmh` rather than hard-coded 220/70, so the three worked cases share one driver):
+
+- `test_ordinary_climb_with_no_terrain_data_trades_speed_toward_the_floor` — 220 → 170 (was
+  220 → 100), plus a second assertion that the relative floor still sits above the absolute one.
+- `test_absolute_floor_binds_below_the_relative_delta` (new) — 130 km/h commanded: the relative
+  delta alone would give 80, but `max(130-50, 100) == 100` wins.
+- `test_commanded_speed_at_or_below_the_absolute_floor_gives_none` (new) — 100 km/h commanded:
+  `max(100-50, 100) == 100 ==` commanded speed, so `v_ref` cannot fall at all under the same forced
+  shortfall that produces a real give at 220/130.
+
+Both toy-plant PROFILE tables (`test_flight_control_law.py`'s `_PROFILE`,
+`test_flight_control_lua.py`'s inline profile table) gained `speed_give_max_delta_kmh = 50.0`
+beside the existing `speed_give_floor_kmh` entry — mirrors `flight_profile.lua`'s shipped default,
+per this file's own earlier "mirror the shipped profile" convention for every other BL-16 M3
+constant.
+
+**Card and docs updated to the new wording** ("speed falls by at most ~50 km/h, not below 100"),
+rows 4 and 11: `docs/acceptance/2026-11-28-bl16-m3-card.md` and its sibling `.html`.
+`aircraft-layer/CLAUDE.md`'s M3 bullet (the only `CLAUDE.md` of the two that stated the speed-give
+floor at all — `body-layer/CLAUDE.md` has no `speed_give_*` mention, grepped, confirmed) now states
+the two-bound formula and cites the user's own words. No `tuning.py`/`defaults.toml` change: neither
+constant lives there.
+
+### R1-b — performance (`performance-m3.md` findings 1/2)
+
+**Finding 1** (terrain projection allocating every DCS frame, read only at `law_hz`): gated the
+`run_active_frame` projection block (builds `measured.terrain`) behind the SAME `law_due(t,
+fc_law_last_update_t, flight_profile.ACTIVE)` test the law-update call below it already uses —
+"project only when `law_due()` is true," the finding's second named mitigation, chosen over
+reusing preallocated parallel arrays (the first) because it needed no change to `law_terrain_w_
+floor`'s own `ipairs(terrain)` iteration or to the `{d, T}` pair shape every other consumer
+(including the toy-plant tests, which feed `measured.terrain` directly) already assumes. Confirmed
+no live test exercises this path through `run_active_frame` end-to-end (grepped
+`test_flight_control_lua.py` for `run_active_frame`/`fc_terrain_n`/`measured.terrain`: the only
+hits are `fc_terrain_n`, which reads `fc_terrain.points` directly and is untouched by this gate,
+and a `run_active_frame` mention inside an unrelated comment) — every terrain-law test drives
+`law_update` directly with `measured.terrain` set by the driver, so this gate is untested by the
+existing suite and no new test was added for it (behaviour-preserving by construction: the result
+is read only on the same frame it is computed, both before and after).
+
+One edge case disclosed, not fixed: the law's own collision-defer path (`law_is_due and
+estimator_due_this_frame and not fc_law_deferred_last_frame` → defer one frame) can still compute
+a terrain projection that `law_update` does not consume that exact frame, since the gate checks
+only `law_due`, not the full three-way defer condition. Strictly less work than before (unconditional
+every frame) in every case, including this one, so not a regression; flagged for whoever next
+touches this collision logic, if it is worth closing further.
+
+**Finding 2** (duplicate `GET /line_of_sight/latest` fetch): added `ConsolePerceptionRunner.
+_los_cache` (`tuple[float, dict[str, object] | None] | None`, keyed by the poll's own sim-time
+stamp) and a new helper `_get_line_of_sight_cached(runner, aircraft_client, poll_stamp)` that both
+`_resolve_expected_area_checks` (keyed by `ownship.t_sim`) and `_compose_and_relay_terrain` (keyed
+by a new `now_sim` parameter, threaded through from `_apply_flight_requests`'s own `now_sim` =
+`runner.last_t_sim`) now call instead of fetching independently. Both call sites pass the SAME
+value for a given poll — `_resolve_expected_area_checks` runs inside `run_once`, which sets
+`runner.last_t_sim = ownship.t_sim` immediately after; `_apply_flight_requests` is called later in
+the same poll cycle with `runner.last_t_sim` (by then already that poll's value) as `now_sim` — so
+the cache is a hit on the second call whenever both run in the same poll, and a plain miss
+(re-fetch) otherwise, never a stale read. A failed fetch (`AircraftLayerError`) is cached as `None`
+too, matching both call sites' pre-existing "degrade to no answer" behaviour exactly, and avoiding
+a second failing request the same poll.
+
+No test added for the cache-sharing itself (the finding was LATER/non-blocking, and the behaviour
+each call site observes is unchanged — same JSON dict either way); the existing expected-area and
+terrain-relay tests (`test_body.py`, `test_body_flight_control.py`) continue to exercise both
+consumers' own logic against whatever `los`/`None` the fake client's `get_line_of_sight_latest`
+returns, unaffected by whether the fetch happened once or twice internally.
+
+**Caught by the existing mission-reset survivor test, not a new test of my own**:
+`test_mission_start_reset.py::test_console_perception_runner_reset_preserves_declared_fields_and_resets_rest`
+poisons every declared field, calls `reset_for_new_mission()`, and asserts every non-preserved
+field is back at its constructor default — `_los_cache` (a plain `default=None`, `init=False`
+field) is exactly the trap that module's own `_terrain_seq`/`_last_probe_seq` comments already
+document (a `self.__init__()` re-invocation does not reassign a plain-default `init=False` field
+per instance). Fixed with one explicit `self._los_cache = None` line in `reset_for_new_mission`,
+right beside the `_terrain_seq` line documenting the same trap — otherwise a cached LOS snapshot
+from the mission that just ended could be read as the new mission's own answer if the new
+mission's sim-time stamp happened to coincide with the cached one's (restarts can produce
+coincident `t_sim` values, per this project's own mission-start documentation). Full suite run
+before and after this fix: 1 failure (this one) → 0.
+
+### R1-c — security hardening (`security-m3.md` findings 1/2)
+
+**Finding 1** (`x`/`z` had no magnitude bound, only `h` did): added the bound at both layers, using
+`_TERRAIN_POINTS_COORD_ABS_MAX` (2,000,000, the same value the channel's other direction already
+uses) rather than `h`'s own tighter `1e5` — the security review's own recommended value.
+
+- `flight_control.lua`'s `parse_terrain_relay`: new local `TERRAIN_RELAY_COORD_ABS_MAX = 2000000`,
+  checked alongside the existing `x == x`/`z == z` finiteness tests.
+- `aircraft-layer/src/api/server.py`: new `_terrain_relay_passes_bounds(raw)` — parses the
+  already-regex-matched string a second time (split on `|`, `;`, `,`) and rejects on any
+  non-finite or out-of-bound `x`/`z`/`h`, called right after the existing shape regex/length check
+  in the `flight_lease` handler. A failing bound drops `terrain` only (sets it to `None`), same
+  "never the whole lease" posture the field already had for a malformed string.
+
+**Finding 2** (point count unbounded in the relay, despite a comment claiming the `MAX_TERRAIN_
+POINTS` bound): closed at both layers, truncating rather than rejecting outright, matching the
+Hook's own `_applyTerrainPoints` precedent for the same cap.
+
+- `flight_control.lua`'s `parse_terrain_relay`: new local `TERRAIN_RELAY_MAX_POINTS = 32`; the
+  point-collection loop now `break`s once the cap is reached (the `seq`/received-time stamp from
+  the entry still being scanned when the cap hit is still applied — only the point list is capped,
+  never the whole parse rejected).
+- `server.py`'s `_terrain_relay_passes_bounds`: counts `;`-separated entries before parsing any of
+  them and rejects (rather than truncates) an over-count string outright — simpler than mirroring
+  Lua's truncate-in-place, and consistent with this field's existing "reject the whole `terrain`
+  field, never the lease" posture for every other malformed-input case at this layer (the
+  truncate-not-reject choice was made in Lua specifically to match the Hook's own established
+  pattern for the SAME cap on the request side; the collector layer had no such precedent to
+  match, so it took the simpler of the two valid choices).
+
+The misleading pre-existing comment on `_TERRAIN_RELAY_PATTERN` (claimed bounds the regex alone
+never checked — the finding's own "doesn't match what the code checks" observation) was corrected
+to describe what the regex actually bounds (shape only) versus what `_terrain_relay_passes_bounds`
+now adds (count + magnitude), rather than left to mislead the next reader the same way.
+
+**Tests added:**
+
+- `test_flight_control_lua.py`, `TestTerrainRelayMagnitudeBound` (two new methods) —
+  `test_out_of_range_xz_are_dropped_in_range_ones_kept` (a huge-but-finite `x` and a huge-but-finite
+  `z`, each dropped, the in-range point kept) and
+  `test_more_than_the_cap_points_are_truncated_not_carried_unbounded` (40 points sent, 32 survive).
+- `test_flight_control_api.py`, `TestFlightLeaseCommandEndpoint` (three new methods) —
+  `test_an_overlong_xz_decimal_literal_drops_terrain_only` (a 400-digit `x`, which the shape regex
+  alone accepts), `test_more_than_the_cap_points_drops_terrain_only` (33 entries, over the cap), and
+  `test_exactly_the_cap_points_still_forwards` (32 entries, the boundary case, still accepted —
+  confirms the fix does not quietly tighten the real, documented limit).
+
+### Non-obvious choices
+
+- **`speed_give_max_delta_kmh` placed in `flight_profile.lua`, not `tuning.py`.** The plan's own
+  Tuning-constants convention ("the numbers the user set and may configure... live in `tuning.py`";
+  "loop values live in the profile") would suggest `tuning.py` for a number the user gave verbatim
+  ("speed delta should typically not exceed 50 km/h"). But `speed_give_floor_kmh` — the sibling
+  constant it is directly compared against in the same line of code, also user-originated (U19) —
+  already lives in `flight_profile.lua`, and splitting the pair across two mechanisms for no
+  functional reason would make the pair harder to read together, not easier to tune. Followed the
+  existing placement rather than the general rule's letter; noted here per the root `CLAUDE.md`
+  tuning-constants procedure's own instruction to say so when departing.
+- **R1-b finding 1's chosen mitigation (gate on `law_due`) over the preallocated-array
+  alternative.** The array alternative would have required `law_terrain_w_floor`'s `ipairs`
+  iteration to become a bounded `for i = 1, n do` over a separate count field (the finding's own
+  text), a second change to a function with its own existing tests, for a MONITOR-level finding
+  that was explicitly "not blocking." The gate gets the same frame-rate reduction with a two-line
+  change to the call site alone.
+- **Server-side point-count enforcement rejects rather than truncates**, while Lua truncates — see
+  R1-c above; both are legitimate, chose per-layer precedent rather than forcing one shape onto
+  both.
+
+## Checks (R1)
+
+Run from this worktree (`aircraft-layer/.venv` and `body-layer/.venv` from the main checkout, per
+this project's "agent worktrees have no local `.venv`" note; `luajit`/`luac5.1` from Homebrew).
+
+**aircraft-layer:**
+
+- `ruff format --check src tests`: pass (one file needed `ruff format` itself —
+  `src/api/server.py`, a blank-line normalisation around the new helper — then re-checked clean).
+- `ruff check src tests`: pass (after prefixing three newly-unused unpacked tuple elements with
+  `_` in the two new R1-a test methods — `RUF059`).
+- `mypy src` (from inside `aircraft-layer/`): pass, 0 issues in 29 source files.
+- `pytest tests -q`: **1325 passed** (1318 before this pass + 7 new: 2 R1-a, 2 R1-c Lua, 3 R1-c
+  Python).
+- `luac5.1 -p` on every touched `.lua` file: pass.
+
+**body-layer:**
+
+- `ruff format --check src tests`: pass.
+- `ruff check src tests`: pass.
+- `mypy src` (from inside `body-layer/`): pass, 0 issues in 96 source files.
+- `pytest tests -q`: first run caught a real regression — `test_mission_start_reset.py::
+  test_console_perception_runner_reset_preserves_declared_fields_and_resets_rest` failed: the new
+  `_los_cache` field (a plain `default=None`, `init=False` field) was not reset by
+  `reset_for_new_mission()`, the same `self.__init__()`-does-not-reassign-a-plain-default-
+  `init=False`-field trap that field's own siblings (`_terrain_seq`, `_last_probe_seq`) already
+  document in that method. Fixed with one explicit `self._los_cache = None` line beside
+  `_terrain_seq`'s own (see "Non-obvious choices" above). Second run: **3927 passed, 4 xfailed**
+  (the 4 xfails are pre-existing and unrelated to this change).
+
+No `tuning.py`/`defaults.toml` change in this pass (R1-a's constants are profile loop values, not
+tuning constants; R1-b/R1-c touch no behaviour-affecting constant at all).

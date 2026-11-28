@@ -687,9 +687,20 @@ M.PROFILES["Mi-24P"] = {
     -- tracks what the aircraft can actually do. Judgement call, first
     -- cut.
     w_ref_lead_max_mps = 2.0,
-    -- How far speed gives before a climb simply goes slower instead
-    -- (D, U19 answered: "~100 km/h, then he simply climbs slower").
+    -- Absolute lower bound the speed give never crosses, whatever the
+    -- commanded speed (R1-a, main-loop assumption, stated to the user):
+    -- below roughly the minimum-power speed slowing further costs climb
+    -- rather than giving it. A commanded speed at or below this gives
+    -- no speed at all -- height gives instead.
     speed_give_floor_kmh = 100.0,
+    -- How far speed gives below the COMMANDED speed before a climb
+    -- simply goes slower instead (D/R1-a, user, verbatim, 2026-11-28:
+    -- "Trade speed for lift when necessary, but slowing to 100 km/h is
+    -- overkill. Instead slow down enough to get lift, but speed delta
+    -- should typically not exceed 50 km/h"). "Typically" = a tunable
+    -- default, not a hard law; the absolute `speed_give_floor_kmh`
+    -- above still bounds it from below.
+    speed_give_max_delta_kmh = 50.0,
     -- Ease-down cap on the return after a terrain-driven climb (C, U20
     -- answered, verbatim: "put it at most 10. Slow speed limits
     -- apply" -- Decision 31's VRS guard, below 50 km/h, is unaffected

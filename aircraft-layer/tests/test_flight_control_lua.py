@@ -336,6 +336,7 @@ flight_profile = {
         terrain_lookahead_enabled = true,
         w_ref_lead_max_mps = 2.0,
         speed_give_floor_kmh = 100.0,
+        speed_give_max_delta_kmh = 50.0,
         terrain_ease_down_mps = 10.0,
     },
 }
@@ -1816,6 +1817,54 @@ print(sent_lines[#sent_lines])
 """
         line = _run(driver)[0]
         assert _field(line, "fc_terrain_n") == "0"
+
+    def test_out_of_range_xz_are_dropped_in_range_ones_kept(self) -> None:
+        """R1-c (`security-m3.md` finding 1) -- `x`/`z` now carry the
+        same kind of magnitude bound `h` already had; a point whose `x`
+        or `z` is a huge-but-finite decimal literal (the mechanism the
+        review traced: a long enough all-digit string overflows IEEE-
+        754 double parsing to `+-math.huge`, which the pre-existing
+        `x == x` finite check alone does not catch) is dropped, never
+        carried as a plausible point."""
+        driver = """
+heading_rad = math.rad(0.0)
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"terrain":"1|100,0,50;3000000,0,60;0,3000000,70"}',
+    0.0)
+flight_control.run_flight_control(0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        # Only the one in-range point survives -- the out-of-bound `x`
+        # and out-of-bound `z` points are both dropped.
+        assert _field(line, "fc_terrain_n") == "1"
+
+    def test_more_than_the_cap_points_are_truncated_not_carried_unbounded(
+        self,
+    ) -> None:
+        """R1-c (`security-m3.md` finding 2) -- an over-count `terrain`
+        string (more entries than `TERRAIN_RELAY_MAX_POINTS`, 32) is
+        truncated at the cap, the same way the Hook's own `_applyTerrain
+        Points` already truncates `n` -- not carried into `fc_terrain.
+        points` unbounded."""
+        driver = """
+heading_rad = math.rad(0.0)
+local entries = {}
+for i = 1, 40 do
+    entries[#entries + 1] = string.format("%d,0,10", i * 10)
+end
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,' ..
+    '"terrain":"1|' .. table.concat(entries, ";") .. '"}',
+    0.0)
+flight_control.run_flight_control(0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_terrain_n") == "32"
 
 
 class TestStage2VoiceTakePrecondition:

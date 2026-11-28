@@ -467,13 +467,57 @@ _TERRAIN_POINTS_SEQ_MAX = 2**31 - 1
 #: `flight_lease`'s own optional `terrain` relay field: `"<seq>|x,z,h;
 #: x,z,h;..."`, body-layer's own encoding of the newest answered grid.
 #: Generous sanity bounds, same posture as every other wire clamp in
-#: this file -- `_TERRAIN_POINTS_MAX_POINTS` points, each coordinate/
-#: height a finite number, comma/semicolon-delimited.
+#: this file -- `_TERRAIN_POINTS_MAX_POINTS` points, comma/semicolon-
+#: delimited. This pattern only bounds the string's SHAPE (total
+#: length, digit-grouping); `_terrain_relay_passes_bounds` below is the
+#: layer that actually enforces the point count and that every
+#: coordinate/height is a finite number within `_TERRAIN_POINTS_COORD_
+#: ABS_MAX` -- added R1-c (`security-m3.md` findings 1/2) after this
+#: comment's own earlier claim ("each coordinate/height a finite
+#: number... bound") did not match what the regex alone checked.
 _TERRAIN_RELAY_MAX_LEN = 4096
 _TERRAIN_RELAY_PATTERN = re.compile(
     r"^-?\d+\|(-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?)"
     r"(;-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?)*$"
 )
+
+
+def _terrain_relay_passes_bounds(raw: str) -> bool:
+    """R1-c (`plans/flight-lift-vector/performance-m3.md`'s sibling
+    security review, `security-m3.md` findings 1/2) -- the shape
+    regex/length cap above bounds the STRING, not the numbers or the
+    point count inside it: a long run of digits is a valid decimal
+    literal under the regex but overflows IEEE-754 double parsing to
+    `+-math.huge` on the Lua side (finding 1), and the regex places no
+    limit on how many `;`-separated entries the string carries at all
+    (finding 2, up to ~680 within the 4096-char cap against the
+    documented/intended `_TERRAIN_POINTS_MAX_POINTS`, 32). Checked here
+    as a second, independent layer -- `flight_control.lua`'s own
+    `parse_terrain_relay` applies the identical bounds, per this
+    project's own standing defense-in-depth posture for every other
+    wire clamp in this file. Only ever called after the shape regex
+    already matched, so this never needs to re-derive the grammar --
+    just reject on count/magnitude."""
+    _, _, rest = raw.partition("|")
+    entries = rest.split(";") if rest else []
+    if len(entries) > _TERRAIN_POINTS_MAX_POINTS:
+        return False
+    for entry in entries:
+        x_str, _, remainder = entry.partition(",")
+        z_str, _, h_str = remainder.partition(",")
+        try:
+            x, z, h = float(x_str), float(z_str), float(h_str)
+        except ValueError:
+            return False
+        if not (math.isfinite(x) and math.isfinite(z) and math.isfinite(h)):
+            return False
+        if (
+            abs(x) > _TERRAIN_POINTS_COORD_ABS_MAX
+            or abs(z) > _TERRAIN_POINTS_COORD_ABS_MAX
+        ):
+            return False
+    return True
+
 
 #: `/audio/play`'s optional `correlation_id` field (`plans/
 #: voice-latency-instrumentation/plan.md` Stage 4) -- the capture side
@@ -1995,8 +2039,10 @@ def _make_handler(
             if isinstance(terrain_raw, str):
                 if terrain_raw == "":
                     terrain = ""
-                elif len(terrain_raw) <= _TERRAIN_RELAY_MAX_LEN and (
-                    _TERRAIN_RELAY_PATTERN.match(terrain_raw)
+                elif (
+                    len(terrain_raw) <= _TERRAIN_RELAY_MAX_LEN
+                    and _TERRAIN_RELAY_PATTERN.match(terrain_raw)
+                    and _terrain_relay_passes_bounds(terrain_raw)
                 ):
                     terrain = terrain_raw
 

@@ -485,6 +485,23 @@ local fc_law_deferred_last_frame = false
 -- max_age_s` staleness.
 local fc_terrain = { seq = nil, points = {}, received_t = nil }
 
+-- R1-c (`security-m3.md` finding 2) -- the documented/intended cap on
+-- the relayed grid, matching the Hook's own `MAX_TERRAIN_POINTS`
+-- (`petrobrain-line-of-sight-hook.lua`) and `schema.line_of_sight.
+-- MAX_TERRAIN_POINTS`. Not behaviour: the user's own default geometry
+-- (16 points) never reaches it; this only truncates an over-count
+-- string from an unauthenticated `POST /command/flight_lease`, the
+-- same way the Hook's own `_applyTerrainPoints` already truncates `n`.
+local TERRAIN_RELAY_MAX_POINTS = 32
+-- R1-c (`security-m3.md` finding 1) -- the magnitude bound `x`/`z`
+-- previously lacked (only `h` had one): a sufficiently long all-digit
+-- string is a valid decimal literal under the relay's own wire regex
+-- but overflows IEEE-754 double parsing to `+-math.huge`, a mechanism
+-- the pre-existing `h == h` finite check alone does not catch (`+-inf`
+-- passes it). Same value the channel's OTHER direction (`terrain_
+-- points`/`probe_points` request validation) already uses.
+local TERRAIN_RELAY_COORD_ABS_MAX = 2000000
+
 -- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- parses
 -- `"<seq>|x,z,h;x,z,h;..."` into `{x, z, h}` triples. A malformed
 -- string, or one whose `seq` does not advance, leaves `fc_terrain`
@@ -505,6 +522,14 @@ local function parse_terrain_relay(raw, t)
     end
     local points = {}
     for entry in rest:gmatch("[^;]+") do
+        -- R1-c finding 2: truncate rather than carry an over-count
+        -- string unbounded -- stop collecting once the cap is
+        -- reached (`break`, not `return`: `seq`/`fc_terrain` below
+        -- are still assigned from whatever this entry's `seq` was,
+        -- just with the point list capped).
+        if #points >= TERRAIN_RELAY_MAX_POINTS then
+            break
+        end
         local x_str, z_str, h_str = entry:match("^([^,]+),([^,]+),([^,]+)$")
         if x_str ~= nil then
             local x, z, h = tonumber(x_str), tonumber(z_str), tonumber(h_str)
@@ -512,13 +537,14 @@ local function parse_terrain_relay(raw, t)
             -- coordinate or height is dropped, never carried as a
             -- plausible-looking value. The height also carries the
             -- plan's own magnitude bound (section E: "each height
-            -- re-checked `h == h` and `|h| < 1e5`") -- a parse that
-            -- somehow produced a wildly-out-of-range but finite
-            -- number (never observed from the real relay, whose own
-            -- `_TERRAIN_RELAY_PATTERN` cannot carry one) is dropped
-            -- the same way a non-finite one is, not carried as a
-            -- plausible height.
-            if x ~= nil and x == x and z ~= nil and z == z
+            -- re-checked `h == h` and `|h| < 1e5`"); `x`/`z` now carry
+            -- the same kind of bound (R1-c finding 1, `TERRAIN_RELAY_
+            -- COORD_ABS_MAX`) -- a parse that somehow produced a
+            -- wildly-out-of-range but finite number is dropped the
+            -- same way a non-finite one is, never carried as a
+            -- plausible point.
+            if x ~= nil and x == x and math.abs(x) < TERRAIN_RELAY_COORD_ABS_MAX
+                and z ~= nil and z == z and math.abs(z) < TERRAIN_RELAY_COORD_ABS_MAX
                 and h ~= nil and h == h and math.abs(h) < 1e5
             then
                 points[#points + 1] = { x, z, h }
@@ -1615,16 +1641,30 @@ local function law_update(state, dt, measured, limits, profile)
     next_state.dbg_effective_shortfall = effective_shortfall
     -- M3 section D ("Speed gives first, then resumes"): the SAME
     -- shortfall that drives `theta_speed_give`/`phi_scale` below also
-    -- lets the speed reference itself yield, never below `speed_give_
-    -- floor_kmh` (U19). `speed_goal_mps`/`desired.ias_kmh` are never
-    -- touched -- what he read back is still the goal; once the
-    -- shortfall ends (next frame, no override here), the ordinary speed
-    -- shaper above already pulls `v_ref` back toward it through its own
-    -- S-curve, no extra code needed to "resume." No special-casing by
-    -- cause (U22, answered 2026-11-28, "every climb trades speed") --
-    -- this triggers on `shortfall` itself, whatever caused it.
+    -- lets the speed reference itself yield. `speed_goal_mps`/`desired.
+    -- ias_kmh` are never touched -- what he read back is still the
+    -- goal; once the shortfall ends (next frame, no override here), the
+    -- ordinary speed shaper above already pulls `v_ref` back toward it
+    -- through its own S-curve, no extra code needed to "resume." No
+    -- special-casing by cause (U22, answered 2026-11-28, "every climb
+    -- trades speed") -- this triggers on `shortfall` itself, whatever
+    -- caused it.
+    --
+    -- R1-a (2026-11-28, user, verbatim): "Trade speed for lift when
+    -- necessary, but slowing to 100 km/h is overkill. Instead slow down
+    -- enough to get lift, but speed delta should typically not exceed
+    -- 50 km/h." So the give is bounded two ways: `speed_give_max_delta_
+    -- kmh` below the commanded speed (the "typically ~50" part, a
+    -- tunable default, not a hard law), floored by the absolute
+    -- `speed_give_floor_kmh` (100, main-loop assumption: below roughly
+    -- the minimum-power speed slowing further costs climb rather than
+    -- giving it). A commanded speed at or below the absolute floor
+    -- gives none, since `v_floor_mps` then sits at or above the
+    -- commanded speed itself.
     if shortfall > 0.0 then
-        local v_floor_mps = profile.speed_give_floor_kmh / 3.6
+        local v_floor_mps = math.max(
+            state.speed_goal_mps - profile.speed_give_max_delta_kmh / 3.6,
+            profile.speed_give_floor_kmh / 3.6)
         next_state.v_ref = math.min(next_state.v_ref, math.max(v_m, v_floor_mps))
         next_state.dv_ref = math.min(next_state.dv_ref, 0.0)
     end
@@ -3450,9 +3490,20 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
     -- stale, absent, or `asl_valid`/`pos_valid` is false, so `law_
     -- update` stays pure and the toy plant can feed `measured.terrain`
     -- directly.
+    --
+    -- R1-b (performance-m3.md finding 1): only `law_update` (gated to
+    -- `law_hz`, ~30 Hz) ever reads this, but `run_active_frame` itself
+    -- runs every DCS frame (~140 Hz) -- projecting unconditionally
+    -- threw away ~4.5 of every 5 allocations the same frame they were
+    -- built. Gated on the SAME `law_due` test `run_active_frame`'s own
+    -- call to `law_update` uses below, so the grid is always fresh on
+    -- the frame that actually consumes it and is simply skipped
+    -- (`measured.terrain` stays `nil`, the existing stale/absent
+    -- fallback) on every frame that doesn't.
     measured.terrain = nil
     if fc_terrain.received_t ~= nil and measured.asl_valid and measured.pos_valid
         and (t - fc_terrain.received_t) <= flight_profile.ACTIVE.terrain_max_age_s
+        and law_due(t, fc_law_last_update_t, flight_profile.ACTIVE)
     then
         local heading_rad = math.rad(measured.psi_deg)
         local nose_x, nose_z = math.cos(heading_rad), math.sin(heading_rad)
