@@ -411,3 +411,31 @@ AGL trend × 5 s look-ahead.
 - Open: does the floor/look-ahead also bound a **low AGL goal** (e.g. "height 20" over rising ground
   — fly 20 m over the terrain ahead, or floor at 50)? Does the cap removal cover **descent** too?
 
+**Follow-up, user verbatim (2026-11-28):**
+
+> 1 - use the floor for normal flight as floor, but if player explicitly commands lower altitude it
+> is allowed.
+>
+> 2 - there is separate rules about slow speed descent, I believe. At faster speeds there is no
+> descent rate limit.
+>
+> 3 - drop all call-outs, the player can see the terrain just as well
+>
+> - terrain polling: up to 1 km (configurable) AND no further than atmospheric visibility (ie fog)
+>
+> 4 - for simplicity use boresight as ahead
+
+**Settled readings:**
+
+- **Floor:** 50 m above bare ground in normal flight, for every goal (barometric hold, default hold at
+  take, seeds). An **explicitly commanded** lower AGL height lowers it to that height — effective
+  floor = min(50 m, explicit AGL goal). The terrain look-ahead protects the effective floor.
+- **Vertical speed:** `max_climb_vs_mps` scrapped both ways. The slow-speed descent rule that exists
+  is Decision 31's VRS guard (`vrs_ias_threshold_kmh` 50, `vrs_max_descent_mps` 4.0) — kept as is.
+- **Callouts:** none. The old plan's "Climbing for terrain." (E7) is withdrawn.
+- **Look-ahead:** along the **nose (boresight)**, grid ±200 m × up to 1 km (configurable), 200 m
+  steps, slow poll, **clipped to atmospheric visibility (fog)**. No weather/visibility input exists in
+  the code today (`body-layer/src/perception/visibility.py` L120 says so) — needs recon.
+- **When the climb does not fit:** speed gives first (slow down, cyclic back), commanded speed
+  resumes after. No numeric climb cap; available power is the limit.
+
