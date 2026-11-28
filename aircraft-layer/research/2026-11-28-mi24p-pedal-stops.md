@@ -281,3 +281,31 @@ grep -n -iE "упор|СПУУ|нулевой индикатор|плотнос�
   available does not pin down the relationship.
 - **Whether the 2026-11-18 sortie's "stops OFF" phase was produced by 270, 275, or some
   combination** — not re-derived here; the probe above answers this once flown.
+
+## Probe flown (2026-11-28, ~20:01)
+
+**Source:** `docs/acceptance/logs-2026-11-28/pedal-stops-probe.log` (gitignored, local). Same
+mission as the hand-flown hover sortie. User: *"OAT ~13 C, same mission as earlier hover logs, to
+same OAT"*. Field ≈ 925 m ASL; flown at 140–250 m AGL, so ≈ 1 070–1 175 m pressure altitude.
+Steps flown: BASELINE, POWER-OFF, then a full press to DONE (power back on). Steps 3–12 (OFF
+button, knob sweep, P/t switch) were **not** flown.
+
+| step | SPUU power (arg 270) | knob (276) | IAS while pinned | full-right effective pedal (arg 1103) |
+|---|---|---|---|---|
+| BASELINE | 1 (mission default) | 0.5 (mission default) | 32–35 km/h | **−0.565** |
+| POWER-OFF (Petrovich's own write, cmd 3010 → 0) | 0 | 0.5 | 25–78 km/h | **−0.678** |
+| DONE (cmd 3010 → 1) | 1 | 0.5 | 81 km/h | back to −0.571 within ~4 s |
+
+**Verified:**
+- **SPUU-52 power (arg 270, `p_spuu_power`) alone causes the right-pedal cap**: off → −0.678, on →
+  −0.57. The write works from Export (`performClickableAction(19, 3010, v)`, `ok=true`), so
+  Petrovich can switch the stops himself. This settles the 2026-11-18 / hand-flown "stops off"
+  phase as this switch.
+- **No airspeed schedule between 25 and 78 km/h**: with the stops off the cap sat at −0.678 flat
+  across that whole range; with them on, −0.565 at 32–35 km/h (and −0.567…−0.569 at hover in the
+  hand-flown sortie). Above 80 km/h untested.
+- The mission starts the knob at **0.5** and the P/t switch centred.
+
+**Still open:** what the knob (276) and the P/t switch (277) do; whether the on-cap moves with the
+knob, OAT or altitude; whether the off-cap (−0.678) is itself a further limit or full travel at
+this density (the ground measurement read −1). One data point: 13 °C, ≈ 1.1 km.
