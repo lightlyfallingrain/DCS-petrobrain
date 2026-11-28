@@ -2747,7 +2747,8 @@ speed limits apply. U22 - if we do not get climb rate at current speed, then cha
 recommended. I'll update the deploy script."*
 
 - **U18: yes** (as recommended) — floor = min(50, AGL goal), 50 for barometric.
-- **U19: ~100 km/h** (as recommended) — the speed-give floor.
+- **U19: ~100 km/h** (as recommended) — the speed-give floor. **SUPERSEDED by "M3 revision R1"
+  (R1-a):** at most ~50 km/h below the commanded speed, never below 100.
 - **U20: ease-down cap 10 m/s** (not the recommended 5), and the slow-speed limits still apply on
   top — Decision 31's VRS guard (below 50 km/h, 4 m/s down) is not loosened by it.
 - **U21: yes** (as recommended) — the look-ahead clears the commanded AGL height (`c = AGL goal`);
@@ -2789,4 +2790,48 @@ recommended. I'll update the deploy script."*
   a speed and a height and nothing is in the way, while with terrain ahead the clearance comes first.
   The alternative is your U3 order (speed, turn, height) for every climb: faster to the height, at
   the cost of slowing to U19's floor on every big climb.
+
+## M3 revision R1 (2026-11-28)
+
+Built M3 (`ad949ef7`..`e458d1ce`, reviewed, security and performance approved) is unflown. This
+revision changes one behaviour and folds in the non-blocking review items. One batch.
+
+**User, verbatim:** *"Do the efficiency clean ups. About climb in normal flight. Trade speed for
+lift when necessary, but slowing to 100 km/h is overkill. Instead slow down enough to get lift, but
+speed delta should typically not exceed 50 km/h."*
+
+### R1-a. U19 revised: speed gives at most ~50 km/h below the commanded speed
+
+- **Supersedes U19's "~100 km/h"** in the Answered block, section D, the Tuning table, Tests and
+  card rows 4 and 11.
+- Section D's yield is unchanged in shape — `v_ref = min(v_ref, max(V_m, v_floor))` while
+  `shortfall > 0`, so he slows only as long as the lift is short ("slow down enough to get lift") and
+  returns through the speed shaper afterwards. Only `v_floor` changes:
+  `v_floor = max(speed_goal − speed_give_max_delta_kmh, speed_give_floor_kmh)`.
+- **New profile constant `speed_give_max_delta_kmh` = 50** (user). "Typically" = this is a tunable
+  default, not a hard law.
+- **`speed_give_floor_kmh` stays, at 100, as an absolute lower bound** (main-loop assumption, stated
+  to the user): below roughly the minimum-power speed slowing further costs climb rather than giving
+  it, so he never trades speed below it; a commanded speed at or below 100 gives no speed at all —
+  height gives instead (diagram 4's order). Worked: commanded 220 → 170; 160 → 110; 140 → 100;
+  ≤ 100 → no speed give.
+- Tests: the U22 ordinary-climb test asserts the new floor (220 → 170 km/h), plus a case where the
+  absolute floor binds (e.g. 130 → 100) and one where commanded ≤ 100 gives none. Card rows 4 and 11:
+  "speed falls by at most ~50 km/h (not below 100)".
+
+### R1-b. Performance cleanups (`performance-m3.md`)
+
+- Finding 1: `run_active_frame`'s per-frame terrain projection
+  (`flight_control.lua` ~3453–3467) allocates a table per point every frame while only `law_update`
+  reads it at ~30 Hz. Reuse preallocated parallel arrays with a count field (the file's own
+  `est_ring_*` shape), and/or project only when `law_due()` is true. Behaviour unchanged.
+- Finding 2: `body.py`'s `_compose_and_relay_terrain` and the expected-area-check path each `GET
+  /line_of_sight/latest` per poll. Fetch once per poll and share. Behaviour unchanged.
+
+### R1-c. Security hardening (`security-m3.md`, findings 1–2, low)
+
+- Bound the `flight_lease` terrain relay's `x`/`z` magnitudes (non-finite or out of range → point
+  dropped, never 0), like `h`'s `|h| < 1e5`.
+- Enforce the 32-point cap (`MAX_TERRAIN_POINTS`) the server comment claims, at both the collector
+  endpoint and the Lua parse.
 

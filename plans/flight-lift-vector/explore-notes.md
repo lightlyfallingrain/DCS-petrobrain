@@ -484,3 +484,8 @@ in this repo.
 apply. U22 - if we do not get climb rate at current speed, then change speed. Others as recommended.
 I'll update the deploy script."* Carried into `plan.md`, M3 "Decisions" ("Answered 2026-11-28").
 
+**U19 revised after M3 was built, user verbatim (2026-11-28, before any M3 flight):** *"About climb
+in normal flight. Trade speed for lift when necessary, but slowing to 100 km/h is overkill. Instead
+slow down enough to get lift, but speed delta should typically not exceed 50 km/h."* Same message:
+*"Do the efficiency clean ups."* Carried into `plan.md`, "M3 revision R1 (2026-11-28)".
+
