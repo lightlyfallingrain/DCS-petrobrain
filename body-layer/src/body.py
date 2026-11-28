@@ -374,21 +374,22 @@ MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
     status="judgement",
 )
 
-#: BL-16 M4 debug fix, 2026-11-28 (`plans/flight-lift-vector/
-#: debug-2026-11-28-sau-take.md`) -- how long, after `controls_to_
-#: petrovich_edge` fires, the SAU-off handover keeps being re-fired every
-#: poll it is not already running, deliberately twice `belief.effector_
-#: engine.EFFECTOR_CONDITION_READBACK_WAIT_S`'s own 5 s give-up budget so
-#: one bad readback window does not cost the whole retry allowance.
-#: `ConsolePerceptionRunner.sau_takeover_retry_until_sim`'s own field
-#: docstring has the full account of why a single fire is not enough;
-#: generous against one bad readback window without masking a genuinely
-#: dead channel for the rest of a long flight.
+#: How long after Petrovich takes the controls (mode 1) the SAU-off
+#: handover keeps being re-fired every poll it is not already running.
+#: 60 s covers both flown failures (2026-11-28: the writes landed 39 s
+#: late in sortie 1, and none landed in 46 s in sortie 2), where the first
+#: cut of 10 s covered neither (`plans/flight-lift-vector/review-sau-
+#: take.md`). The cost of a longer window is only that a genuinely dead
+#: readback channel is retried longer -- each failed attempt still logs
+#: the engine's own give-up warning, so it is never silent. Why a single
+#: fire is not enough: `ConsolePerceptionRunner.sau_takeover_retry_until_
+#: sim`'s field docstring and `plans/flight-lift-vector/debug-2026-11-28-
+#: sau-take.md`. A stopgap until the readback failure itself is found.
 SAU_TAKEOVER_RETRY_WINDOW_S: Final[float] = tuning.real(
     "body.SAU_TAKEOVER_RETRY_WINDOW_S",
-    10.0,
+    60.0,
     lo=5.0,
-    hi=30.0,
+    hi=120.0,
     status="judgement",
 )
 

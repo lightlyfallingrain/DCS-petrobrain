@@ -9309,7 +9309,7 @@ def test_the_handover_retries_and_succeeds_after_an_initial_readback_timeout(
             "the original run must have given up with no write by now"
         )
 
-        # Still inside the retry window (10 s) -- once reads succeed
+        # Still inside the retry window -- once reads succeed
         # again, the retry re-fires and the write lands.
         aircraft_client.fail_read_args = False
         assert _wait_for(
@@ -9343,7 +9343,7 @@ def test_the_retry_never_fires_once_its_own_window_has_elapsed(
         aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "take")
         assert _wait_for(lambda: len(aircraft_client.read_args_calls) >= 1)
 
-        # Past the whole 10 s retry window, reads still failing the
+        # Past the whole retry window, reads still failing the
         # entire time.
         aircraft_client._telemetry["dcs_model_time_s"] = (
             50.0 + body_module.SAU_TAKEOVER_RETRY_WINDOW_S + 1.0
