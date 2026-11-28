@@ -360,3 +360,54 @@ effector writes, this case is exception.)"* — applies to both the take-side (o
 
 Carried into `plan.md` LV-3 sections C and E ("Corrected 2026-11-28").
 
+## M3 terrain floor explore (2026-11-28)
+
+**What was found first (main loop):** the AGL hold already follows the ground directly below (goal is
+AGL, so rising ground lowers measured AGL and the law climbs), but nothing looks ahead. A spoken AGL
+height is clamped at 40 m in body-layer (`flight_control.py` `FLOOR_AGL_M`). A barometric goal has no
+floor outside a break (converted to AGL every frame, `flight_control.lua` ~L1104). The break floor is
+50 m / ≤100 m loss (Decision 29 / LV-2 D). `LoGetRadarAltimeter` = `LoGetAltitudeAboveGroundLevel`
+within 0.4 m over open ground (M0-A, `aircraft-layer/research/2026-11-18-bl16-m0-flight-axes-findings.md`);
+forest/town never flown. `max_climb_vs_mps` 5.0 clamps the reference vertical speed both ways
+(`flight_control.lua` L1133). Worked table shown: climb needed = speed × slope ahead; at 200 km/h a
+10 % slope already needs 5.6 m/s. Old plan M3 (`plans/flight-control/plan.md` L3045) used only the
+AGL trend × 5 s look-ahead.
+
+`Export.LoGetAltitude` (always available) and `Export.LoGetHeightWithObjects` appear in
+`aircraft-layer/research/reference/Sim_ControlAPI.md` L550–557 — signature and semantics unverified.
+
+**User, verbatim:**
+
+> - Allow player to command any altitude and then accept it.
+> - the 40 m floor is especially for barometric mode, we don't want to fly to terrain
+> - for radar alt, use the telemetry AGL
+> - climb limit: no number limit, limit comes from available power. Fly the lift vector.
+>
+> 1 - climb early. Slow down a bit if necessary so that we can climb faster.
+>
+> 2 - yes, Petrovich should poll the terrain elevation ahead. Let's say 1 km ahead in 200 m steps.
+> Even better, poll a rectangular shaped grid:1 km ahead of aircraft, 200 m to both sides. Slow poll
+> rate is ok here.
+>
+> 3 - with what I said above, the 5 m/s limit is scrapped. But there's still aircraft limits to how
+> fast we can climb. Speed gives first. The helicopter at full speed does not climb well, slowing
+> down and pulling back on cyclic creates more lift. No need to say anything.
+>
+> 4 - 40 m from bare ground. My 40 m floor includes tree avoidance.
+>
+> 5 - one floor is better, use 50 m
+
+**Readings (main loop, to confirm where marked):**
+
+- The spoken-height clamp goes: "height 20" AGL is accepted and flown at 20 m.
+- One terrain floor, **50 m above bare ground**, replacing both 40 m (`FLOOR_AGL_M`/`floor_agl_m`) and
+  the break's separate 50 m. It exists chiefly so a barometric hold never flies into terrain.
+- AGL source unchanged: telemetry AGL (`LoGetAltitudeAboveGroundLevel`, = "radar" read).
+- Terrain ahead: a grid 1 km ahead × ±200 m, 200 m steps (5 rows × 3 columns = 15 points, or 18 with
+  a row at 0 m), polled slowly. Climb early against the highest point ahead.
+- No numeric climb-rate cap; the limit is available power (the existing RPM/collective guards). When
+  the climb does not fit, **speed gives first** — slow down and pull back to climb harder. **No
+  callout** — this withdraws the old plan's settled "Climbing for terrain." (E7) line. *(to confirm)*
+- Open: does the floor/look-ahead also bound a **low AGL goal** (e.g. "height 20" over rising ground
+  — fly 20 m over the terrain ahead, or floor at 50)? Does the cap removal cover **descent** too?
+
