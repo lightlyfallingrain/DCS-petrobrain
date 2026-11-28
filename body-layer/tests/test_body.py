@@ -38,6 +38,7 @@ from belief.contacts import ContactStore
 from belief.crew_console import CONFIG_ERROR_LINE, CrewConsole
 from belief.effector_engine import (
     AIRCRAFT,
+    EFFECTOR_CONDITION_READBACK_WAIT_S,
     EFFECTOR_SEQUENCE_STEP_DELAY_S,
     PETROVICH_ROLE,
     EffectorTrigger,
@@ -9132,6 +9133,57 @@ def _effector_config_with_controls_to_petrovich_sequence() -> tuple[
 _CONTROLS_TO_PETROVICH_WRITE = (7, 3002, 1.0)  # observ on
 
 
+def _effector_config_with_momentary_controls_to_petrovich_sequence() -> tuple[
+    dict[tuple[str, str, str], Any], dict[str, Any]
+]:
+    """Same shape as `_effector_config_with_controls_to_petrovich_sequence`
+    above, but the stand-in effector is a *momentary, non-absolute*
+    button (`absolute_write=False`) rather than `observ`'s real
+    `default_2_position_tumb` shape -- matching the real SAU OFF buttons
+    (`effectors.toml`'s `p_sau_h_channel_off` etc., shape `default_
+    square_button`). `observ`'s own absolute shape writes through a
+    readback give-up unconditionally (R12) -- the wrong stand-in for
+    testing `sau_takeover_retry_until_sim`, whose whole premise is the
+    real SAU buttons' give-up failing *silently with zero writes*
+    (confirmed by `test_effector_engine.py`'s `test_e2_non_absolute_
+    unknown_readback_skips_with_warning`), which only a non-absolute
+    effector reproduces."""
+    sequences, registry = _fixture_effector_config()
+    merged_registry = dict(registry)
+    merged_registry["sau_off_momentary"] = EffectorDef(
+        name="sau_off_momentary",
+        source_element="SAU-H-OFF-PTR",
+        device=10,
+        cmd=3007,
+        arg=236,
+        values={"on": 1.0, "off": 0.0},
+        shape="default_square_button",
+    )
+    merged_sequences = dict(sequences)
+    merged_sequences[
+        (AIRCRAFT, PETROVICH_ROLE, EffectorTrigger.CONTROLS_TO_PETROVICH.value)
+    ] = SequenceFile(
+        aircraft=AIRCRAFT,
+        petrovich_role=PETROVICH_ROLE,
+        trigger=EffectorTrigger.CONTROLS_TO_PETROVICH.value,
+        rows=(
+            SwitchRow(
+                condition=None,
+                effector="sau_off_momentary",
+                value="on",
+                petrovich_says="",
+                comment="",
+            ),
+        ),
+        source_path=Path("fake-controls-to-petrovich-momentary.md"),
+        read_args=frozenset({236}),
+    )
+    return merged_sequences, merged_registry
+
+
+_MOMENTARY_SAU_WRITE = (10, 3007, 1.0)  # sau_off_momentary "on" (press)
+
+
 def test_a_voice_take_into_m1_fires_controls_to_petrovich(tmp_path: Path) -> None:
     aircraft_client, _runner, console, stop_event, poll_thread = (
         _start_effector_poll_loop(
@@ -9193,6 +9245,161 @@ def test_an_unpark_into_m2_does_not_fire_controls_to_petrovich(
     )
     try:
         aircraft_client.flight_desired_state = _flight_desired_sample("m2", 1, "park")
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
+
+
+# -- `sau_takeover_retry_until_sim` (debug fix, 2026-11-28, `plans/
+# flight-lift-vector/debug-2026-11-28-sau-take.md`): a persistently-
+# failing `read_args` call makes `belief.effector_engine.advance` give up
+# on `CONTROLS_TO_PETROVICH`'s run *permanently* (confirmed by
+# `test_effector_engine.py::test_e2_non_absolute_unknown_readback_skips_
+# with_warning` -- zero writes, no retry, once `EFFECTOR_CONDITION_
+# READBACK_WAIT_S` elapses). These tests drive that exact give-up through
+# the real poll loop, then confirm the new bounded retry recovers it --
+# and stays bounded (never fires past the window, never fires once the
+# handover has reversed). -------------------------------------------------
+
+
+def test_the_handover_retries_and_succeeds_after_an_initial_readback_timeout(
+    tmp_path: Path,
+) -> None:
+    aircraft_client, _runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_momentary_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        # The fixture's `raw_args` carries no "236" key -- a successful
+        # read would otherwise still resolve `self_raw` to `None`
+        # (unknown, same as a failed one) and skip forever regardless of
+        # `fail_read_args`. A *known*, mismatching value is what lets
+        # the retry's eventual successful read actually write.
+        aircraft_client.raw_args = {**aircraft_client.raw_args, "236": 0.0}
+        aircraft_client.fail_read_args = True
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "taking", 1, "take"
+        )
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "take")
+        # Wait for the first (failing) `read_args` attempt to actually
+        # register at sim=50.0 -- `read_first_attempt_sim` must be set
+        # *before* sim time advances, or the give-up window below would
+        # never actually elapse.
+        assert _wait_for(lambda: len(aircraft_client.read_args_calls) >= 1)
+
+        # Past `EFFECTOR_CONDITION_READBACK_WAIT_S` (5 s): the original
+        # run gives up permanently, with no write -- not a `_wait_for` on
+        # "no longer running": with `fail_read_args` still `True`, a
+        # give-up's own removal is followed, the same poll's retry
+        # check, by an immediate fresh re-fire (still within the
+        # window), which then sits retrying forever at this same frozen
+        # sim time, since this test does not advance it again before
+        # flipping `fail_read_args` below. The only property needed here
+        # is "no write has landed yet".
+        aircraft_client._telemetry["dcs_model_time_s"] = (
+            50.0 + EFFECTOR_CONDITION_READBACK_WAIT_S + 1.0
+        )
+        time.sleep(0.1)
+        assert aircraft_client.cockpit_switch_writes == [], (
+            "the original run must have given up with no write by now"
+        )
+
+        # Still inside the retry window (10 s) -- once reads succeed
+        # again, the retry re-fires and the write lands.
+        aircraft_client.fail_read_args = False
+        assert _wait_for(
+            lambda: _MOMENTARY_SAU_WRITE in aircraft_client.cockpit_switch_writes
+        )
+        time.sleep(0.05)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == [_MOMENTARY_SAU_WRITE], (
+        "a later re-fire, once the first write already landed, must be a "
+        "no-op (the implicit self-check sees the write via assumed_writes)"
+    )
+
+
+def test_the_retry_never_fires_once_its_own_window_has_elapsed(
+    tmp_path: Path,
+) -> None:
+    aircraft_client, runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_momentary_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        aircraft_client.fail_read_args = True
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "taking", 1, "take"
+        )
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "take")
+        assert _wait_for(lambda: len(aircraft_client.read_args_calls) >= 1)
+
+        # Past the whole 10 s retry window, reads still failing the
+        # entire time.
+        aircraft_client._telemetry["dcs_model_time_s"] = (
+            50.0 + body_module.SAU_TAKEOVER_RETRY_WINDOW_S + 1.0
+        )
+        assert _wait_for(lambda: runner.sau_takeover_retry_until_sim is None)
+
+        # Reads recover only now -- too late, the window already closed.
+        aircraft_client.fail_read_args = False
+        time.sleep(0.1)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+    assert not poll_thread.is_alive()
+    assert aircraft_client.cockpit_switch_writes == []
+
+
+def test_the_retry_never_fires_once_the_handover_has_reversed(
+    tmp_path: Path,
+) -> None:
+    aircraft_client, runner, console, stop_event, poll_thread = (
+        _start_effector_poll_loop(
+            tmp_path, _effector_config_with_momentary_controls_to_petrovich_sequence()
+        )
+    )
+    try:
+        aircraft_client.fail_read_args = True
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "taking", 1, "take"
+        )
+        assert _wait_for(lambda: console.flight_authority_state.mode_n == 1)
+        aircraft_client.flight_desired_state = _flight_desired_sample("m1", 2, "take")
+        assert _wait_for(lambda: len(aircraft_client.read_args_calls) >= 1)
+
+        aircraft_client._telemetry["dcs_model_time_s"] = (
+            50.0 + EFFECTOR_CONDITION_READBACK_WAIT_S + 1.0
+        )
+        # Not a `_wait_for` on "no longer running": with `fail_read_args`
+        # still `True`, a give-up's own removal from `runs` is followed,
+        # same poll's retry check, by an immediate fresh re-fire (still
+        # within the window) -- which then sits retrying forever at this
+        # same frozen sim time, since this test never advances it again.
+        # The only property this test needs before reversing the
+        # handover is "no write has landed yet".
+        time.sleep(0.1)
+        assert aircraft_client.cockpit_switch_writes == []
+
+        # Still inside the retry window, but the controls went back to
+        # the player before it fired again -- never press the SAU OFF
+        # buttons against the wrong mode.
+        aircraft_client.flight_desired_state = _flight_desired_sample(
+            "off", 3, "release"
+        )
+        assert _wait_for(lambda: console.flight_authority_state.fd_mode == "off")
+        assert _wait_for(lambda: runner.sau_takeover_retry_until_sim is None)
+
+        aircraft_client.fail_read_args = False
         time.sleep(0.1)
     finally:
         stop_event.set()

@@ -374,6 +374,24 @@ MISSION_START_RESOLVE_FALLBACK_S: Final[float] = tuning.real(
     status="judgement",
 )
 
+#: BL-16 M4 debug fix, 2026-11-28 (`plans/flight-lift-vector/
+#: debug-2026-11-28-sau-take.md`) -- how long, after `controls_to_
+#: petrovich_edge` fires, the SAU-off handover keeps being re-fired every
+#: poll it is not already running, deliberately twice `belief.effector_
+#: engine.EFFECTOR_CONDITION_READBACK_WAIT_S`'s own 5 s give-up budget so
+#: one bad readback window does not cost the whole retry allowance.
+#: `ConsolePerceptionRunner.sau_takeover_retry_until_sim`'s own field
+#: docstring has the full account of why a single fire is not enough;
+#: generous against one bad readback window without masking a genuinely
+#: dead channel for the rest of a long flight.
+SAU_TAKEOVER_RETRY_WINDOW_S: Final[float] = tuning.real(
+    "body.SAU_TAKEOVER_RETRY_WINDOW_S",
+    10.0,
+    lo=5.0,
+    hi=30.0,
+    status="judgement",
+)
+
 #: How often body-layer re-sends its own process-start reset while
 #: unconfirmed (BL-16 sortie 2026-11-20, `docs/acceptance/
 #: 2026-11-20-sortie-feedback.md`) -- every seq-carrying send (mode 1's
@@ -699,6 +717,27 @@ class ConsolePerceptionRunner:
     #: and mission-reset's re-run `__init__`.
     effector_state: EffectorRunState = field(default_factory=EffectorRunState)
 
+    #: BL-16 M4 debug fix, 2026-11-28 (`plans/flight-lift-vector/
+    #: debug-2026-11-28-sau-take.md`) -- the sim time up to which
+    #: `CONTROLS_TO_PETROVICH` should be re-fired every poll it is not
+    #: already running, or `None` when no takeover is currently pending
+    #: a retry. Set to `now_sim + SAU_TAKEOVER_RETRY_WINDOW_S` the poll
+    #: `controls_to_petrovich_edge` fires; cleared once the window
+    #: elapses or `fd_mode` leaves `"m1"` (the handover reversed; a
+    #: stale retry must never press the SAU OFF buttons after Petrovich
+    #: no longer has the controls). Exists because `belief.
+    #: effector_engine.advance`'s own one-shot read, per `EffectorTrigger`
+    #: run, gives up *permanently* (zero writes, no retry, confirmed by
+    #: `test_e2_non_absolute_unknown_readback_skips_with_warning`) once a
+    #: persistently-failing `read_args` call exceeds `EFFECTOR_CONDITION_
+    #: READBACK_WAIT_S` -- fine for a cosmetic switch, not for this
+    #: safety-stated handover (the whole point of M4 is that the SAU must
+    #: not keep fighting the law). A re-fire is a true no-op once the
+    #: original run already wrote (the implicit self-check skips a fresh
+    #: run's own rows silently against the now-correct cockpit state), so
+    #: this only ever helps the one case it exists for.
+    sau_takeover_retry_until_sim: float | None = None
+
     #: `plans/effector-sequences/plan.md` Stage 4, S4.5 -- the sim time
     #: the continuous feed's `watch_args` install was last (re)sent, or
     #: `None` before the first poll or right after a mission reset. An
@@ -976,7 +1015,8 @@ class ConsolePerceptionRunner:
         (`last_t_sim`, `last_ownship_state`, `enrichment`, `mission_phase_
         tracker`, `scan_plan`, `optic_state`, `attack_run_state`,
         `atgm_run_state`,
-        `guidance_unit_state`, `effector_state`, `watch_args_last_sent_sim`,
+        `guidance_unit_state`, `effector_state`, `sau_takeover_retry_
+        until_sim`, `watch_args_last_sent_sim`,
         `watched_args_unavailable_warned`, `watch_args_unconfirmed_warned`,
         `sight_head`, `last_sight_look_sim`, `attitude_history`, `optic`,
         `_last_look_direction`, `last_mission_start_sequence`,
@@ -6107,6 +6147,7 @@ def _run_crew_text_poll_loop(
                         # direction: Petrovich taking the raw axes
                         # (`controls_to_petrovich_edge`), whichever path
                         # got him there -- sets SAU H/K/T off, B on.
+                        assert runner.last_t_sim is not None
                         if controls_to_petrovich_edge(
                             previous_flight_authority,
                             crew_console.flight_authority_state,
@@ -6116,6 +6157,37 @@ def _run_crew_text_poll_loop(
                                 EffectorTrigger.CONTROLS_TO_PETROVICH,
                                 runner.last_t_sim,
                             )
+                            # Debug fix, 2026-11-28 (`plans/flight-lift-
+                            # vector/debug-2026-11-28-sau-take.md`) --
+                            # opens the bounded retry window
+                            # `ConsolePerceptionRunner.sau_takeover_
+                            # retry_until_sim`'s own docstring explains.
+                            runner.sau_takeover_retry_until_sim = (
+                                runner.last_t_sim + SAU_TAKEOVER_RETRY_WINDOW_S
+                            )
+                        elif runner.sau_takeover_retry_until_sim is not None:
+                            still_m1 = (
+                                crew_console.flight_authority_state.fd_mode == "m1"
+                            )
+                            window_open = (
+                                runner.last_t_sim < runner.sau_takeover_retry_until_sim
+                            )
+                            if still_m1 and window_open:
+                                if (
+                                    EffectorTrigger.CONTROLS_TO_PETROVICH
+                                    not in runner.effector_state.runs
+                                ):
+                                    runner.effector_state = fire_effector_trigger(
+                                        runner.effector_state,
+                                        EffectorTrigger.CONTROLS_TO_PETROVICH,
+                                        runner.last_t_sim,
+                                    )
+                            else:
+                                # Window elapsed, or the handover already
+                                # reversed (`fd_mode` left `"m1"`) -- never
+                                # re-fire a stale retry against the wrong
+                                # mode.
+                                runner.sau_takeover_retry_until_sim = None
                         # U2's carried-value lines (section 3a's own
                         # speech order: mode-change lines first, then
                         # these) -- the m2->m1 unpark carry, first

@@ -520,6 +520,11 @@ COMMAND_RESET_RESEND_INTERVAL_S = 2.0
 # source: body.py:MISSION_START_RESOLVE_FALLBACK_S
 MISSION_START_RESOLVE_FALLBACK_S = 30.0
 
+# BL-16 M4 debug fix, 2026-11-28 (`plans/flight-lift-vector/debug-2026-11-28-sau-take.md`) -- how long, after `controls_to_petrovich_edge` fires, the SAU-off handover keeps being re-fired every poll it is not already running, deliberately twice `belief.effector_engine.EFFECTOR_CONDITION_READBACK_WAIT_S`'s own 5 s give-up budget so one bad readback window does not cost the whole retry allowance.
+# status: judgement | range: 5.0 .. 30.0
+# source: body.py:SAU_TAKEOVER_RETRY_WINDOW_S
+SAU_TAKEOVER_RETRY_WINDOW_S = 10.0
+
 [mission_memory.admission]
 # How long, in seconds, a `fired_on` entry for one shooter suppresses a second entry from the same shooter -- the user's own "~2 min" (explore notes, Decision 5), stated there as a tunable.
 # status: judgement | range: 10.0 .. 900.0
