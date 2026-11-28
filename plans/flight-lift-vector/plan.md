@@ -1487,6 +1487,13 @@ against these measured figures.
 artifact https://claude.ai/artifact/HPQAEpYd11UibGVcc5SqE5 (this section's two diagrams plus a
 by-channel change table).
 
+**Plan check CONCERNS on BE6 settled (user, verbatim, 2026-11-28):** *"go with 'A, ease bank
+too:'"* — the question (`alignment.md`, "Plan check — 2026-11-28 — LV-2 rework"): near the floor,
+does bank ease together with the collective so the turn really slows (A), or does bank stay at 30°
+unless collective alone fails (B)? **A**: in the RECOVERING regime the bank eases as the collective
+comes up — ordinary recovery, not only the safety-net exception. Section B's "fixed 30°" is
+amended accordingly in "LV-2 rework — BE6 amendment" below.
+
 Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `feature/bl16-lift-vector-law`),
 tip `7773b8ef`. Supersedes the collective/vertical-channel design of "LV-2 amendment (2026-11-27)"
 section C and the bank cap of section B — the first LV-2 card flew and failed
