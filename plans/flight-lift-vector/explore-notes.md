@@ -439,3 +439,36 @@ AGL trend × 5 s look-ahead.
 - **When the climb does not fit:** speed gives first (slow down, cyclic back), commanded speed
   resumes after. No numeric climb cap; available power is the limit.
 
+**Goal-check questions (alignment.md, M3 section), user verbatim (2026-11-28):**
+
+> 1 - option A
+> 2 - yes
+> 3 - maintain current altitude
+> 4 - ease down
+> 5 - there's a backlog item for effects of weather on perception. Tie this to that item. Defer
+> until weather stuff is figured out.
+> 6 - using the naked eye perception at light levels logic that was added to main, when it is dark
+> outside, terrain is invisible. NVG is there for that reason, it allows for terrain avoidance at
+> night. -> let's simplify: use the same polling regardless of light level. A pilot would use NVGs at
+> night to see terrain. We'll just do the polling.
+
+**Settled:**
+
+- **Q1 → A:** clear each grid point by the time he reaches it, with an early start (climb needed ≈
+  speed × slope), not "climb now for the highest point within 1 km". A hill he is not moving toward
+  does not lift him; a hover behind a ridge stays behind it.
+- **Q2 → yes:** "hold altitude" below 50 m and a relative "descend <n>" ending below 50 m count as
+  explicitly commanding that height (effective floor = that height).
+- **Q3 → keep current height:** a take below 50 m with no height spoken holds the current AGL (it
+  counts as the explicit height), no pop-up to 50 m.
+- **Q4 → ease down** over a crest at cruise, not straight down the far slope.
+- **Q5 → fog clipping deferred to `[[BL-B138]]`** (weather → perception). M3 polls the configured
+  range (1 km default) regardless of weather; BL-B138 adds the fog clip when weather is figured out.
+  Recon: `world.weather.getFogVisibilityDistance()` is readable via the Hook `"mission"` bridge
+  (`aircraft-layer/research/2026-11-28-bl16-m3-terrain-ahead-and-visibility.md`).
+- **Q6 → same polling regardless of light level** (the pilot would use NVG at night).
+- **Applied without objection (main loop):** barometric goal always floored at 50 m; floor and
+  look-ahead are mode 1 only; a low height commanded in mode 2 carries through the unpark take.
+- **Open (user's Windows grep):** whether `LoGetAltitude(x, z)` returns bare terrain height at a
+  point — decides grid in Export.lua (preferred) vs body-layer via the BL-B111 `probe_points` Hook.
+
