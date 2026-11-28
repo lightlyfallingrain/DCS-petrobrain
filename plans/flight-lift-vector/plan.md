@@ -2028,6 +2028,32 @@ detail; no change needed there.)
 > arrest, so unlike the 120/180/250 rows above it if they run the margin down late in the turn, bank
 > here should stay visibly steady throughout, not come off).
 
+### LV-2 rework — sink signal correction (2026-11-28, plan check R2)
+
+**Overrides every use of `state.w_ref` as "how fast the aircraft is sinking" in this rework** — the
+D.1 sink lead (`sink_lead_m`) and the D.4a easing (`sink_being_arrested_mps`) alike. Main-loop
+correction from `alignment.md`, "Plan check R2 — 2026-11-28 — LV-2 rework BE6 amendment":
+
+- `state.w_ref` is the altitude shaper's own second-order reference. During a break `alt_goal_agl`
+  is floored at `break_floor` from frame 1, and `w_ref` integrates toward it on its own clock
+  (critically damped, accel-capped: ~15–25 s for a 100 m error) with no feedback from the real
+  aircraft while RELEASED. In a break longer than ~20 s (break-away at cruise: 31–38 s) `w_ref`
+  reaches ~0 before the real margin runs out — so both the lead and the bank easing would vanish
+  exactly when they are needed. The R1 risk note ("one frame or so behind") understated this.
+- **Use the measured vertical speed `measured.w_mps`** (`LoGetVerticalVelocity`, already read every
+  frame and already used by the `a_u_d` error term) in both places:
+  `sink_lead_m = profile.break_recovery_lead_s * max(0, -measured.w_mps)` and
+  `sink_being_arrested_mps = max(0, -measured.w_mps)`. Everything else in D.1/D.4a is unchanged.
+- BE7 is unaffected: height is held from frame 1, so the measured sink stays ≈ 0 and so does the
+  easing. Bank still returns to 30° by itself once the real sink is arrested.
+- Noise: `LoGetVerticalVelocity` is DCS's own filtered value, the one the vertical loop already
+  closes on; no extra smoothing is added. If the card shows bank flicker near the floor, smooth it
+  then (the estimator's ring buffers are the existing mechanism) — `k_phi_recovery_ease` is still a
+  first cut.
+- **Test added:** a long released break (≥ 30 s, toy plant sinking steadily) in which the shaper's
+  reference would have settled before the margin runs out — the lead and the bank easing still engage
+  as the real margin shrinks, and the floor is never crossed.
+
 ## LV-3 amendment (2026-11-27)
 
 Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `origin/feature/bl16-lift-vector-
