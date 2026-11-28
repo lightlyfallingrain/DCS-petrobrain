@@ -1106,6 +1106,14 @@ def _describe_token_for_confirm(
 #: class. `test_crew_console.py` asserts every member of this set either
 #: returns a non-empty result from `handle_command`, or is one of the two
 #: documented no-return exceptions.
+#: Testing aid (2026-11-28) -- the operator's "Fire Shturm" key binding:
+#: `devices.WEAP_SYS` (6), `weapon_commands.Operator_LAUNCH_URS` (3036),
+#: from `Mi-24P/Cockpit/Scripts/{devices,command_defs}.lua`. Binding-only
+#: (no clickable element, no arg), so not in the effector registry.
+_LAUNCH_DEVICE: Final = 6
+_LAUNCH_CMD: Final = 3036
+_LAUNCH_PRESS_S: Final = 0.5
+
 DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
     set(_RELATIVE_SCAN_TOKENS)
     | set(_BEARING_SCAN_TOKENS)
@@ -1182,6 +1190,11 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         # no-return-value exemption.
         "radio_check",
         "greeting",
+        # Testing aid (2026-11-28): "launch" presses the operator's Fire
+        # Shturm button (WEAP_SYS 6 / Operator_LAUNCH_URS 3036) for
+        # `_LAUNCH_PRESS_S`, to test whether a binding-only command is
+        # writable via performClickableAction. Always returns a line.
+        "launch",
         # `look`/`sight`/`what is [at] <where>` (`plans/
         # 9k113-scan-procedure/plan-stage2.md`) -- `_handle_point` always
         # returns a refusal/confirm-question/readback line unconditionally
@@ -3781,6 +3794,8 @@ class CrewConsole:
             )
         elif token == "radio_check":
             lines = self._handle_radio_check()
+        elif token == "launch":
+            lines = self._handle_launch()
         elif token == "greeting":
             lines = self._handle_greeting(slots)
         elif token in self.enabled_rule_ids:
@@ -6400,6 +6415,33 @@ class CrewConsole:
             band=band,
             correlation_id=correlation_id,
         )
+
+    def _handle_launch(self) -> list[str]:
+        """Testing aid (2026-11-28) -- "launch" presses Fire Shturm
+        (`_LAUNCH_DEVICE`/`_LAUNCH_CMD`, no clickable element, no arg) for
+        `_LAUNCH_PRESS_S`, then releases. Press/sleep/release runs on a
+        daemon thread so the caller's thread never blocks; the release is
+        sent in a `finally` so a failed or interrupted hold never leaves the
+        button down. Not an effector-sequence row: this exists only to test
+        whether the write lands at all."""
+        client = self.aircraft_client
+        if client is None:
+            return ["Unable, no aircraft link."]
+
+        def press() -> None:
+            try:
+                client.write_cockpit_switch(_LAUNCH_DEVICE, _LAUNCH_CMD, 1.0)
+                time.sleep(_LAUNCH_PRESS_S)
+            except Exception:
+                logger.warning("launch press failed", exc_info=True)
+            finally:
+                try:
+                    client.write_cockpit_switch(_LAUNCH_DEVICE, _LAUNCH_CMD, 0.0)
+                except Exception:
+                    logger.warning("launch release failed", exc_info=True)
+
+        threading.Thread(target=press, name="launch-press", daemon=True).start()
+        return ["Launching."]
 
     def _handle_radio_check(self) -> list[str]:
         """`[[BL-B81]]` -- "radio check" -> "Loud and clear." Reads
