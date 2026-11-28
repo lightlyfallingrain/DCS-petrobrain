@@ -114,6 +114,25 @@ with stops off. At the cap: ease collective and accept a slight descent; with no
 gain speed. Act early — once the left yaw runs there is nothing left to stop it. The stops knob's
 effect is unknown; worth a probe.
 
+### Correction: SAU channel B is the ALTITUDE channel (user, verbatim, 2026-11-28)
+
+> *"Ah, you are correct, B is altitude channel. In the image, adustable stops are the panel at top
+> right corner. And there is a know to adjust it, but I'm not sure what it does"*
+
+(The image: the pilot's AFCS console — an "ADJUSTABLE STOPS" panel top right with gauge, red OFF
+button, a knob and a "P ←→ t" toggle; an "ON / ADJUST STOPS" toggle on the top strip; YAW / ROLL /
+PITCH / ALT channel units below.) Prompted by the main loop noticing `SAU-B-SWITCH-PTR` is labelled
+"Autopilot Altitude Control" (Cyrillic В = высота).
+
+Consequences:
+- The 2026-11-20 note "B - adjustable stops channel. Just keep it turned ON" (`explore-notes.md`,
+  "SAU in mode 1") named the wrong unit. **Every sequence that presses `p_sau_b_channel_on` has been
+  switching the altitude hold ON**: `seat-pilot.md` at mission start (3013 pressed at 18:22:34 and
+  18:39:34 in sorties 1 and 2), `controls-to-petrovich.md` (M4) and `controls-to-player.md`.
+- So in both Petrovich flights the altitude channel was (at least commanded) on while the law flew
+  the collective — a further confound alongside H/K/T, unknown whether it engaged.
+- The "stops off" phase of the hand-flown sortie was the real adjustable stops, not channel B.
+
 ## Mode-2 fixes card (`2026-11-27-mode2-fixes-card.md`)
 
 User's words (verbatim):
