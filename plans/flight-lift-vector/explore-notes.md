@@ -96,7 +96,10 @@ Main-loop reading:
   (mode off), switch SAU H, K and T ON (and B ON). This doesn't wait for SAU stage 2; it fits the
   existing effector-sequence mechanism (a sequence file on a handover-to-player trigger). Any
   trigger that already exists for it should be reused.
-- **B (adjustable stops):** always ON, no other action.
+- **B (adjustable stops):** always ON, no other action. **Superseded 2026-11-28:** B is the
+  **altitude** channel (user: *"B is altitude channel"*); off on take, left off at hand-back. The
+  adjustable stops are SPUU-52 (device 19), switched ON by `seat-pilot.md`
+  (`docs/acceptance/2026-11-28-sortie-feedback.md`, `aircraft-layer/research/2026-11-28-mi24p-pedal-stops.md`).
 - **Stage 2 (using the SAU):** an aircraft-specific helper behind the per-aircraft profile (the
   Mi-24/Mi-8 have it, others don't). The law runs with it off and may switch channels and hold or
   release trim: trim held during an attitude or heading change, released once stable, so the SAU
