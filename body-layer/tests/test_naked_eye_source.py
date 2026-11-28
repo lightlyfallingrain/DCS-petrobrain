@@ -260,6 +260,7 @@ def _source(
     blocked_unit_names: frozenset[str] = frozenset(),
     firing: dict[str, Any] | None = None,
     agl_by_unit_name: dict[str, float] | None = None,
+    own_weapon_object_names: frozenset[str] = frozenset(),
 ) -> tuple[NakedEyePerceptionSource, FakeAircraftClient]:
     client = FakeAircraftClient(
         world_objects,
@@ -272,6 +273,7 @@ def _source(
         aircraft_client=client,  # type: ignore[arg-type]
         theatre=_THEATRE,
         world_model_conn=_FAKE_CONN,
+        own_weapon_object_names=own_weapon_object_names,
     )
     return source, client
 
@@ -681,6 +683,51 @@ def test_a_newly_visible_candidate_emits_one_observation() -> None:
     assert obs.derived_world_position is not None
     assert obs.derived_world_position.x == 100.0
     assert obs.derived_world_position.z == 0.0
+
+
+# --- `[[BL-B67]]` Stage 5: own-weapon exclusion ------------------------
+
+
+def test_own_weapon_object_name_is_excluded_from_candidates() -> None:
+    """A candidate whose `object_type` is in `own_weapon_object_names` is
+    dropped before it can ever become a contact -- exclusion only
+    (module docstring, "Own missiles must not become contacts")."""
+    world_objects = {
+        "objects": [_world_object(1, "Ataka_9M120", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(
+        world_objects, own_weapon_object_names=frozenset({"Ataka_9M120"})
+    )
+
+    assert source.poll(0.0, _ownship()) == []
+
+
+def test_own_weapon_object_name_exclusion_does_not_drop_other_candidates() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(1, "Ataka_9M120", lat_deg=100.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=100.0, lon_deg=0.1),
+        ]
+    }
+    source, _client = _source(
+        world_objects, own_weapon_object_names=frozenset({"Ataka_9M120"})
+    )
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == "OP_INFANTRY"
+
+
+def test_empty_own_weapon_object_names_is_a_true_no_op() -> None:
+    """Default behaviour is byte-identical -- a candidate that would have
+    been excluded is admitted exactly as before this field existed."""
+    world_objects = {
+        "objects": [_world_object(1, "Ataka_9M120", lat_deg=100.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    assert len(source.poll(0.0, _ownship())) == 1
 
 
 def test_admitted_candidate_with_clear_live_los_carries_a_relative_direction() -> None:
@@ -2438,6 +2485,11 @@ _PRESERVED_FIELDS: frozenset[str] = frozenset(
         "forest",
         "emit_mode",
         "trace_sink",
+        # `[[BL-B67]]` Stage 5 -- construction-time aircraft data
+        # (`atgm.toml`'s own exclusion set), never reassigned per-poll
+        # and never cleared on a mission reset, same shape as
+        # `forest`/`trace_sink` above.
+        "own_weapon_object_names",
     }
 )
 _PER_POLL_OVERWRITTEN_FIELDS: frozenset[str] = frozenset(

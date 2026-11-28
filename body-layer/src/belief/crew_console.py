@@ -171,6 +171,7 @@ from belief.optic_policy import SIGHT_SEARCH_NEAR_M as _POINT_NEAR_M
 from belief.optic_policy import SIGHT_SEARCH_WIDE_FAR_M as _POINT_FAR_M
 from belief.referent import Mention, ReferentMemory, resolve_referent
 from belief.speech import (
+    OutgoingSpeech,
     UrgentCall,
     _contact_report_text,
     render_attack_run_off,
@@ -5925,6 +5926,39 @@ class CrewConsole:
         # re-fires immediately once the geometry (or the now-unchanged
         # comparison) says to.
         return state
+
+    def drain_atgm_run_speech(
+        self,
+        speech: tuple[OutgoingSpeech, ...],
+        now_sim: float,
+        contact_id: str,
+    ) -> None:
+        """Speaks `belief.atgm_run.decide`'s own returned `speech` tuple,
+        in order (`[[BL-B67]]` Stage 7) -- `body.py`'s poll loop is the
+        only caller, right beside `drain_attack_run`, per that module's
+        own docstring: *"`say` is not an action here... `body.py`'s poll
+        loop (Stage 7) is the executor for both: `fire`/`select_station`
+        through `effector_engine`, `say` through the existing
+        `CrewConsole._print`/scheduler path."*
+
+        **Does not gate on `self.scheduler.busy_until_sim`** the way
+        `drain_attack_run` does -- that gate exists so a *dropped* BL-14
+        guidance line can be safely re-offered next tick (the state it
+        would have updated is rolled back when the gate holds). The ATGM
+        run's own speech is a one-shot narration of a state transition
+        that has *already happened* (a launch, an impact, a range call) --
+        there is nothing to re-offer next tick, and dropping it would
+        mean "Impact." or a launch line is sometimes silently never
+        spoken. `_print` itself still sequences multiple lines
+        correctly (module docstring on why `speech` can carry two lines
+        in one poll)."""
+        if not speech:
+            return
+        self._print(
+            [line.text for line in speech],
+            now_sim,
+            mentions=[Mention(kind="contact", id=contact_id, t_sim=now_sim)],
+        )
 
     def drain_where_is_it(
         self,

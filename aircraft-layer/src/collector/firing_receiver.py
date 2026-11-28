@@ -68,6 +68,7 @@ from schema.firing import (
     FiringParseError,
     FiringRawEvent,
     MissionClockSample,
+    OwnWeaponRawEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,126 @@ _RESTART_TOLERANCE_S: Final[float] = 0.5
 #: the `FIRING` entry is removed").
 _DEATH_KINDS: Final[frozenset[str]] = frozenset({"S_EVENT_DEAD", "S_EVENT_CRASH"})
 
+#: `[[BL-B67]]` Stage 5 -- how long an `OwnWeaponLedger` entry survives
+#: after its own `gone_t` is set (plan: "keeps entries 60s after
+#: gone_t"). Generous past any plausible poll gap on the body-layer side
+#: -- the consumer (`perception.own_weapons.OwnWeaponTracker`) only ever
+#: needs the entry to still exist for the one or two polls immediately
+#: after `gone_t`, to diff against its own last-seen snapshot and emit
+#: `missile_gone`; this is slack for a missed poll, not a feature. Same
+#: no-tuning-mechanism-yet posture as every other behaviour-affecting
+#: constant in this module (see `FIRING_MIN_VISIBLE_S`'s own note).
+OWN_WEAPON_RETENTION_S: Final[float] = 60.0
+
+#: `[[BL-B67]]` Stage 5 -- the ledger's own cap (plan: "caps at 32"), well
+#: above "the run never has more than one in flight" (the Hook-side
+#: `PB_OWN_WEAPONS` cap is 8) -- this side's own entries additionally
+#: linger for `OWN_WEAPON_RETENTION_S` after `gone_t`, so a busy sortie
+#: with several runs across the retention window needs headroom beyond
+#: the Hook's own in-flight cap. The oldest entry (by `shot_t`) is dropped
+#: when a new one would exceed this.
+OWN_WEAPON_LEDGER_CAP: Final[int] = 32
+
+
+class OwnWeaponEntry:
+    """One of our own weapons, as the ledger currently believes it
+    (`[[BL-B67]]` Stage 5 plan: "`{type, category, guidance, exists_at_
+    shot, shot_t, gone_t | None}`") -- mutable, updated in place for the
+    same reason `ActiveEmitter` above is."""
+
+    __slots__ = (
+        "category",
+        "exists_at_shot",
+        "gone_t",
+        "guidance",
+        "shot_t",
+        "type_name",
+    )
+
+    def __init__(
+        self,
+        type_name: str | None,
+        category: int | None,
+        guidance: int | None,
+        exists_at_shot: bool | None,
+        shot_t: float,
+        gone_t: float | None = None,
+    ) -> None:
+        self.type_name = type_name
+        self.category = category
+        self.guidance = guidance
+        self.exists_at_shot = exists_at_shot
+        self.shot_t = shot_t
+        self.gone_t = gone_t
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "type_name": self.type_name,
+            "category": self.category,
+            "guidance": self.guidance,
+            "exists_at_shot": self.exists_at_shot,
+            "shot_t": self.shot_t,
+            "gone_t": self.gone_t,
+        }
+
+
+class OwnWeaponLedger:
+    """A small, `seq`-keyed ledger of our own weapons (`[[BL-B67]]` Stage
+    5 plan: "a small `OwnWeaponLedger` beside `EmitterTracker`, fed the
+    same batches"). Composed directly into `EmitterTracker` (below) --
+    `ingest()` is called from the same `EmitterTracker.ingest()` call
+    that feeds the firing-emitter latch, and `snapshot()` feeds `GET
+    /firing/latest`'s own `"own_weapons"` key, mirroring `EmitterTracker`
+    itself in every structural respect (a plain `dict`, no lock, "dict
+    mutation/iteration under the GIL is effectively atomic enough").
+
+    **Mission-restart reset is the caller's job, not this class's own.**
+    `EmitterTracker.ingest` already detects `dcs_model_time_s` regression
+    before calling into this ledger -- `clear()` is called from there,
+    the same single place every other state in this module resets on a
+    mission boundary, rather than this class re-deriving the same check
+    independently."""
+
+    def __init__(self) -> None:
+        self._entries: dict[int, OwnWeaponEntry] = {}
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def ingest(self, own_events: tuple[OwnWeaponRawEvent, ...], now: float) -> None:
+        """Apply this poll's own-weapon entries, in order, then prune
+        every entry whose `gone_t` is more than `OWN_WEAPON_RETENTION_S`
+        old, and enforce `OWN_WEAPON_LEDGER_CAP` (plan: "caps at 32")."""
+        for event in own_events:
+            if event.kind == "OWN_SHOT":
+                self._entries[event.seq] = OwnWeaponEntry(
+                    type_name=event.type_name,
+                    category=event.category,
+                    guidance=event.guidance,
+                    exists_at_shot=event.exists_at_shot,
+                    shot_t=event.t_sim,
+                )
+            elif event.kind == "OWN_GONE":
+                existing = self._entries.get(event.seq)
+                if existing is not None:
+                    existing.gone_t = event.t_sim
+
+        for seq in [
+            seq
+            for seq, entry in self._entries.items()
+            if entry.gone_t is not None and now - entry.gone_t > OWN_WEAPON_RETENTION_S
+        ]:
+            del self._entries[seq]
+
+        while len(self._entries) > OWN_WEAPON_LEDGER_CAP:
+            oldest_seq = min(self._entries, key=lambda seq: self._entries[seq].shot_t)
+            del self._entries[oldest_seq]
+
+    def snapshot(self) -> dict[str, object]:
+        """A plain, JSON-ready dict, `{str(seq): entry.to_dict()}` --
+        `GET /firing/latest`'s own `"own_weapons"` key."""
+        return {str(seq): entry.to_dict() for seq, entry in self._entries.items()}
+
 
 class ActiveEmitter:
     """One unit's currently-tracked emitter state. Mutable (plain
@@ -226,6 +347,11 @@ class EmitterTracker:
         #: builds that on its own side (deferred to Stage 4, out of this
         #: stage's scope).
         self._last_mission_clock: MissionClockSample | None = None
+        #: `[[BL-B67]]` Stage 5 -- composed directly into this tracker
+        #: (`OwnWeaponLedger`'s own docstring on why), fed the same
+        #: batches and cleared on the same mission-restart detection this
+        #: `ingest()` already does for `self._active`.
+        self._own_weapons = OwnWeaponLedger()
 
     def ingest(self, batch: FiringEventBatch) -> None:
         """Apply one poll's drained events, in order, then prune every
@@ -248,11 +374,13 @@ class EmitterTracker:
                 now,
             )
             self._active.clear()
+            self._own_weapons.clear()
         self._last_dcs_model_time_s = now
         self._last_mission_clock = batch.mission_clock
 
         for event in batch.events:
             self._apply(event, now)
+        self._own_weapons.ingest(batch.own_events, now)
 
         for name in [
             name
@@ -332,6 +460,7 @@ class EmitterTracker:
                 if self._last_mission_clock is not None
                 else None
             ),
+            "own_weapons": self._own_weapons.snapshot(),
         }
 
 

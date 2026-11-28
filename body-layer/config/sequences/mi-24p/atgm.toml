@@ -1,0 +1,40 @@
+# Aircraft data for the ATGM run (`[[BL-B67]]`, `plans/bl-b67-atgm-run/plan.md`
+# Stage 5/6) -- data, not code, like `effectors.toml`'s own per-aircraft
+# curated files. `body-layer/src/belief/atgm_config.py` loads this; a bad
+# or missing file is never fatal (same D5 posture every other per-aircraft
+# config in this codebase takes) -- the run falls back to its own code
+# defaults, which predate this file and are still correct for everything
+# this file does not override.
+
+[guided_filter]
+# The `S_EVENT_SHOT` weapon's own `getDesc().category`/`.guidance` --
+# confirmed live, Stage 0 sortie Q6 (`docs/acceptance/
+# 2026-11-27-bl-b67-stage0-probe-feedback.md`): "guided filter
+# category == 1 and guidance == 8". An unguided `S_EVENT_SHOT` (S-8
+# rockets also raise one) has a different category/guidance and is
+# never mistaken for an ATGM launch.
+category = 1
+guidance = 8
+
+[knob_steps]
+# Knob step -> payload station index (Q3, re-probed and confirmed same
+# day, user: "this is true"): "step n fires Stations[n]" -- a 1:1
+# identity mapping on this aircraft. Declared here, not assumed in code,
+# so a future aircraft whose knob/station numbering does not coincide is
+# a config change here, not a code change.
+1 = 1
+2 = 2
+3 = 3
+4 = 4
+5 = 5
+6 = 6
+7 = 7
+8 = 8
+
+[exclusion]
+# `OWN_WEAPON_OBJECT_NAMES` (Q2, exclusion only) -- the ATGM/rocket
+# world-object `Name`(s) `perception.naked_eye_source` drops before they
+# can ever become a contact (module docstring, "Own missiles must not
+# become contacts"). Confirmed live, Stage 0 sortie:
+# `Ataka_9M120`, `AT_6` (9M114 Shturm), `C_8CM`, `C_8` (S-8 rocket).
+own_weapon_object_names = ["Ataka_9M120", "AT_6", "C_8CM", "C_8"]

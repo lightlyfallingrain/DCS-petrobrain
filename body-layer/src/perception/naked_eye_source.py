@@ -617,6 +617,16 @@ class NakedEyePerceptionSource:
     peripheral_stimulus_ids: frozenset[int] = field(
         default_factory=frozenset, repr=False
     )
+    #: `[[BL-B67]]` Stage 5 (`plans/bl-b67-atgm-run/plan.md`, "Own missiles
+    #: must not become contacts") -- world-object `Name`s (`WorldObjectCandidate.
+    #: object_type`) dropped before clustering ever sees them, exclusion
+    #: only: nothing finds our own missile by name, this only keeps it
+    #: from becoming a phantom contact. Default empty (a true no-op) --
+    #: `body.py` wires this from `belief.atgm_config.AtgmConfig.
+    #: own_weapon_object_names` (`config/sequences/<aircraft-dir>/atgm.toml`'s
+    #: `[exclusion]` table) at startup, same per-aircraft-data posture as
+    #: `optic`/`scan_plan`.
+    own_weapon_object_names: frozenset[str] = field(default_factory=frozenset)
 
     #: `object_id -> last-seen t_sim`, not a per-poll frozenset (2C, module
     #: docstring point 4a) -- a moving cone makes poll-indexing wrong (a
@@ -765,6 +775,17 @@ class NakedEyePerceptionSource:
                 raw_objects, world_objects.get("dcs_model_time_s"), line_of_sight
             )
         )
+        # `[[BL-B67]]` Stage 5 -- our own in-flight ATGM/rocket, dropped
+        # before `filter_ownship`/clustering ever see it (module docstring,
+        # "Own missiles must not become contacts"). Cheap and unconditional:
+        # `own_weapon_object_names` is empty by default, so this is a
+        # true no-op everywhere it is not explicitly wired.
+        if self.own_weapon_object_names:
+            raw_objects = [
+                obj
+                for obj in raw_objects
+                if obj.get("object_type") not in self.own_weapon_object_names
+            ]
         all_candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(

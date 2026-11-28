@@ -87,9 +87,15 @@ project has no channel for.
 
 Wire format (this script -> collector), UDP, one JSON object per poll
 (matches `schema.firing.FiringEventBatch.from_wire`):
-    {"payload": "<count>|<dcs_model_time_s>|<entries>", "bridge_call_ms": <float>,
+    {"payload": "<count>|<dcs_model_time_s>|<entries>|<own_entries>", "bridge_call_ms": <float>,
      "mission_clock": "<abs_time_s>|<year>|<month>|<day>"}
 `entries` is `"<kind>:<t>:<initiator>:<targets_ownship01>:<x>:<z>;..."`.
+**`<own_entries>` (`BL-B67` Stage 5):** `"<OWN_SHOT|OWN_GONE
+entry>;..."` -- `"OWN_SHOT:<t>:<seq>:<type>:<category>:<guidance>:
+<exists01>"` (queued by the event handler, `EVENT_REGISTER_CODE`'s own
+`isPlayerShot` branch) or `"OWN_GONE:<t>:<seq>"` (queued by this poll's
+own drain, below). See `schema.firing`'s own module docstring for the
+full shape and the independent parser-side bound on `<type>`.
 `mission_clock` (`BL-B124`, amendment 2026-11-25) carries either
 `"<abs_time_s>|<year>|<month>|<day>"` or the literal sentinel
 `"unavailable"` (the guarded `timer.getAbsTime()`/`env.mission.date`
@@ -165,6 +171,15 @@ local EVENT_REGISTER_CODE = [[
 if not PB_FIRING_HANDLER_REGISTERED then
     PB_FIRING_EVENT_QUEUE = {}
     PB_ACTIVE_FIRING_UNITS = PB_ACTIVE_FIRING_UNITS or {}
+    -- `BL-B67` Stage 5 -- our own in-flight weapon objects, kept
+    -- across polls in this same scripting state (file header's own
+    -- "one set of globals across calls" note). `PB_OWN_WEAPON_SEQ` is a
+    -- monotonically increasing counter, never a DCS object id -- the
+    -- wire-local key `OwnWeaponLedger`/`OwnWeaponTracker` (collector and
+    -- body-layer sides) key every own-weapon entry by.
+    PB_OWN_WEAPONS = PB_OWN_WEAPONS or {}
+    PB_OWN_WEAPON_SEQ = PB_OWN_WEAPON_SEQ or 0
+    PB_OWN_WEAPON_QUEUE = PB_OWN_WEAPON_QUEUE or {}
     local eventNames = {}
     for name, id in pairs(world.event) do
         eventNames[id] = name
@@ -196,6 +211,32 @@ if not PB_FIRING_HANDLER_REGISTERED then
         local okPos, pos = pcall(function() return initiator:getPosition() end)
         if not okPos or pos == nil or pos.p == nil then return nil, nil end
         return pos.p.x, pos.p.z
+    end
+    -- `BL-B67` Stage 5 -- `initiator == world.getPlayer()`, the same
+    -- name comparison `targetsOwnship` above already makes against
+    -- `event.target`. `pcall`-guarded throughout, same defensive posture
+    -- as every other field read here (a unit that died in the same frame
+    -- as the event can raise on `getName()`/`getID()`).
+    local function isPlayerShot(initiator)
+        if initiator == nil then return false end
+        local okP, player = pcall(world.getPlayer)
+        if not okP or player == nil then return false end
+        local playerName = safeName(player)
+        local initName = safeName(initiator)
+        if playerName == nil or initName == nil then return false end
+        return playerName == initName
+    end
+    -- `BL-B67` Stage 5 -- one own-weapon entry string, sanitised
+    -- before it ever reaches the queue (truncated to 48 characters,
+    -- `:;|` replaced -- `schema.firing`'s own independent parser-side
+    -- bound checks this again, never trusting that this truncation
+    -- happened, per that module's docstring).
+    local function sanitizeTypeName(raw)
+        if raw == nil then return "nil" end
+        local s = tostring(raw)
+        if #s > 48 then s = s:sub(1, 48) end
+        s = s:gsub("[:;|]", "_")
+        return s
     end
     local handler = {}
     function handler:onEvent(event)
@@ -231,6 +272,58 @@ if not PB_FIRING_HANDLER_REGISTERED then
             .. ":" .. ownship01
             .. ":" .. xStr
             .. ":" .. zStr
+
+        -- `BL-B67` Stage 5 -- our own `S_EVENT_SHOT` only. Every
+        -- field read off `event.weapon` is its own `pcall`, so one bad
+        -- field (e.g. `getDesc()` raising on an exotic weapon type)
+        -- degrades that one field to "nil" rather than losing the whole
+        -- own-weapon entry.
+        if kind == "S_EVENT_SHOT" and isPlayerShot(event.initiator) then
+            PB_OWN_WEAPON_SEQ = PB_OWN_WEAPON_SEQ + 1
+            local seq = PB_OWN_WEAPON_SEQ
+            local weapon = event.weapon
+            local existsOk, exists = pcall(function()
+                return weapon ~= nil and weapon:isExist()
+            end)
+            exists = existsOk and exists == true
+            local typeOk, typeName = pcall(function() return weapon:getTypeName() end)
+            if not typeOk then typeName = nil end
+            local category, guidance = nil, nil
+            local descOk, desc = pcall(function() return weapon:getDesc() end)
+            if descOk and type(desc) == "table" then
+                category = desc.category
+                guidance = desc.guidance
+            end
+            if exists then
+                -- Capped at 8 (plan: "the run never has more than one in
+                -- flight") -- the oldest tracked weapon is dropped first,
+                -- same "drop the oldest" rule `OwnWeaponLedger`'s own
+                -- retention cap uses, kept in lock-step rather than
+                -- derived later.
+                local count = 0
+                local oldestSeq, oldestAt = nil, nil
+                for s, w in pairs(PB_OWN_WEAPONS) do
+                    count = count + 1
+                    if oldestAt == nil or w.at < oldestAt then
+                        oldestSeq, oldestAt = s, w.at
+                    end
+                end
+                if count >= 8 and oldestSeq ~= nil then
+                    PB_OWN_WEAPONS[oldestSeq] = nil
+                end
+                PB_OWN_WEAPONS[seq] = { weapon = weapon, at = event.time }
+            end
+            local categoryStr = category ~= nil and tostring(category) or "nil"
+            local guidanceStr = guidance ~= nil and tostring(guidance) or "nil"
+            local existsStr = exists and "1" or "0"
+            PB_OWN_WEAPON_QUEUE[#PB_OWN_WEAPON_QUEUE + 1] = "OWN_SHOT"
+                .. ":" .. tostring(event.time)
+                .. ":" .. tostring(seq)
+                .. ":" .. sanitizeTypeName(typeName)
+                .. ":" .. categoryStr
+                .. ":" .. guidanceStr
+                .. ":" .. existsStr
+        end
     end
     world.addEventHandler(handler)
     PB_FIRING_HANDLER_REGISTERED = true
@@ -259,7 +352,28 @@ local queue = PB_FIRING_EVENT_QUEUE or {}
 local out = {}
 for i = 1, #queue do out[i] = queue[i] end
 PB_FIRING_EVENT_QUEUE = {}
-local payload = tostring(#out) .. "|" .. tostring(timer.getTime()) .. "|" .. table.concat(out, ";")
+-- `BL-B67` Stage 5 -- drains `PB_OWN_WEAPON_QUEUE` (this poll's own
+-- `OWN_SHOT` entries, queued by the event handler above) and checks
+-- every still-kept `PB_OWN_WEAPONS` entry's `isExist()`, queuing
+-- `OWN_GONE` and dropping it the poll it turns false. `pcall`-guarded --
+-- a weapon object can itself raise on `isExist()` once sufficiently
+-- gone, same defensive posture as every other DCS API call in this file.
+local ownOut = {}
+local ownQueue = PB_OWN_WEAPON_QUEUE or {}
+for i = 1, #ownQueue do ownOut[#ownOut + 1] = ownQueue[i] end
+PB_OWN_WEAPON_QUEUE = {}
+local stillTracked = {}
+for seq, entry in pairs(PB_OWN_WEAPONS or {}) do
+    local okExist, stillExists = pcall(function() return entry.weapon:isExist() end)
+    if okExist and stillExists == true then
+        stillTracked[seq] = entry
+    else
+        ownOut[#ownOut + 1] = "OWN_GONE:" .. tostring(timer.getTime()) .. ":" .. tostring(seq)
+    end
+end
+PB_OWN_WEAPONS = stillTracked
+local payload = tostring(#out) .. "|" .. tostring(timer.getTime()) .. "|"
+    .. table.concat(out, ";") .. "|" .. table.concat(ownOut, ";")
 local absOk, absTime = pcall(timer.getAbsTime)
 local dateOk, date = pcall(function() return env.mission.date end)
 local clockStr = "unavailable"

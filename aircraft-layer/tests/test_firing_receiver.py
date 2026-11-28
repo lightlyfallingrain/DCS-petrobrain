@@ -14,10 +14,13 @@ from collector.firing_receiver import (
     FIRING_MIN_VISIBLE_S,
     FIRING_WATCHDOG_S,
     LAUNCH_FLASH_DURATION_S,
+    OWN_WEAPON_LEDGER_CAP,
+    OWN_WEAPON_RETENTION_S,
     EmitterTracker,
     FiringEventsReceiver,
+    OwnWeaponLedger,
 )
-from schema.firing import FiringEventBatch, FiringRawEvent
+from schema.firing import FiringEventBatch, FiringRawEvent, OwnWeaponRawEvent
 
 
 def _batch(t_sim: float, *events: FiringRawEvent) -> FiringEventBatch:
@@ -462,3 +465,125 @@ def test_non_json_datagram_is_dropped() -> None:
     _run_receiver_briefly(receiver)
 
     assert tracker.snapshot()["active"] == {}
+
+
+# --- `[[BL-B67]]` Stage 5: `OwnWeaponLedger` -----------------------------
+
+
+def _own_shot(
+    seq: int,
+    t_sim: float,
+    *,
+    type_name: str | None = "Ataka_9M120",
+    category: int | None = 1,
+    guidance: int | None = 8,
+    exists_at_shot: bool | None = True,
+) -> OwnWeaponRawEvent:
+    return OwnWeaponRawEvent(
+        kind="OWN_SHOT",
+        t_sim=t_sim,
+        seq=seq,
+        type_name=type_name,
+        category=category,
+        guidance=guidance,
+        exists_at_shot=exists_at_shot,
+    )
+
+
+def _own_gone(seq: int, t_sim: float) -> OwnWeaponRawEvent:
+    return OwnWeaponRawEvent(kind="OWN_GONE", t_sim=t_sim, seq=seq)
+
+
+def test_own_weapon_ledger_shot_then_gone_across_batches() -> None:
+    ledger = OwnWeaponLedger()
+    ledger.ingest((_own_shot(1, 10.0),), now=10.0)
+    snapshot = ledger.snapshot()
+    assert snapshot["1"] == {
+        "type_name": "Ataka_9M120",
+        "category": 1,
+        "guidance": 8,
+        "exists_at_shot": True,
+        "shot_t": 10.0,
+        "gone_t": None,
+    }
+
+    ledger.ingest((_own_gone(1, 20.0),), now=20.0)
+    entry = ledger.snapshot()["1"]
+    assert isinstance(entry, dict)
+    assert entry["gone_t"] == 20.0
+
+
+def test_own_weapon_ledger_gone_for_unknown_seq_is_a_no_op() -> None:
+    ledger = OwnWeaponLedger()
+    ledger.ingest((_own_gone(99, 5.0),), now=5.0)
+    assert ledger.snapshot() == {}
+
+
+def test_own_weapon_ledger_retention_prunes_after_gone_plus_window() -> None:
+    ledger = OwnWeaponLedger()
+    ledger.ingest((_own_shot(1, 0.0),), now=0.0)
+    ledger.ingest((_own_gone(1, 1.0),), now=1.0)
+    assert "1" in ledger.snapshot()
+
+    ledger.ingest((), now=1.0 + OWN_WEAPON_RETENTION_S - 1.0)
+    assert "1" in ledger.snapshot()
+
+    ledger.ingest((), now=1.0 + OWN_WEAPON_RETENTION_S + 1.0)
+    assert ledger.snapshot() == {}
+
+
+def test_own_weapon_ledger_cap_drops_the_oldest_by_shot_t() -> None:
+    ledger = OwnWeaponLedger()
+    for seq in range(1, OWN_WEAPON_LEDGER_CAP + 2):
+        ledger.ingest((_own_shot(seq, float(seq)),), now=float(seq))
+    snapshot = ledger.snapshot()
+    assert len(snapshot) == OWN_WEAPON_LEDGER_CAP
+    assert "1" not in snapshot
+    assert str(OWN_WEAPON_LEDGER_CAP + 1) in snapshot
+
+
+def test_own_weapon_ledger_clear() -> None:
+    ledger = OwnWeaponLedger()
+    ledger.ingest((_own_shot(1, 0.0),), now=0.0)
+    ledger.clear()
+    assert ledger.snapshot() == {}
+
+
+def test_emitter_tracker_snapshot_carries_own_weapons() -> None:
+    tracker = EmitterTracker()
+    batch = FiringEventBatch(
+        dcs_model_time_s=5.0,
+        received_wall_clock_s=0.0,
+        bridge_call_ms=0.0,
+        events=(),
+        own_events=(_own_shot(1, 5.0),),
+    )
+    tracker.ingest(batch)
+    own_weapons = tracker.snapshot()["own_weapons"]
+    assert isinstance(own_weapons, dict)
+    assert "1" in own_weapons
+
+
+def test_emitter_tracker_mission_restart_clears_own_weapons_too() -> None:
+    tracker = EmitterTracker()
+    tracker.ingest(
+        FiringEventBatch(
+            dcs_model_time_s=100.0,
+            received_wall_clock_s=0.0,
+            bridge_call_ms=0.0,
+            events=(),
+            own_events=(_own_shot(1, 100.0),),
+        )
+    )
+    assert "1" in tracker.snapshot()["own_weapons"]  # type: ignore[operator]
+
+    tracker.ingest(
+        FiringEventBatch(
+            dcs_model_time_s=0.0,
+            received_wall_clock_s=0.0,
+            bridge_call_ms=0.0,
+            events=(),
+            own_events=(),
+        )
+    )
+    assert tracker.snapshot()["own_weapons"] == {}
