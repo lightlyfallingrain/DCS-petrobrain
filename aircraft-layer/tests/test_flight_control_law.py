@@ -85,7 +85,6 @@ _LIMITS = """
 local LIMITS = {
     takeover_level_bank_deg = 5.0,
     max_turn_bank_deg = 20.0,
-    max_climb_vs_mps = 5.0,
     max_accel_mps2 = 1.0,
     heading_band_deg = 5.0,
     alt_band_frac = 0.10,
@@ -146,7 +145,6 @@ local PROFILE = {
     -- change any pre-existing assertion -- confirmed by running the
     -- suite with these added, not assumed.
     break_max_bank_deg = 60.0,
-    break_floor_agl_m = 50.0,
     break_height_give_band_m = 30.0,
     -- LV-2 fix pass (review-lv2.md required fix 1) -- break-only
     -- shaper bandwidth so `break_max_bank_deg`'s own cap, above, is
@@ -221,6 +219,20 @@ local PROFILE = {
     hover_pedal_band_forward = 2.0,
     goal_jerk_hover_mps3 = 0.5,
     goal_jerk_edge_mps3 = 5.0,
+    -- BL-16 M3 (`plans/flight-lift-vector/plan.md`, "M3 amendment") --
+    -- the terrain look-ahead's own loop constants. No test in this
+    -- file (other than `TestM3*`) ever sets `measured.terrain`, so the
+    -- look-ahead itself stays inert regardless of these values; they
+    -- are here only so `law_update` finds non-nil fields. Mirrors
+    -- `flight_profile.lua`'s own shipped defaults.
+    terrain_lead_s = 2.0,
+    terrain_tau_min_s = 1.0,
+    terrain_min_speed_mps = 3.0,
+    terrain_max_age_s = 5.0,
+    terrain_lookahead_enabled = true,
+    w_ref_lead_max_mps = 2.0,
+    speed_give_floor_kmh = 100.0,
+    terrain_ease_down_mps = 10.0,
 }
 """
 
@@ -1537,18 +1549,27 @@ class TestCollectiveRateCapNearPedalLimit:
     mirror the review's own mutation, on the reverted sign
     (`0.42`/`-0.92`); `h_m`/`alt_goal_m` mirror `TestRotorEnvelopeGuards
     .test_well_clear_of_both_guards_collective_rises_freely` so only
-    the pedal guard is ever in question here, with `w_mps` widened
-    (-5.0 -> -10.0) only to confirm first that this scenario's own
-    nominal (uncapped) rate (0.447, by direct computation against the
-    real law) clears `COLLECTIVE_RATE_CAP_NEAR_PEDAL_LIMIT` (0.3) --
-    the -5.0 scenario's own nominal rate (0.177) sits below 0.3
-    regardless of the guard, so a reading at or below 0.3 there would
-    prove nothing."""
+    the pedal guard is ever in question here.
+
+    M3 amendment (`plans/flight-lift-vector/plan.md`, section C):
+    removing `max_climb_vs_mps`'s hard clamp also removed the
+    artificial one-step jump it used to put into `w_ref` whenever
+    `measured.w_mps` sat outside `[-5, 5]` -- that jump was what drove
+    this scenario's own nominal (uncapped) collective rate above the
+    guard's 0.3 threshold before M3; without it, the SAME scenario's
+    nominal rate no longer clears 0.3 at all (measured: ~0.18,
+    regardless of how negative `w_mps` is). Each driver below overrides
+    `PROFILE.alt_accel_cap_mps2` to a locally generous 10.0 (this
+    test's own copy of the profile table, not the shared fixture) so
+    the vertical channel's own desired acceleration is large enough to
+    isolate the pedal guard again -- the guard itself, not this now-
+    unrelated accel-cap value, is what each assertion is about."""
 
     def test_caps_a_rising_collective_near_the_scarce_positive_limit(
         self,
     ) -> None:
         driver = f"""
+PROFILE.alt_accel_cap_mps2 = 10.0
 local measured = {_measured(h_m=100.0, w_mps=-10.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
@@ -1565,6 +1586,7 @@ print(string.format("%.6f", next_state.dbg_u_c_rate))
         self,
     ) -> None:
         driver = f"""
+PROFILE.alt_accel_cap_mps2 = 10.0
 local measured = {_measured(h_m=100.0, w_mps=-10.0)}
 local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, nil, PROFILE)
 state.alt_goal_m = 1000.0
@@ -2853,12 +2875,17 @@ end
             assert theta_i == 0.0  # theta_speed_give never engages
 
     def test_near_the_break_floor_engages_at_pre_amendment_strength(self) -> None:
-        """Entry height 50 m: `break_floor = max(50, 50-100) = 50`, so
-        `height_margin_m = 0` -- `height_available_frac` is 0 and
-        `effective_shortfall` equals the raw `shortfall` exactly, the
-        same as the ordinary (non-break) chain would have produced
-        before this amendment."""
-        rows = self._run_scenario(entry_h_m=50.0, steps=10)
+        """Entry height 40 m (this file's own `LIMITS.floor_agl_m`,
+        M3's `f_eff` -- the seed's own `alt_m` is 500 m above entry, so
+        the ordinary AGL-goal floor never binds below it): `break_floor
+        = max(40, 40-100) = 40`, so `height_margin_m = 0` --
+        `height_available_frac` is 0 and `effective_shortfall` equals
+        the raw `shortfall` exactly, the same as the ordinary
+        (non-break) chain would have produced before this amendment.
+        M3 amendment: `entry_h_m` moved from 50 to 40 -- `break_floor`
+        is now `f_eff` (this file's `LIMITS.floor_agl_m`, 40), not the
+        superseded, independent `profile.break_floor_agl_m` (50)."""
+        rows = self._run_scenario(entry_h_m=40.0, steps=10)
         for shortfall, effective, theta_i, _phi_d in rows:
             assert shortfall > 0.3
             assert abs(effective - shortfall) < 1e-6
@@ -2881,29 +2908,43 @@ end
 
 
 class TestLV2BreakFloorIsBreakOnly:
-    """LV-2 amendment, section D -- `break_floor_agl_m` (50.0, shipped
-    `flight_profile.lua`) replaces `limits.floor_agl_m` (40.0, unchanged)
-    only in the break-floor clamp `law_update` already computed (U11
-    answered, 2026-11-27, verbatim: "only breaks"). A break entered at
-    120 m AGL with `break_max_height_loss_m` (100, unchanged `LIMITS`)
-    would have floored at `max(40, 120-100) = 40` before this amendment;
-    it now floors at `max(50, 20) = 50` -- the new, higher, break-only
-    value, not the old one."""
+    """M3 amendment (`plans/flight-lift-vector/plan.md`, section A) --
+    **superseded**: `profile.break_floor_agl_m`, independent of
+    `limits.floor_agl_m`, is REMOVED ("one floor is better, use 50 m" --
+    user). The break floor is now `max(f_eff, entry_h_m -
+    break_max_height_loss_m)`, the SAME `f_eff` every other command
+    shares -- U11's old "only breaks" answer no longer applies; there is
+    one floor. For a barometric goal (whose explicit-AGL-goal exception,
+    U18, never applies), `f_eff` is simply `limits.floor_agl_m` (40, this
+    file's own `LIMITS`) regardless of how low the commanded barometric
+    number is -- the technique below (previously forcing `alt_goal_m`
+    low directly) is updated to a barometric goal for exactly that
+    reason: under M3 an explicit low AGL goal would instead PULL `f_eff`
+    down with it (U18), defeating the point of this probe."""
 
-    def test_break_floor_converges_near_the_new_50m_floor_not_the_old_40m(
+    def test_break_floor_converges_near_f_eff_not_the_entry_height_loss_budget(
         self,
     ) -> None:
         driver = """
 local PROFILE = dofile("{profile_path}").PROFILES["Mi-24P"]
 local measured = {measured}
 local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, nil, PROFILE)
--- Force a far-below floor so the shaper would chase it if the break
--- floor did not intervene (same technique as `TestBreakHeightFloor`).
-state.alt_goal_m = 0.0
+-- A barometric goal far below any floor -- `f_eff` for a barometric
+-- goal is `limits.floor_agl_m` regardless (U18 never applies), so this
+-- forces the shaper to chase a target the break floor must then catch,
+-- without also pulling `f_eff` itself down (the AGL-goal case would).
+state.alt_goal_ref = "baro"
+state.alt_goal_m = -10000.0
 state = flight_control.law_apply_goal(state, { heading_deg = 90.0, turn_rate_deg_s = 40.0 }, LIMITS, PROFILE)
 local dt = 0.05
 local min_h_ref = state.h_ref
-for i = 1, 400 do
+-- 1200 steps (60 s model time), not 400 -- the M3 power governor
+-- (section C) bounds the descent rate to `measured.w_mps +-
+-- w_ref_lead_max_mps` once collective bottoms at -1 (this static
+-- `measured` table never updates, so that bound is a fixed -2 m/s),
+-- slower than the old hard `max_climb_vs_mps` cap (5 m/s) this probe
+-- was originally timed against -- 80 m (120 -> 40) at 2 m/s needs 40 s.
+for i = 1, 1200 do
     state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
     if state.h_ref < min_h_ref then min_h_ref = state.h_ref end
 end
@@ -2919,11 +2960,11 @@ print(string.format("%.6f", min_h_ref))
         )
         lines = _run(driver)
         min_h_ref = float(lines[0])
-        # Converges close to the new 50 m floor -- a regression to the
-        # old `limits.floor_agl_m` (40) would settle near ~41, failing
-        # this bound.
-        assert min_h_ref >= 50.0 - 1e-6
-        assert min_h_ref < 55.0
+        # `f_eff` (`LIMITS.floor_agl_m`, 40) exceeds the entry-height-
+        # loss budget (120 - 100 = 20), so `f_eff` itself is what the
+        # break floor converges to, not the loss budget.
+        assert min_h_ref >= 40.0 - 1e-6
+        assert min_h_ref < 45.0
 
 
 #: LV-2 fix pass (review-lv2.md required fix 1) -- the real closed-loop

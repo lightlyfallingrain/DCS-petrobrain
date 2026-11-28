@@ -96,11 +96,12 @@ M.PROFILES["Mi-24P"] = {
     -- deg/s commanded per degree of drift. Owed by M0-E.
     k_heading_track = 0.3,
 
-    -- Altitude/speed channel accel limits, before the commanded
-    -- `max_climb_vs_mps`/`max_accel_mps2` ceilings (body-layer
-    -- tunables) clip the resulting rate, and before LV-1's own
-    -- `schedule_gain_min`/`schedule_full_speed_kmh` scale them by
-    -- speed. Owed by M0-E.
+    -- Altitude/speed channel accel limits, before the commanded `max_
+    -- accel_mps2` ceiling (body-layer tunable; the altitude side's own
+    -- `max_climb_vs_mps` ceiling was REMOVED by M3's power governor,
+    -- below) clips the resulting rate, and before LV-1's own `schedule_
+    -- gain_min`/`schedule_full_speed_kmh` scale them by speed. Owed by
+    -- M0-E.
     alt_accel_cap_mps2 = 1.0,
     -- LV-1 amendment (2026-11-24, fourth re-fly, Q2 "brisk"/E14): raised
     -- 0.5 -> 1.9 -- the user's own acceleration (150->250 km/h in ~20 s,
@@ -334,15 +335,14 @@ M.PROFILES["Mi-24P"] = {
     -- row) -- the 40 deg/s override ceiling itself still binds
     -- promptly at the new bandwidth.
     break_max_bank_deg = 60.0,
-    -- Break-only safety floor (D) -- 50.0 m AGL, replacing `fc_limits.
-    -- floor_agl_m` (40.0, unchanged) only in the break-floor clamp
-    -- `law_update` already computes; ordinary flight and the unpark
-    -- seed clamp keep reading `floor_agl_m` (U11 answered, 2026-11-27,
-    -- verbatim: "only breaks"). Both height budgets apply together --
-    -- `break_max_height_loss_m` (100.0, `fc_limits`, unchanged) is the
-    -- other one, via the same `max()` the break-floor clamp already
-    -- used.
-    break_floor_agl_m = 50.0,
+    -- `profile.break_floor_agl_m` is REMOVED (BL-16 M3, `plans/
+    -- flight-lift-vector/plan.md`, section A) -- "one floor is better,
+    -- use 50 m" (user). The break floor is now `max(F_eff, break_entry_
+    -- h_m - break_max_height_loss_m)`, where `F_eff` (derived each
+    -- `law_update` step, never stored: `min(limits.floor_agl_m, AGL
+    -- goal)` for an AGL goal, `limits.floor_agl_m` for barometric) is
+    -- the ONE effective floor every ordinary command, the unpark seed
+    -- and a break all now share.
     -- Height-gives-first band (C) -- how many metres of margin above
     -- the break floor it takes to fully suppress the shortfall chain's
     -- pitch-back/bank-easing; the fraction ramps from 1 (full margin)
@@ -657,6 +657,44 @@ M.PROFILES["Mi-24P"] = {
     -- reached -0.38/+0.51), not +-1.
     ball_centre = 0.03,
     ball_usable_range = 0.5,
+
+    -- ---- BL-16 M3 (`plans/flight-lift-vector/plan.md`, "M3
+    -- amendment"): the terrain look-ahead's own loop constants (never
+    -- wire-carried -- the grid geometry/floor are body-layer's `tuning.
+    -- py` job; these are how the law reacts to what it is handed).
+
+    -- How far ahead of arrival the climb is established (B): `w_i =
+    -- (R_i - A) / max(d_i/V_f - terrain_lead_s, terrain_tau_min_s)`.
+    -- Judgement call -- the time to set up a climb at the accel cap.
+    terrain_lead_s = 2.0,
+    -- Bounds `w_i` for a point almost reached (division-by-near-zero
+    -- guard, the project's own convention) -- judgement call.
+    terrain_tau_min_s = 1.0,
+    -- Below this ground speed along the nose, nothing ahead is urgent
+    -- (E8: hover/pedal-turn must not pump height) -- ~11 km/h,
+    -- judgement call.
+    terrain_min_speed_mps = 3.0,
+    -- A grid older than this (model time since receipt of its own
+    -- `seq`) gives no demand -- judgement call, the plan's own "~1-3 s
+    -- old when the law first uses it" latency plus margin.
+    terrain_max_age_s = 5.0,
+    -- Kill switch (E): `false` flies the floor beneath with no
+    -- look-ahead, if the data path misbehaves on the card.
+    terrain_lookahead_enabled = true,
+    -- Power governor (C, replaces the removed `max_climb_vs_mps`
+    -- ceiling): while the lift length is capped, `w_ref` is held
+    -- within this many m/s of measured `w` -- the reference then
+    -- tracks what the aircraft can actually do. Judgement call, first
+    -- cut.
+    w_ref_lead_max_mps = 2.0,
+    -- How far speed gives before a climb simply goes slower instead
+    -- (D, U19 answered: "~100 km/h, then he simply climbs slower").
+    speed_give_floor_kmh = 100.0,
+    -- Ease-down cap on the return after a terrain-driven climb (C, U20
+    -- answered, verbatim: "put it at most 10. Slow speed limits
+    -- apply" -- Decision 31's VRS guard, below 50 km/h, is unaffected
+    -- and still caps the descent tighter, at 4 m/s, when it binds).
+    terrain_ease_down_mps = 10.0,
 }
 
 M.ACTIVE = M.PROFILES["Mi-24P"]

@@ -247,7 +247,11 @@ local DT_CAP = 2.0
 -- body-layer's first send, and are deliberately conservative.
 local fc_limits = {
     takeover_level_bank_deg = 5.0,
-    floor_agl_m = 40.0,
+    -- M3 (`plans/flight-lift-vector/plan.md`, section A): raised 40 ->
+    -- 50 -- "one floor is better, use 50 m" (user). This is now THE
+    -- floor (`F_eff = min(this, AGL goal)`, derived every `law_update`
+    -- step), not only the unpark seed clamp it used to be.
+    floor_agl_m = 50.0,
     max_ias_kmh = 280.0,
     on_ground_agl_threshold_m = 10.0,
     arm_lease_s = 3.0,
@@ -257,8 +261,11 @@ local fc_limits = {
     -- own first send; `belief.flight_control.flight_control_limits`
     -- carries the real (tunable) values. No `max_bank_deg` any more
     -- (mode-1 batch, F-M1).
+    -- M3 section C: `max_climb_vs_mps` is REMOVED entirely, not
+    -- widened -- "no number limit, limit comes from available power"
+    -- (user). A power governor (`w_ref_lead_max_mps`, `flight_
+    -- profile.lua`) replaces it inside `law_update`.
     max_turn_bank_deg = 20.0,
-    max_climb_vs_mps = 5.0,
     max_accel_mps2 = 1.0,
     speed_band_frac = 0.10,
     alt_band_frac = 0.10,
@@ -305,8 +312,9 @@ local FC_LIMIT_BOUNDS = {
     -- No `max_bank_deg` entry any more (mode-1 batch, F-M1: "remove the
     -- 30 degree limit") -- removed from the wire entirely, not
     -- widened, so a stale sender's value finds nothing here to accept.
+    -- No `max_climb_vs_mps` entry any more (M3, section C) -- removed
+    -- from the wire entirely, same posture as `max_bank_deg` above.
     max_turn_bank_deg = { lo = 0.0, hi = 60.0 },
-    max_climb_vs_mps = { lo = 0.0, hi = 20.0 },
     max_accel_mps2 = { lo = 0.0, hi = 10.0 },
     speed_band_frac = { lo = 0.0, hi = 1.0 },
     alt_band_frac = { lo = 0.0, hi = 1.0 },
@@ -464,6 +472,52 @@ local fc_law_last_update_t = nil
 -- and one deferral always finds a free frame before the next is due)
 -- while guaranteeing the law is never starved under a coarser step.
 local fc_law_deferred_last_frame = false
+
+-- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- the
+-- fresh terrain grid, parsed from the `flight_lease`'s own `terrain`
+-- field. Lives OUTSIDE `fc_law`, like the estimator (Co-moving table):
+-- it is received and projected in every mode, never reset by an
+-- ordinary mode change, only by `on_stop`/`reset(epoch)`. `points` is a
+-- list of `{x, z, h}` triples (world coordinates, as sent -- re-
+-- projected against the CURRENT position every `law_update` step, so
+-- age only shortens the reach, never bends the geometry); `received_t`
+-- is the DCS model time this grid's `seq` was parsed, for `terrain_
+-- max_age_s` staleness.
+local fc_terrain = { seq = nil, points = {}, received_t = nil }
+
+-- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- parses
+-- `"<seq>|x,z,h;x,z,h;..."` into `{x, z, h}` triples. A malformed
+-- string, or one whose `seq` does not advance, leaves `fc_terrain`
+-- unchanged -- same "no error path leaves a stale value worse off"
+-- posture as every other wire parse in this module; the grid simply
+-- ages out via `terrain_max_age_s` if nothing fresher ever arrives.
+local function parse_terrain_relay(raw, t)
+    if type(raw) ~= "string" or raw == "" then
+        return
+    end
+    local seq_str, rest = raw:match("^(%-?%d+)|(.*)$")
+    if seq_str == nil then
+        return
+    end
+    local seq = tonumber(seq_str)
+    if seq == nil or seq ~= seq or seq == fc_terrain.seq then
+        return
+    end
+    local points = {}
+    for entry in rest:gmatch("[^;]+") do
+        local x_str, z_str, h_str = entry:match("^([^,]+),([^,]+),([^,]+)$")
+        if x_str ~= nil then
+            local x, z, h = tonumber(x_str), tonumber(z_str), tonumber(h_str)
+            -- Non-finite standing rule: a point with any non-finite
+            -- coordinate or height is dropped, never carried as a
+            -- plausible-looking value.
+            if x ~= nil and x == x and z ~= nil and z == z and h ~= nil and h == h then
+                points[#points + 1] = { x, z, h }
+            end
+        end
+    end
+    fc_terrain = { seq = seq, points = points, received_t = t }
+end
 
 -- BL-16 lift-vector law, Stage LV-1 fix (review-lv1.md, required fix 1)
 -- -- diagnostic-only call counters, never read by any `law_*`/`est_*`
@@ -634,6 +688,11 @@ local function law_apply_goal(state, goal, limits, profile)
     end
     if goal.alt_m ~= nil then
         next_state.alt_goal_m = goal.alt_m
+        -- M3 Co-moving: "an ordinary command flies ordinarily" -- a new
+        -- altitude goal clears any standing terrain-return ease-down,
+        -- the same unconditional-clear shape `bank_hold_deg`/`rate_
+        -- override_deg_s` already get from a heading-type command.
+        next_state.terrain_return = false
     end
     if goal.alt_ref ~= nil then
         next_state.alt_goal_ref = goal.alt_ref
@@ -849,6 +908,11 @@ local function law_init_at_take(measured, limits, command, seed, profile)
         -- inherits a stale break from a previous session.
         rate_override_deg_s = nil,
         break_entry_h_m = nil,
+        -- M3 Co-moving -- a fresh activation never inherits a stale
+        -- terrain-driven ease-down from a previous session.
+        terrain_return = false,
+        terrain_binding = false,
+        dbg_terrain_w_floor = nil,
         -- Section F -- the turn-entry pedal nudge, zero until the first
         -- `law_update` recomputes it from `r_d`, same "bit-exact at
         -- take" reasoning as every other field above: nothing is added
@@ -893,6 +957,44 @@ end
 -- `fc_law`).
 local function law_due(t, last_t, profile)
     return last_t == nil or (t - last_t) >= (1.0 / profile.law_hz)
+end
+
+-- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section B, Q1 -> A): the
+-- vertical-speed floor a fresh terrain grid demands, from `measured.
+-- terrain` (`run_active_frame`'s own projection, a list of `{d, T}`
+-- pairs -- along-nose distance and bare-ground ASL height -- or `nil`
+-- when stale/absent/ASL invalid). `c` is the clearance height to hold
+-- over each point, `goal_asl` is the ASL height the altitude goal is
+-- currently driving toward over the ground beneath (a point below it
+-- says nothing: a commanded descent over flat ground stays free), `v_f`
+-- is ground speed along the nose (`nil`/below `terrain_min_speed_mps`
+-- disarms the whole grid -- E8: nothing ahead is urgent at hover or in
+-- a pedal turn), `a_asl` is the current ASL altitude. Returns `nil`
+-- (never `0.0`, which the caller would read as "level off here") when
+-- nothing ahead demands a climb or bounds a descent. Pure.
+local function law_terrain_w_floor(terrain, c, goal_asl, v_f, a_asl, profile)
+    if terrain == nil or not profile.terrain_lookahead_enabled then
+        return nil
+    end
+    if type(v_f) ~= "number" or v_f ~= v_f or v_f < profile.terrain_min_speed_mps then
+        return nil
+    end
+    local w_floor = nil
+    for _, point in ipairs(terrain) do
+        local d = point[1]
+        local t = point[2]
+        if type(d) == "number" and type(t) == "number" and d > 0.0 then
+            local r = t + c
+            if r > goal_asl then
+                local tau = math.max(d / v_f - profile.terrain_lead_s, profile.terrain_tau_min_s)
+                local w_i = (r - a_asl) / tau
+                if w_floor == nil or w_i > w_floor then
+                    w_floor = w_i
+                end
+            end
+        end
+    end
+    return w_floor
 end
 
 -- `law_update(state, dt, measured, limits, profile)` -- one frame of the
@@ -1096,6 +1198,17 @@ local function law_update(state, dt, measured, limits, profile)
     next_state.yaw_damp_pedal = law_clamp(
         -profile.k_yaw_damp * yaw_e, -profile.yaw_damp_max, profile.yaw_damp_max)
 
+    -- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section A): the one
+    -- effective floor, derived fresh every step, never stored. An AGL
+    -- goal floors at `min(limits.floor_agl_m, AGL goal)` (U18: every
+    -- AGL goal in the system is "explicit" by construction); a
+    -- barometric goal floors at `limits.floor_agl_m` outright ("the
+    -- 40 m floor is especially for barometric mode").
+    local f_eff = limits.floor_agl_m
+    if state.alt_goal_ref == "agl" then
+        f_eff = math.min(limits.floor_agl_m, state.alt_goal_m)
+    end
+
     -- Step 1 (altitude, section B, kept): position+rate shaper towards
     -- the AGL-equivalent goal. A barometric goal is converted every
     -- frame via the currently-measured ASL-AGL offset.
@@ -1103,6 +1216,10 @@ local function law_update(state, dt, measured, limits, profile)
     if state.alt_goal_ref == "baro" then
         alt_goal_agl = state.alt_goal_m - (measured.asl_m - measured.h_m)
     end
+    -- M3 section A ("The floor beneath"): a no-op for an AGL goal
+    -- (its own floor is itself, or `f_eff` below it); for a barometric
+    -- goal whose AGL equivalent falls below the floor, raised to it.
+    alt_goal_agl = math.max(alt_goal_agl, f_eff)
     -- Decision 29 -- while a break's rate override is active, the
     -- shaper's own *effective* target is floored at the break's own
     -- height-loss budget below its entry height (never above the
@@ -1110,27 +1227,71 @@ local function law_update(state, dt, measured, limits, profile)
     -- break replaces only the heading goal"). Stops applying the
     -- instant the break settles (the clearing below).
     --
-    -- LV-2 amendment, section D: `profile.break_floor_agl_m` (50.0)
-    -- replaces `limits.floor_agl_m` (40.0) in THIS clamp only -- the
-    -- user's own floor applies to a break specifically (U11 answered,
-    -- 2026-11-27, verbatim: "only breaks"); the ordinary chain's own
-    -- passive height-giving and the unpark seed clamp both keep reading
-    -- `limits.floor_agl_m` unchanged. `break_max_height_loss_m` (100.0)
-    -- is unchanged -- both budgets apply together via this same `max()`.
-    -- `break_floor` is hoisted to the enclosing scope (declared just
-    -- above this `if`) so the shortfall block (section C, below) can
-    -- read the same computed value rather than re-deriving the formula.
+    -- M3 amendment: `f_eff` replaces `profile.break_floor_agl_m`
+    -- (removed) -- "one floor is better, use 50 m" (user), so the
+    -- break shares the same effective floor every other command now
+    -- uses, rather than a second one of its own. `break_max_height_
+    -- loss_m` (100.0) is unchanged -- both budgets apply together via
+    -- this same `max()`. `break_floor` is hoisted to the enclosing
+    -- scope (declared just above this `if`) so the shortfall block
+    -- (section C, below) can read the same computed value rather than
+    -- re-deriving the formula.
     local break_floor = nil
     if state.rate_override_deg_s ~= nil and state.break_entry_h_m ~= nil then
-        break_floor = math.max(
-            profile.break_floor_agl_m, state.break_entry_h_m - limits.break_max_height_loss_m)
+        break_floor = math.max(f_eff, state.break_entry_h_m - limits.break_max_height_loss_m)
         alt_goal_agl = math.max(alt_goal_agl, break_floor)
     end
     local err_h = alt_goal_agl - state.h_ref
     local a_ref_h = profile.omega_alt * profile.omega_alt * err_h
         - 2.0 * profile.law_zeta * profile.omega_alt * state.w_ref
     a_ref_h = law_clamp(a_ref_h, -alt_accel_cap, alt_accel_cap)
-    next_state.w_ref = law_clamp(state.w_ref + a_ref_h * dt, -limits.max_climb_vs_mps, limits.max_climb_vs_mps)
+
+    -- M3 section B (Q1 -> A, the look-ahead): what each fresh grid
+    -- point ahead asks of the vertical reference, from `measured.
+    -- terrain` (`run_active_frame`'s own projection, `nil` when stale/
+    -- absent/ASL invalid). `c` (the clearance height to hold over each
+    -- point) is the commanded AGL height itself for an AGL goal (U21,
+    -- answered yes: "the look-ahead clears the commanded AGL height"),
+    -- or the floor for a barometric goal -- never `f_eff` for an AGL
+    -- goal above the floor, which U21 asked to also be protected.
+    local terrain_c = f_eff
+    if state.alt_goal_ref == "agl" then
+        terrain_c = state.alt_goal_m
+    end
+    -- "The goal's own height" (B): the ASL height the shaper is
+    -- currently driving toward, over the ground beneath the aircraft
+    -- right now -- a point whose clearance stands below this says
+    -- nothing (a commanded descent over flat ground stays free).
+    local goal_asl = measured.asl_m - measured.h_m + alt_goal_agl
+    local w_floor = law_terrain_w_floor(
+        measured.terrain, terrain_c, goal_asl, measured.v_g_f, measured.asl_m, profile)
+
+    -- M3 section C: "w_ref = max(w_shaper, w_floor), approached at the
+    -- accel cap (no step)" -- implemented in acceleration space (the
+    -- floor's own demand, as an acceleration that would reach it from
+    -- `state.w_ref` by the time this step's `dt` has passed, itself
+    -- capped at `alt_accel_cap`), so the floor never steps the
+    -- reference: whichever acceleration (the ordinary shaper's, or the
+    -- floor's) asks for MORE climb (or less descent) wins this frame.
+    -- Positive `w_floor` climbs him early; negative `w_floor` bounds a
+    -- descent toward a ridge above the goal.
+    local a_ref_final = a_ref_h
+    local terrain_binding = false
+    if w_floor ~= nil then
+        local a_ref_terrain = law_clamp((w_floor - state.w_ref) / dt, -alt_accel_cap, alt_accel_cap)
+        if a_ref_terrain > a_ref_h then
+            a_ref_final = a_ref_terrain
+            terrain_binding = true
+        end
+    end
+    next_state.w_ref = state.w_ref + a_ref_final * dt
+    -- M3 section C ("Ease down past the crest", U20): on the return
+    -- after a terrain-driven climb, the descent rate is capped --
+    -- gentler than "no limit" but never tighter than Decision 31's VRS
+    -- guard below, which still binds first at low speed.
+    if state.terrain_return then
+        next_state.w_ref = math.max(next_state.w_ref, -profile.terrain_ease_down_mps)
+    end
     -- Decision 31 -- vortex ring state, every mode-1 state (not only a
     -- break): below the VRS IAS threshold, the descent-rate reference
     -- is capped regardless of how large the altitude error driving it
@@ -1138,7 +1299,47 @@ local function law_update(state, dt, measured, limits, profile)
     if ias_kmh < limits.vrs_ias_threshold_kmh then
         next_state.w_ref = math.max(next_state.w_ref, -limits.vrs_max_descent_mps)
     end
-    next_state.h_ref = state.h_ref + next_state.w_ref * dt
+    -- M3 section C (the power governor, "replaces the 5 m/s cap"): once
+    -- the lift length was capped (feedback only, from LAST frame's own
+    -- `dbg_shortfall`/saturated `u_c` -- this frame's own shortfall is
+    -- not known yet, section G below), the reference is held within a
+    -- lead of measured vertical speed so it tracks what the aircraft
+    -- can actually do; the margin keeps the collective asking, so the
+    -- shortfall persists and speed gives (D). No special-casing by
+    -- cause (U22, answered 2026-11-28: "every climb trades speed") --
+    -- an ordinary commanded climb that saturates the collective is
+    -- governed exactly the same way a terrain climb is.
+    local collective_was_capped = state.u_c >= 0.999 or (state.dbg_shortfall or 0.0) > 0.0
+    local collective_was_floored = state.u_c <= -0.999
+    if collective_was_capped then
+        next_state.w_ref = math.min(next_state.w_ref, measured.w_mps + profile.w_ref_lead_max_mps)
+    elseif collective_was_floored then
+        next_state.w_ref = math.max(next_state.w_ref, measured.w_mps - profile.w_ref_lead_max_mps)
+    end
+    -- M3 section C ("While the floor binds, h_ref follows measured.
+    -- h_m"): without this, an AGL-frame reference integrating a world
+    -- climb rate would run ahead of the measured AGL on every upslope
+    -- (finding 2's frame trap, the other way round) and add a climb
+    -- nobody asked for. When it releases, the shaper continues from the
+    -- measured state: no step (the ordinary integration below picks up
+    -- from wherever `h_ref` was left).
+    if terrain_binding then
+        next_state.h_ref = measured.h_m
+    else
+        next_state.h_ref = state.h_ref + next_state.w_ref * dt
+    end
+    -- `terrain_return` (NEW, Co-moving) -- set the step the floor stops
+    -- binding (a falling edge), cleared once altitude is back in band
+    -- (below, after `in_band_altitude` is computed), on a new altitude
+    -- goal (`law_apply_goal`), or by any `fc_law = nil`.
+    if state.terrain_binding and not terrain_binding then
+        next_state.terrain_return = true
+    else
+        next_state.terrain_return = state.terrain_return
+    end
+    next_state.terrain_binding = terrain_binding
+    -- Diagnostic-only (status line/trace), same posture as `dbg_r_d`.
+    next_state.dbg_terrain_w_floor = w_floor
 
     -- Step 1 (speed, section B, kept; braking-distance ceiling added
     -- 2026-11-25, fifth re-fly, `plans/flight-lift-vector/debug-2026-
@@ -1403,6 +1604,21 @@ local function law_update(state, dt, measured, limits, profile)
     -- class-aware routing actually engaging (or not).
     next_state.dbg_shortfall = shortfall
     next_state.dbg_effective_shortfall = effective_shortfall
+    -- M3 section D ("Speed gives first, then resumes"): the SAME
+    -- shortfall that drives `theta_speed_give`/`phi_scale` below also
+    -- lets the speed reference itself yield, never below `speed_give_
+    -- floor_kmh` (U19). `speed_goal_mps`/`desired.ias_kmh` are never
+    -- touched -- what he read back is still the goal; once the
+    -- shortfall ends (next frame, no override here), the ordinary speed
+    -- shaper above already pulls `v_ref` back toward it through its own
+    -- S-curve, no extra code needed to "resume." No special-casing by
+    -- cause (U22, answered 2026-11-28, "every climb trades speed") --
+    -- this triggers on `shortfall` itself, whatever caused it.
+    if shortfall > 0.0 then
+        local v_floor_mps = profile.speed_give_floor_kmh / 3.6
+        next_state.v_ref = math.min(next_state.v_ref, math.max(v_m, v_floor_mps))
+        next_state.dv_ref = math.min(next_state.dv_ref, 0.0)
+    end
     local theta_speed_give = profile.k_theta_speed_give * effective_shortfall
     local phi_scale = 1.0
     if effective_shortfall > profile.speed_give_capacity then
@@ -1560,6 +1776,12 @@ local function law_update(state, dt, measured, limits, profile)
         and math.abs(law_wrap180(measured.psi_deg - next_state.heading_goal_deg)) <= limits.heading_band_deg
     local alt_band = math.max(limits.alt_band_frac * math.abs(alt_goal_agl), limits.alt_band_min_m)
     next_state.in_band_altitude = math.abs(measured.h_m - alt_goal_agl) <= alt_band
+    -- M3 section C ("cleared ... when altitude is back in band") --
+    -- the other clearing edges (a new altitude goal, `fc_law = nil`)
+    -- are handled at `law_apply_goal`/every reset site respectively.
+    if next_state.terrain_return and next_state.in_band_altitude then
+        next_state.terrain_return = false
+    end
     -- LV-3 amendment, section B: `v_m` (blended) replaces bare IAS, and
     -- a floor (finding 7) lets a "speed 0" goal be in band.
     local speed_band = math.max(limits.speed_band_frac * state.speed_goal_mps, profile.speed_band_min_mps)
@@ -2060,6 +2282,15 @@ local function read_measured()
     if self_data_ok and type(self_data.Heading) == "number" then
         psi_deg = law_wrap360(math.deg(self_data.Heading))
     end
+    -- M3 (`plans/flight-lift-vector/plan.md`, section E) -- world x/z
+    -- position, needed to project `fc_terrain`'s own world-coordinate
+    -- points into along-nose distance each `run_active_frame` call.
+    -- `pos_valid = false` (never a fabricated `0, 0`) disarms the
+    -- look-ahead the same way `asl_valid = false` does.
+    local pos_valid = self_data_ok and type(self_data.Position) == "table"
+        and type(self_data.Position.x) == "number" and type(self_data.Position.z) == "number"
+    local pos_x = pos_valid and self_data.Position.x or 0.0
+    local pos_z = pos_valid and self_data.Position.z or 0.0
     local ias_mps = safe_call(LoGetIndicatedAirSpeed)
     local ias_valid = type(ias_mps) == "number" and ias_mps == ias_mps
     if not ias_valid then ias_mps = 0.0 end
@@ -2072,8 +2303,16 @@ local function read_measured()
     local h_m = agl
     if radar_valid and type(radar_dist) == "number" then h_m = radar_dist end
     if type(h_m) ~= "number" or h_m ~= h_m then h_m = 0.0 end
+    -- M3 (`plans/flight-lift-vector/plan.md`, section E): `asl_valid`
+    -- tells the law whether `asl_m` is a genuine ASL read this frame or
+    -- the AGL fallback below -- the look-ahead needs the real datum
+    -- (`A` in its own `w_i` formula) and must not run against a value
+    -- that is silently the wrong one (today a failed ASL read falls
+    -- back to AGL, the wrong frame for comparing against `land.
+    -- getHeight`'s ASL-referenced terrain heights).
     local asl_m = safe_call(LoGetAltitudeAboveSeaLevel)
-    if type(asl_m) ~= "number" or asl_m ~= asl_m then asl_m = h_m end
+    local asl_valid = type(asl_m) == "number" and asl_m == asl_m
+    if not asl_valid then asl_m = h_m end
     local ang = safe_call(LoGetAngularVelocity)
     local p_deg_s, q_deg_s, r_deg_s = 0.0, 0.0, 0.0
     if type(ang) == "table" then
@@ -2106,6 +2345,10 @@ local function read_measured()
         w_mps = w_mps,
         h_m = h_m,
         asl_m = asl_m,
+        asl_valid = asl_valid,
+        pos_x = pos_x,
+        pos_z = pos_z,
+        pos_valid = pos_valid,
         p_deg_s = p_deg_s,
         q_deg_s = q_deg_s,
         r_deg_s = r_deg_s,
@@ -2597,7 +2840,8 @@ local function format_trace_line(t, est, raw, law, mode, last_command)
         .. "mode=%s phi_d=%s bank=%.3f theta_d=%s pitch=%.3f t_r=%s t_p=%s t_y=%s "
         .. "turn_coord_pedal=%s u_c=%s u_c_rate=%s r_d=%s a_f_d=%s a_r_d=%s a_u_d=%s "
         .. "phi_i=%s theta_i=%s out_pitch=%s out_roll=%s out_pedals=%s out_collective=%s "
-        .. "phi_bar=%.3f bank_hold=%s eng40=%s eng41=%s eng838=%s eng839=%s rot42=%s rot845=%s",
+        .. "phi_bar=%.3f bank_hold=%s eng40=%s eng41=%s eng838=%s eng839=%s rot42=%s rot845=%s "
+        .. "v_ref=%s h_ref=%s w_ref=%s terrain_return=%s terrain_w_floor=%s",
         t, est.v.n, est.v.u, est.v.e, est.a.f, est.a.r, est.a.u, est.v_g, est.v_g_f, est.v_g_r,
         est.euler.phi_dot, est.euler.theta_dot, est.euler.psi_dot, est.ball, est.lambda,
         tostring(raw.vec_n), tostring(raw.vec_u), tostring(raw.vec_e),
@@ -2612,7 +2856,11 @@ local function format_trace_line(t, est, raw, law, mode, last_command)
         est.phi_bar, tostring(l.bank_hold_deg),
         tostring(raw.eng_rpm_40), tostring(raw.eng_rpm_41),
         tostring(raw.eng_rpm_838), tostring(raw.eng_rpm_839),
-        tostring(raw.rotor_rpm_42), tostring(raw.rotor_rpm_845))
+        tostring(raw.rotor_rpm_42), tostring(raw.rotor_rpm_845),
+        -- M3 (`plans/flight-lift-vector/plan.md`, Implementation Plan
+        -- item 4) -- the law's own vertical-channel internals.
+        tostring(l.v_ref), tostring(l.h_ref), tostring(l.w_ref),
+        tostring(l.terrain_return), tostring(l.dbg_terrain_w_floor))
 end
 
 -- Runs one estimator step (plan, section A). `raw` is `read_estimator_
@@ -2879,19 +3127,16 @@ local function build_take_seed(measured_true_deg)
             seed.heading_deg = heading_ref_to_true(desired.heading_deg, measured_true_deg)
         end
         if type(desired.alt_m) == "number" then
-            -- U2 (`plans/flight-desired-state/plan.md`, section 3,
-            -- answered yes): a carried value mode 1 cannot fly exactly
-            -- is flown clamped, never fed to the law raw -- `desired`
-            -- itself (and `seed`/`desired`'s own return below, which
-            -- body-layer's `fd_alt`/`fd_ias` mirror) keeps the exact
-            -- commanded value; only the seed fed to `law_init_at_take`
-            -- below is clamped, mirroring `belief.flight_control.
-            -- clamp_altitude`'s own "agl floor only" rule.
+            -- M3 (`plans/flight-lift-vector/plan.md`, section A, E10):
+            -- the floor clamp here is REMOVED -- a mode-2 height is
+            -- carried as given, no jump at the unpark ("allow player to
+            -- command any altitude and then accept it"). `seed.alt_m`
+            -- now equals `desired.alt_m` exactly, same as every other
+            -- part of this seed; `F_eff` (`law_update`) follows the
+            -- carried goal the very next step, the same way it follows
+            -- any other altitude goal.
             seed.alt_m = desired.alt_m
             seed.alt_ref = (desired.alt_ref == "baro") and "B" or "R"
-            if seed.alt_ref == "R" and seed.alt_m < fc_limits.floor_agl_m then
-                seed.alt_m = fc_limits.floor_agl_m
-            end
         end
         if type(desired.ias_kmh) == "number" then
             -- BL-16 lift-vector law, Stage LV-1 (U8, no floor): only the
@@ -2973,6 +3218,12 @@ local function handle_flight_lease_command(data, t)
     if not apply_limits_bounds_checked(data, "flight_lease") then
         return
     end
+    -- M3 (`plans/flight-lift-vector/plan.md`, section E): the `terrain`
+    -- relay field is validated on its own -- a bad/absent/empty one
+    -- drops terrain only, never the lease or its limits (the
+    -- whole-message-reject posture above is deliberately NOT extended
+    -- to this field).
+    parse_terrain_relay(extract_json_raw_string_field(data, "terrain", 4096), t)
     fc_arm_last_t = t
 end
 
@@ -3181,6 +3432,29 @@ local function run_active_frame(t, dt, just_took, estimator_due_this_frame)
         measured.v_g = fc_est.v_g
         measured.v_g_f = fc_est.v_g_f
         measured.v_g_r = fc_est.v_g_r
+    end
+    -- M3 (`plans/flight-lift-vector/plan.md`, section E) -- project the
+    -- fresh grid into `{d, T}` (along-nose distance, bare-ground ASL
+    -- height) pairs, against the CURRENT position and heading (never
+    -- the position at compose time): age then only shortens the reach,
+    -- it never bends the geometry. `nil` (never an empty table) when
+    -- stale, absent, or `asl_valid`/`pos_valid` is false, so `law_
+    -- update` stays pure and the toy plant can feed `measured.terrain`
+    -- directly.
+    measured.terrain = nil
+    if fc_terrain.received_t ~= nil and measured.asl_valid and measured.pos_valid
+        and (t - fc_terrain.received_t) <= flight_profile.ACTIVE.terrain_max_age_s
+    then
+        local heading_rad = math.rad(measured.psi_deg)
+        local nose_x, nose_z = math.cos(heading_rad), math.sin(heading_rad)
+        local terrain = {}
+        for _, point in ipairs(fc_terrain.points) do
+            local dx = point[1] - measured.pos_x
+            local dz = point[2] - measured.pos_z
+            local d = dx * nose_x + dz * nose_z
+            terrain[#terrain + 1] = { d, point[3] }
+        end
+        measured.terrain = terrain
     end
     local ok, reason = check_envelope(t, measured)
     if not ok then
@@ -3680,6 +3954,22 @@ local function push_flight_control_state(t)
     -- read, as `nil`, which `fmt_num_or_null` already turns into `null`.
     local slip_ball_lo_api = safe_call(LoGetSlipBallPosition)
 
+    -- M3 (`plans/flight-lift-vector/plan.md`, Implementation Plan item
+    -- 4) -- the status line's own terrain/floor fields, `nil` whenever
+    -- there is no active law (`fc_law == nil`) to read them off.
+    local fc_floor_eff_m = nil
+    if fc_law ~= nil then
+        fc_floor_eff_m = fc_limits.floor_agl_m
+        if fc_law.alt_goal_ref == "agl" then
+            fc_floor_eff_m = math.min(fc_limits.floor_agl_m, fc_law.alt_goal_m)
+        end
+    end
+    local fc_terrain_n = #fc_terrain.points
+    local fc_terrain_age_s = nil
+    if fc_terrain.received_t ~= nil then
+        fc_terrain_age_s = t - fc_terrain.received_t
+    end
+
     local ok, err = client:send('{"t":' .. string.format("%.3f", t)
         .. ',"fc_mode":"' .. fc_mode .. '"'
         -- BL-16 Stage 3 (`plans/flight-desired-state/plan.md`) --
@@ -3725,7 +4015,15 @@ local function push_flight_control_state(t)
         .. ',"fc_est_theta_dot":' .. fmt_num_or_null(fc_est.euler.theta_dot)
         .. ',"fc_est_psi_dot":' .. fmt_num_or_null(fc_est.euler.psi_dot)
         .. ',"fc_est_ball":' .. fmt_num_or_null(fc_est.ball)
-        .. ',"fc_est_lambda":' .. fmt_num_or_null(fc_est.lambda) .. '}\n')
+        .. ',"fc_est_lambda":' .. fmt_num_or_null(fc_est.lambda)
+        -- M3 status fields (Implementation Plan item 4).
+        .. ',"fc_floor_eff_m":' .. fmt_num_or_null(fc_floor_eff_m)
+        .. ',"fc_terrain_n":' .. tostring(fc_terrain_n)
+        .. ',"fc_terrain_age_s":' .. fmt_num_or_null(fc_terrain_age_s)
+        .. ',"fc_terrain_w_floor":' .. fmt_num_or_null(fc_law and fc_law.dbg_terrain_w_floor)
+        .. ',"fc_terrain_binding":' .. bool_or_null(fc_law and fc_law.terrain_binding)
+        .. ',"fc_speed_giving":' .. bool_or_null(fc_law and ((fc_law.dbg_shortfall or 0.0) > 0.0))
+        .. '}\n')
     if not ok then
         debug_log("flight-control send failed: " .. tostring(err))
         client:close()
@@ -3774,6 +4072,10 @@ local function on_stop()
     -- every mode), but a mission stop/restart is a genuine discontinuity
     -- the same way a model-time gap inside `est_sample` is.
     est_reset(fc_est)
+    -- M3 Co-moving: `fc_terrain` lives outside `fc_law`, like the
+    -- estimator -- same "mission stop/restart, reset(epoch)" reset
+    -- edges, never an ordinary mode change.
+    fc_terrain = { seq = nil, points = {}, received_t = nil }
 end
 
 -- Body-layer process-start reset (BL-16 sortie 2026-11-20, `docs/

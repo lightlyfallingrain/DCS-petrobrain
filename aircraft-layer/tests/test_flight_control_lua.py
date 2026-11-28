@@ -85,6 +85,9 @@ _CORE_HELPERS: tuple[str, ...] = (
     "safe_call",
     "extract_json_number_field",
     "extract_json_string_field",
+    # BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
+    # `handle_flight_lease_command`'s own `terrain` field extractor.
+    "extract_json_raw_string_field",
     # `is_finite_number` must precede `fmt_num_or_null`/`fmt_int_or_null`
     # in this tuple -- both call it as a bare name, and the harness below
     # concatenates these extracted bodies into one chunk in tuple order,
@@ -324,6 +327,16 @@ flight_profile = {
         hover_pedal_band_forward = 2.0,
         goal_jerk_hover_mps3 = 0.5,
         goal_jerk_edge_mps3 = 5.0,
+        -- BL-16 M3 (`plans/flight-lift-vector/plan.md`, "M3
+        -- amendment") -- mirrors `flight_profile.lua`.
+        terrain_lead_s = 2.0,
+        terrain_tau_min_s = 1.0,
+        terrain_min_speed_mps = 3.0,
+        terrain_max_age_s = 5.0,
+        terrain_lookahead_enabled = true,
+        w_ref_lead_max_mps = 2.0,
+        speed_give_floor_kmh = 100.0,
+        terrain_ease_down_mps = 10.0,
     },
 }
 

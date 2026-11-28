@@ -291,6 +291,26 @@ local function extract_json_id_field(json_text, field_name)
     return value
 end
 
+-- BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- a third
+-- sibling, for a field whose value carries characters `[%w_]+` cannot
+-- (`flight_lease`'s own `terrain` relay string: digits, `.`, `,`, `;`,
+-- `|`, `-`). Captures everything up to the next unescaped `"` -- safe
+-- here because this codebase only ever sends this field from its own
+-- `json.dumps` (never a value containing a literal `"`), never a
+-- general-purpose JSON-string unescape. Returns `nil` when the field
+-- is absent, not a quoted string, or longer than `max_len` (the whole-
+-- message bound this field's own callers already enforce on the wire,
+-- not re-derived here -- a length past it is simply treated as
+-- missing, same "malformed -> absent, never guessed" posture as every
+-- other extractor in this file).
+local function extract_json_raw_string_field(json_text, field_name, max_len)
+    local value = json_text:match("\"" .. field_name .. "\"%s*:%s*\"([^\"]*)\"")
+    if value == nil or #value > max_len then
+        return nil
+    end
+    return value
+end
+
 -- Wheel device (GetDevice(30)) button codes -- confirmed live per
 -- `aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md`. 3001
 -- opens/ensures the wheel's search page is current; 3015 is the centre
@@ -383,6 +403,7 @@ _G.encode_scalar = encode_scalar
 _G.extract_json_string_field = extract_json_string_field
 _G.extract_json_number_field = extract_json_number_field
 _G.extract_json_id_field = extract_json_id_field
+_G.extract_json_raw_string_field = extract_json_raw_string_field
 _G.WHEEL_MENU_BUTTON = WHEEL_MENU_BUTTON
 _G.WHEEL_CENTER_BUTTON = WHEEL_CENTER_BUTTON
 
