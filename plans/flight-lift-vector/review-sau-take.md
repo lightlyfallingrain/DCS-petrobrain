@@ -119,3 +119,67 @@ Full read — debug note, `body.py`'s diff in full, `effector_engine.py`'s and
 `flight_authority.py`'s relevant sections, both sortie debug logs' take/ack/write windows (grepped
 and read in context), sortie 2's flight-trace file end-to-end for the ~46 s duration claim, the
 three new tests in full, and the rendered `defaults.toml` entry.
+
+## R2 (a9abc3da)
+
+Re-review at the stated expected tip; `git rev-parse HEAD` confirmed `a9abc3da` after switching to
+it in a fresh branch off that sha, per the dispatch instructions. Video game add-on (DCS World
+Mi-24P) review — nothing here controls real hardware.
+
+### Required Fixes
+None.
+
+- **R1's required fix 1 is closed.** `SAU_TAKEOVER_RETRY_WINDOW_S` 10 → 60 s (`body.py` diff), `hi`
+  30 → 120, `lo` unchanged at 5.0. 60 s now covers both flown cases with margin: sortie 1's 39 s
+  late write and sortie 2's ≥46 s (log-end) uncovered duration are both inside the new window. The
+  commit message states the tradeoff plainly ("Still a stopgap: the readback failure itself is not
+  found; each failed attempt logs the engine's give-up warning") rather than presenting 60 s as a
+  closed fix — option (b) from R1, correctly chosen over silently declaring victory. The docstring
+  in `body.py` states the same thing with the actual numbers (39 s / 46 s) attributed to their
+  source review, not re-derived from the engine's internal timeout the way the original 10 s figure
+  was — this was R1's specific complaint about where the number came from, and it is fixed.
+- **Gating is unchanged and still correct** — read the `elif` branch in `body.py` (lines
+  6169–6191): `still_m1` and `window_open` are both required to re-fire, and the field is cleared
+  (never left stale) the instant either `fd_mode` leaves `"m1"` or the window elapses. A widened
+  window changes only the deadline value fed into this unchanged comparison; it cannot cause a
+  post-hand-back write — reversal is checked every poll, not just at window close. The three tests
+  (`..._after_an_initial_readback_timeout`, `..._window_has_elapsed`, `..._has_reversed`) all read
+  `body_module.SAU_TAKEOVER_RETRY_WINDOW_S` rather than a literal 10, so they exercise the real new
+  value, not a stale number — confirmed by grep, no hardcoded `10.0`/`"10 s"` remaining anywhere in
+  the three tests.
+- **Rendered `config/defaults.toml` checked directly, not the `#:` comment**: the entry reads
+  the full first sentence correctly ("How long after Petrovich takes the controls (mode 1) the
+  SAU-off handover keeps being re-fired every poll it is not already running."), `range: 5.0 ..
+  120.0`, default `60.0` — matches the source. No truncation or markup defect this pass.
+- **Stale test comments**: both numeric mentions of "10 s" in `test_body.py` were correctly
+  genericized to "the retry window" rather than left describing a value that no longer applies —
+  the kind of comment prune this role is meant to check; nothing durable was lost (no dated
+  statement or measurement lived in either line).
+- **R1's required fix 2 (the sortie-1-recovery/genuine-edge ambiguity) was not re-opened by this
+  commit and is not re-addressed by it either** — the debug note's text is unchanged. This commit
+  only widens the window; it does not touch the diagnosis. Not a blocker for this specific fix (the
+  commit message's "Still a stopgap: the readback failure itself is not found" line already signals
+  to the user that the cause is unresolved, which is most of what R1's weaker-form ask wanted), but
+  flagging it as **not forgotten**: the specific fork R1 raised — whether sortie 1 actually recovered
+  via a genuine `fd_mode` flicker rather than this retry mechanism at all — is still open and still
+  worth saying to the user in so many words before this is taken as "the SAU-handover bug is fixed."
+  Downgraded from Required to a note here rather than re-listing it as a blocking fix, since the
+  commit's own framing already carries the "not closed, stopgap" signal R1 needed stated.
+
+### Checks run (this pass)
+- `ruff format --check src tests`: 236 files, already formatted.
+- `ruff check src tests`: all checks passed.
+- `cd body-layer && .venv/bin/mypy src`: clean, 96 files.
+- `pytest -q tests/test_body.py tests/test_tuning_defaults_toml.py tests/test_tuning_comment_renders.py -m "not slow"`: 267 passed.
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read — this review (R1), the debug note, the `a9abc3da` diff in full (`body.py`,
+`defaults.toml`, `test_body.py`), the unchanged gating `elif` branch read directly in `body.py`
+(lines 6130–6199), the rendered `defaults.toml` entry, and all three retry tests' use of the live
+constant via grep. Not independently re-walked this pass: the raw sortie logs themselves (R1 already
+read them in full and this pass's job was to check the fix against R1's own cited numbers, which it
+does) and `effector_engine.py`'s readback/`assumed_writes` mechanics (unchanged by this commit,
+already verified in R1).
