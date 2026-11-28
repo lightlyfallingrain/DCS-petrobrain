@@ -2470,7 +2470,9 @@ measured.v_g_f`:
   the shortfall persists and speed gives. For a commanded climb with no terrain in the way, U22
   "terrain only" sets the lead to 0: the reference sits at what the aircraft achieves, `e_u` falls
   to ~0, the shortfall ends, speed is held and he climbs as fast as the power left allows (height
-  gives). U22 "every climb" uses the same lead in both cases (U3's ordinary order). Transient
+  gives). U22 "every climb" uses the same lead in both cases (U3's ordinary order). **Answered
+  2026-11-28: every climb** (*"if we do not get climb rate at current speed, then change speed"*) —
+  the lead is `w_ref_lead_max_mps` for ordinary commanded climbs too; no terrain-only branch. Transient
   shortfalls in turns and breaks are untouched either way: LV-1's `theta_speed_give` stays as built.
 - **Break and terrain together:** while `w_floor` binds, LV-2's `height_available_frac` is 0 (the
   height a break would give is wanted for the ground ahead), so a break near rising ground gives
@@ -2541,7 +2543,7 @@ LV-3 hover regime, goal slew and yaw channel.
 | `terrain_lookahead_enabled` | `flight_profile.lua` | true | kill switch |
 | `w_ref_lead_max_mps` | `flight_profile.lua` | 2.0 m/s | judgement (replaces `max_climb_vs_mps`) |
 | `speed_give_floor_kmh` | `flight_profile.lua` | 100 km/h | judgement, U19 |
-| `terrain_ease_down_mps` | `flight_profile.lua` | 5.0 m/s | judgement, U20 (the descent rate every LV card flew under the old cap) |
+| `terrain_ease_down_mps` | `flight_profile.lua` | 10.0 m/s | user, U20 (*"put it at most 10. Slow speed limits apply"*; the VRS guard still caps below 50 km/h) |
 | `MAX_TERRAIN_POINTS` | protocol constant, schema + Hook, parity test | 32 | not behaviour |
 
 **Removed:** `MAX_CLIMB_VS_MPS`/`max_climb_vs_mps`, `profile.break_floor_agl_m`. The split follows
@@ -2731,6 +2733,23 @@ ground; the call that matches `ASL − AGL` settles both existence and argument 
 M3.
 
 ### Decisions Requiring User Input (M3)
+
+**Answered 2026-11-28 (user, verbatim, after the diagram review):** *"U20, put it at most 10. Slow
+speed limits apply. U22 - if we do not get climb rate at current speed, then change speed. Others as
+recommended. I'll update the deploy script."*
+
+- **U18: yes** (as recommended) — floor = min(50, AGL goal), 50 for barometric.
+- **U19: ~100 km/h** (as recommended) — the speed-give floor.
+- **U20: ease-down cap 10 m/s** (not the recommended 5), and the slow-speed limits still apply on
+  top — Decision 31's VRS guard (below 50 km/h, 4 m/s down) is not loosened by it.
+- **U21: yes** (as recommended) — the look-ahead clears the commanded AGL height (`c = AGL goal`);
+  barometric goals get the 50 m floor only.
+- **U22: speed gives for every climb, not terrain climbs only** (not the recommended "no"). If the
+  climb rate is not available at the current speed, the speed reference yields (down to U19's
+  floor) for an ordinary commanded climb too — the governor's lead is not zero for ordinary climbs.
+  Diagram 4's order (speed, turn, height) applies to every vertical demand.
+- **Deploy:** the user updates their deploy script to copy `Scripts/Hooks/` (the LOS Hook). The card
+  still names the Hook as required.
 
 - **U18: "Explicitly commanded" = every AGL height goal.** Every AGL goal in the system comes from
   you: "altitude n", climb/descend, hold, level flight, the take (your Q3), the mode-2 height carried

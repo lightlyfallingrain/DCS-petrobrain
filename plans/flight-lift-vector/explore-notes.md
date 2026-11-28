@@ -480,3 +480,7 @@ evidence: `land.getHeight` flown via the Hook bridge, 1.3 µs/point warm, 9.2 µ
 (`aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`); `LoGetAltitude` never used
 in this repo.
 
+**M3 diagram review, user verbatim (2026-11-28):** *"U20, put it at most 10. Slow speed limits
+apply. U22 - if we do not get climb rate at current speed, then change speed. Others as recommended.
+I'll update the deploy script."* Carried into `plan.md`, M3 "Decisions" ("Answered 2026-11-28").
+
