@@ -472,3 +472,11 @@ AGL trend × 5 s look-ahead.
 - **Open (user's Windows grep):** whether `LoGetAltitude(x, z)` returns bare terrain height at a
   point — decides grid in Export.lua (preferred) vs body-layer via the BL-B111 `probe_points` Hook.
 
+**Poll rate, user verbatim (2026-11-28):** *"Even if I fly at 200 km/h, it takes a couple of seconds
+to travel 200m. Elevation polling can be 1 Hz or even 0.5 Hz."* (200 km/h = 55.6 m/s → 200 m in
+3.6 s.) So the routing latency of the proven `land.getHeight` route (Hook → collector → body-layer →
+goal message → Lua, ~1–2 s) is acceptable; the `LoGetAltitude` grep is no longer blocking. Prior
+evidence: `land.getHeight` flown via the Hook bridge, 1.3 µs/point warm, 9.2 µs cold peak
+(`aircraft-layer/research/2026-10-05-elevation-cost-probe-results.md`); `LoGetAltitude` never used
+in this repo.
+
