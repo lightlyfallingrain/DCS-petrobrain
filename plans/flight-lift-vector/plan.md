@@ -1481,6 +1481,415 @@ anticipation term ahead of the deceleration, a separate mechanism, out of this o
 scope) — added to the LV-2 card's own "roll-out on the break heading" watch line for a live read
 against these measured figures.
 
+## LV-2 rework amendment (2026-11-28)
+
+Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `feature/bl16-lift-vector-law`),
+tip `7773b8ef`. Supersedes the collective/vertical-channel design of "LV-2 amendment (2026-11-27)"
+section C and the bank cap of section B — the first LV-2 card flew and failed
+(`docs/acceptance/2026-11-28-sortie-feedback.md`, first sortie): roll-in to 66° overshoot, the
+vertical loop demanding full collective to hold altitude at that bank, full collective pitching
+the nose to +19° against full forward cyclic, IAS 213 → 120, then the pitch integrator winding to
+−1 under the saturation and the nose falling to −52° once bank came off — h_ref 190 → 45 m, below
+the 50 m floor. Inputs read in full: `explore-notes.md` "LV-2 re-explore — what a break turn
+actually needs" and its five follow-up answers (the specification); `alignment.md` "Goal check —
+2026-11-28 — LV-2 rework", BE1–BE10, the open assumptions and Findings 1–6 (every finding answered
+below); `docs/acceptance/2026-11-28-sortie-feedback.md` (sortie 1's trace reading); the existing
+"LV-2 amendment"/"LV-2 fix pass" sections above, read in full before changing them (not re-derived).
+Code read in full for the paths this touches: `law_apply_goal`'s break branch (~L676–722),
+`law_init_at_take`'s default/seed bookkeeping (~L930–945), `law_update`'s heading-rate step
+(~L1137–1218), the altitude shaper and break floor (~L1236–1378), the desired-acceleration/
+collective block (~L1433–1686), the inner tilt-loop integrators (~L1738–1748), the settling clear
+(~L1840–1849), the unpark carry-over (~L3572–3593), and `law_outputs` (~L1895–1931).
+
+### Why this amendment is judged (restated from `alignment.md`)
+
+A break is the pilot's escape: heading changed fast, speed and rotor kept, height spent as the
+currency — never the ground. The first design chased a *trajectory* (hold this much height loss,
+solve for whatever lift vector that needs) and the solve demanded more collective exactly when bank
+was steepest, which is what pitched the nose into the sky. The rework instead sets an *attitude*
+(bank, pitch, a deliberate collective offset) the way the user actually flies it, and lets height be
+whatever falls out — never commanding the vertical channel to fight for a number.
+
+### A. What changes and what does not
+
+| | old design (failed) | rework |
+|---|---|---|
+| Bank target | `break_max_bank_deg = 60°` (2.0 G) | **30°** (profile value, "for now" — BE1, Q1) |
+| Pitch | — (no separate target; fell out of `a_u_d`'s climb/descent demand) | unchanged mechanism: the speed loop's own `a_f_d`/`theta_d` — "whatever holds entry speed" (BE2) — **no new code** |
+| Collective | `a_u_d` tracks the break-floor altitude reference; `u_c_ff` solves for whatever lift length that bank+climb-demand needs | `a_u_d` blended toward **0** (no climb/descent demand) plus an explicit **drop** below level-flight trim, both scaled by the same release fraction (D) |
+| Pedal | ball-centred (unchanged) | unchanged — **no new code** |
+| Near-floor/no-margin safety net | `effective_shortfall` (height-gives) feeds `theta_speed_give`/`phi_scale` | **kept, same formula**, now gated by the widened release fraction (D) — this is what makes bank "come off" when collective genuinely cannot keep up (BE6), not a second mechanism |
+| Roll-out height | shaper drives back to the standing `alt_goal_m` (implicit climb back) | **the height reached becomes the new standing goal** (E) — supersedes Decision 29's "a break never writes `alt_goal_m`" |
+| Pitch-loop anti-windup | freezes `t_p`/`t_r` only at their *own* ±1 bound | freezes at the **combined output's** ±1 bound too (F) — a generic law fix, every regime, not break-specific |
+
+### B. Bank — 30°, unchanged mechanism
+
+`break_max_bank_deg: 60.0 → 30.0`. The rate-cap mechanism (section B of the earlier LV-2 amendment,
+`law_turn_rate_at_bank(profile.break_max_bank_deg, v_t)` feeding `rate_limit`) is untouched — it is
+exactly what turns "set a bank" into "a bank-derived turn rate." `break_omega_heading` (1.0) is also
+unchanged: its natural peak rate for a 90° step (~33°/s) still exceeds every card speed's
+30°-derived rate ceiling (9.7/5.8/4.7°/s at 120/200/250 km/h, BE5's table), so the cap binds
+immediately and fully at every speed — "steep bank quickly" (BE1) falls out with no new tuning.
+`break_max_bank_deg` is **not** scaled by margin or by anything else: the bank target is 30°
+whenever a break is active, full stop — BE7's "steeper than ordinary turn's bank, even with no
+height to spare" settles this directly (Finding 2's "just command more turn rate" reading is
+answered: the ordinary 20° cap never applies to a break, by construction, regardless of margin). What
+*does* ease the bank when it genuinely must (BE6) is the existing `phi_scale` safety net in D, not
+this cap.
+
+At 30°, the coordinated-turn lift length is `1/cos(30°) ≈ 1.15` — nowhere near the old 60°/65°
+design's ~2 G. This is why the rework is materially safer even before the collective redesign in D:
+holding altitude at 30° never demands a dramatic collective jump the way holding it at 60°+ did.
+
+### C. Pitch — unchanged, no new mechanism
+
+Confirmed by reading the code, not re-derived: `a_f_d` is driven by the ordinary speed shaper
+(`v_ref` tracking `state.speed_goal_mps`, the *standing* commanded speed, untouched by a break) with
+`k_speed_error` feedback, exactly as today. A break does not freeze or re-capture a separate "entry
+speed" goal — it keeps using whatever `speed_goal_mps` already was, so a break called mid-
+acceleration does not silently lose the commanded speed (the open assumption "which speed is kept,"
+answered). `theta_d` (pitch target) is whatever that speed-hold produces; the user's own "≈ −10°" is
+an outcome, not a target (BE2). No profile constant changes here.
+
+### D. Collective & the vertical channel — the attitude-manoeuvre redesign (the sortie's actual fix)
+
+**New state, co-moving with the break (full table in "Co-moving Fields" below):**
+`break_entry_ias_kmh` — IAS at the moment a break's heading goal is applied, captured the same
+frame and cleared the same way `break_entry_h_m` already is. Needs one new cached-from-measured
+field, `state.measured_ias_kmh` (written every `law_update` frame exactly as `measured_v_t_mps`
+already is at ~L1817/L938), since `law_apply_goal` has no access to the live `measured` table —
+the same reason `measured_v_t_mps` exists.
+
+**1. The release fraction (widens the existing `height_available_frac`, not a new mechanism).**
+Hoisted right after `break_floor` is computed (~L1278), so both this section and the shortfall
+block below (today's ~L1618–1634) read the same value:
+
+```
+height_margin_m = measured.h_m - break_floor
+sink_lead_m      = profile.break_recovery_lead_s * max(0, -state.w_ref)   -- lead grows with sink rate (Finding 3)
+effective_band_m = max(profile.break_height_give_band_m, sink_lead_m)
+break_release     = clamp(height_margin_m / effective_band_m, 0, 1)        -- 1 = plenty of height, 0 = at/near the floor
+```
+
+`break_recovery_lead_s` (new, first cut 4.0 s) is what makes the near-floor reaction start *before*
+the floor rather than at it (Finding 3): a break sinking faster gets a wider effective band, so the
+recovery (D.2/D.3 below, and the existing `phi_scale` safety net) engages earlier. At `break_release
+= 0` from the very first frame (a break called at 55–70 m AGL, BE7), the mechanism below falls
+straight into "fully held," which is exactly BE7's "holds height and turns faster than ordinary"
+with no separate entry-time branch needed.
+
+**2. `a_u_d` is blended, not zeroed outright — and terrain safety always wins.** The ordinary
+formula (today's `a_u_d`, unchanged, call it `a_u_d_ordinary`) still runs every frame, since M3's
+terrain look-ahead (`w_floor`/`terrain_binding`, computed earlier at ~L1313–1321) must keep working
+unconditionally through a break (the "terrain ahead during the break" open assumption):
+
+```
+a_u_d = terrain_binding and a_u_d_ordinary
+     or ((1.0 - break_release) * a_u_d_ordinary)     -- only while class == "break"
+```
+
+`terrain_binding` (M3) overrides the release outright — ground/terrain safety never yields to the
+attitude manoeuvre (E8's "envelope first"). Away from terrain and with height to spare
+(`break_release = 1`), `a_u_d = 0`: no climb/descent is demanded at all, which is what lets the
+aircraft actually sink rather than fight to hold a sinking reference (the sortie's root cause,
+removed). As the margin shrinks, `a_u_d` fades back toward the full ordinary (height-tracking)
+value — collective is asked to arrest the sink before the floor, not at it.
+
+**3. The explicit collective drop — "collective visibly goes down ~20–30%" (BE1), in command-domain
+units, not solved from a trajectory:**
+
+```
+speed_scale = clamp((break_entry_ias_kmh - break_drop_speed_low_kmh)
+                     / (break_drop_speed_high_kmh - break_drop_speed_low_kmh),
+                     break_drop_speed_scale_min, 1.0)
+break_drop  = profile.break_collective_drop_frac * speed_scale
+u_c_ff      = k_lift_ff * (n_d - 1.0) - ((not terrain_binding) and break_release * break_drop or 0.0)
+```
+
+(`n_d = law_lift_length_g(a_f_d, a_r_d, a_u_d)`, unchanged formula — fed the blended `a_u_d` from
+D.2, so at `break_release = 1` away from terrain, `n_d` is already the "level, no climb" lift length
+for the current bank/speed, ≈1.15 at 30°, and `u_c_ff` additionally subtracts the drop on top of
+that — literally "less collective than level flight needs," the mechanism the user described.) At
+100–120 km/h entry, `speed_scale ≈ 0.5–0.6` — "about half the collective drop" (BE/Q4). At 180 km/h
+and above, `speed_scale = 1.0` — the full drop. The drop fades to 0 the same way `a_u_d` fades back
+(both gated by `break_release`, and both suppressed outright when `terrain_binding`), so there is
+one release fraction, not two independently-tuned ones.
+
+**4. The existing near-floor safety net is kept, unchanged in formula, now gated by the same
+fraction.** Today's `effective_shortfall = shortfall * (1.0 - height_available_frac)` (LV-2
+amendment, section C) stays exactly as written — `height_available_frac` is simply `break_release`
+from D.1, computed once. This is what makes bank genuinely "come off" (BE6) when the modest ~1.15 G
+collective recovery still cannot keep up (an engine still spooling down from a prior manoeuvre, say)
+— `phi_scale` eases the bank *as a consequence of a real shortfall*, not as a scheduled function of
+margin. Most breaks at 30° never reach this: BE6's "comes off" is the exception path, not the
+common one, which is the point — at the old 60–65° cap it was the common path, and that was the bug.
+
+**No change to the RPM-warning ease, blade-stall, pedal-limit or engine-RPM-gated collective-rate
+guards** — they are symmetric in sign only for *increases*; a break's collective is now mostly
+*decreasing* at entry (D.3), which those guards never throttle. Only the anti-windup check at
+`u_c` (unchanged, "Section H" today) still applies.
+
+### E. Roll-out — level at the height reached (supersedes Decision 29)
+
+**Decision 29 REVISED 2026-11-28.** Decision 29 and its restated comment ("a break replaces only
+the heading goal," ~L1261) assumed the standing `alt_goal_m` is never touched by a break, so the
+shaper drives back to it once the break settles — Finding 1 showed this means an uncommanded climb
+back to the pre-break height, contradicting the user's own *"restore to whatever is needed for
+level flight"* and BE8. The settling block (today's ~L1847–1849, the same frame `rate_override_
+deg_s`/`break_entry_h_m`/`break_entry_ias_kmh` clear) gains one more write:
+
+```
+if state.alt_goal_ref == "agl" then next_state.alt_goal_m = measured.h_m
+else                                 next_state.alt_goal_m = measured.asl_m end
+```
+
+(Either branch makes the shaper's own `alt_goal_agl` formula evaluate to the current height at that
+instant — `asl_m - h_m` cancels for the baro branch — so there is no step in the reference, only a
+redefinition of what "home" means from here.) The player re-commands a height if they want one
+(BE8); nothing climbs on its own. This is the one place this amendment writes `alt_goal_m` from
+inside `law_update` rather than from a desired-state command — flagged because it is a genuine,
+deliberate exception to "a break never writes `alt_goal_m`," not a silent one.
+
+### F. Pitch-loop anti-windup — all regimes, not break-specific
+
+**The sortie's second failure, independent of the break redesign above.** Today's freeze condition
+(`(state.t_p >= 1.0 and d_t_p > 0.0) or (state.t_p <= -1.0 and d_t_p < 0.0)`, ~L1740–1745) checks
+only `t_p`'s *own* bound. But the value actually clamped at write time is the **combined** output,
+`u_pitch = t_p + k_theta*(theta_d - pitch) - k_q*theta_rate` (`law_outputs`, ~L1899–1900) — and that
+combination can saturate at ±1 while `t_p` itself is still well inside [-1, 1], because the
+proportional/damping terms can carry the sum past the bound on their own. That is exactly the
+sortie: full forward cyclic (`out_pitch = -1`) from t = 63.3 while `t_p` kept integrating toward −1
+because its *own* value hadn't hit the bound yet — by the time it got there (wound up), bank had
+come off and the nose fell to −52°. **Fix: estimate the combined output before deciding whether to
+freeze, using the same terms `law_outputs` uses:**
+
+```
+u_pitch_est = state.t_p + profile.k_theta * (next_state.theta_d - measured.pitch_deg)
+            - profile.k_q * (measured.theta_dot_deg_s or measured.q_deg_s)
+d_t_p = profile.k_theta_i * (next_state.theta_d - measured.pitch_deg)
+freeze if (u_pitch_est >= 1.0 and d_t_p > 0.0) or (u_pitch_est <= -1.0 and d_t_p < 0.0)
+      or (state.t_p's own bound, as today)       -- OR'd, strictly more conservative, never less
+```
+
+Same change, same reasoning, for `t_r`/`u_roll` (~L1746 onward) — structurally identical risk, not
+observed in this sortie but not break-specific either, and fixing one loop and not its twin would be
+inconsistent for no stated reason. **Applies in every regime** (break or not, every speed): it is a
+correctness fix to the generic law, not gated on `class == "break"`. `t_p`/`t_r`'s own ±1 clamp
+stays as a second, independent guard — the new check only ever freezes *earlier*, never later.
+
+### G. How BE6/BE7 fall out without a separate mechanism
+
+Walking the two cases against B–D, so the plan does not merely assert they are covered:
+
+- **BE7 (called low, e.g. 55–70 m AGL, no margin from frame 1):** `break_release ≈ 0` immediately
+  (D.1). `a_u_d` is already ≈ `a_u_d_ordinary` (D.2) — the vertical loop is fully engaged from the
+  first frame, holding height at 30° bank. `break_drop ≈ 0` (D.3, release gates it to zero). Bank
+  stays at 30° throughout (B — never eased by margin). Result: a level turn at 30°, steeper than the
+  ordinary 20° cap, height held — BE7, verbatim.
+- **BE6 (reaches the floor mid-break, having flown most of it at `break_release = 1`):** as margin
+  shrinks, `a_u_d` fades toward full height-tracking and `break_drop` fades to 0 (D.2/D.3) —
+  collective "comes up." Bank itself stays commanded at 30° (B); it only actually eases if the
+  ~1.15 G recovery genuinely outruns what collective-rate can deliver, via the unchanged
+  `effective_shortfall`/`phi_scale` safety net (D.4) — "bank comes off... together [with collective
+  rising]," the exception path, not a scheduled one.
+
+### Tuning constants
+
+All new, in `flight_profile.lua`. Checked the full table (widened 4a rule) before naming any of
+these — none overlaps an existing key; `break_max_bank_deg` and `break_height_give_band_m` are
+existing keys whose *value*/*role* change, not new keys.
+
+| constant | first cut | role |
+|---|---|---|
+| `break_max_bank_deg` (existing, value changes) | 30.0 (was 60.0) | the break's bank target, B |
+| `break_collective_drop_frac` | 0.25 | the "20–30%" lever-travel drop, full-speed value, D.3 |
+| `break_drop_speed_scale_min` | 0.5 | the slow-entry floor on the drop's speed schedule, D.3 |
+| `break_drop_speed_low_kmh` | 110.0 | entry IAS at/below which the drop scale floors at `break_drop_speed_scale_min` |
+| `break_drop_speed_high_kmh` | 180.0 | entry IAS at/above which the drop scale reaches 1.0 (covers the 180/250 card rows at full) |
+| `break_recovery_lead_s` | 4.0 | seconds of sink-rate lookahead widening the release band near the floor, D.1/Finding 3 |
+| `break_height_give_band_m` (existing, role widens) | 30.0 (unchanged) | the release band at zero sink rate — floor of `effective_band_m`, D.1 |
+
+**Non-finite check (standing rule).** All of the above are boundary floats read from profile data
+the same way every other constant in these tables is — guarded with `math.isfinite`-style checking
+the same way the existing bounds tables are, per the standing rule (merged to `main` as `c0d8af86`).
+`break_entry_ias_kmh`/`measured_ias_kmh` are derived from `measured.ias_mps` (already finite-checked
+at the telemetry boundary) — no new boundary-float path is introduced.
+
+### Co-moving Fields
+
+Trigger (6a) checked: a break is tracked by `rate_override_deg_s`/`break_entry_h_m`, written
+externally (`axes_break_turn`/`axes_break_away` → `law_apply_goal`) and internally (the settling
+clear). This amendment adds one more co-moving field (`break_entry_ias_kmh`) and one new
+cached-from-measured field (`measured_ias_kmh`, written every frame like `measured_v_t_mps`, not a
+phase field itself but read by the new capture). Every construction/write site of the break phase,
+found by grep (`rate_override_deg_s\|break_entry_h_m`), gets the new field alongside it:
+
+| site | writes today | `break_entry_ias_kmh` |
+|---|---|---|
+| `law_apply_goal`, `goal.turn` branch (~L692–693) | clears `rate_override_deg_s`/`break_entry_h_m` to `nil` (a continuous turn ends any break) | **add:** clear to `nil` too |
+| `law_apply_goal`, `goal.heading_deg` branch (~L717–722) | sets `rate_override_deg_s`; snapshots `break_entry_h_m = state.h_ref` only if an override is present, else `nil` | **add:** snapshot `state.measured_ias_kmh` (or `nil`) the same way, same condition |
+| `law_init_at_take` default seed (~L943–945) | `rate_override_deg_s = nil`, `break_entry_h_m = nil` (a fresh session never inherits a stale break) | **add:** `break_entry_ias_kmh = nil` |
+| `law_init_at_take`'s own measured-cache seed (~L938, alongside `measured_v_t_mps`) | — | **add:** `measured_ias_kmh = ias_kmh` at the take instant |
+| settling clear (today's ~L1847–1849) | clears `rate_override_deg_s`/`break_entry_h_m` to `nil` when `in_band_heading` and a break was active; **this amendment also writes `alt_goal_m`** here (E) | **add:** clear `break_entry_ias_kmh` to `nil` in the same `if` |
+| unpark carry-over (~L3578–3587) | calls `law_apply_goal` directly with `heading_deg`/`turn_rate_deg_s` — covered automatically once the `goal.heading_deg` branch above carries the new field | no separate site — confirmed by reading the call, not assumed |
+| `law_update`, every frame (~L1817, alongside `next_state.measured_v_t_mps`) | caches `measured.v_t_mps` | **add:** cache `measured.ias_kmh` (already computed locally as `ias_kmh` at ~L1066) the same way |
+
+No other field is added or changed by this amendment; `break_release` (D.1) is a local, never
+persisted, same posture as `shortfall`/`class` already are.
+
+### Design Overview (diagrams)
+
+**1. What a break actually commands, by regime — bank is constant; the vertical channel and the
+collective offset are what move.**
+
+```mermaid
+flowchart TB
+  ENTRY["break left/right commanded<br/>(axes_break_turn, UNCHANGED)"] --> REL["break_release (D.1)<br/>height_margin_m / effective_band_m<br/>(band widened by sink-rate lead)"]
+  REL -->|"= 1, height to spare"| FREE["RELEASED<br/>bank: 30 deg (B, fixed)<br/>pitch: holds entry-ish speed (C, unchanged)<br/>a_u_d = 0 -- no climb/descent demand (D.2)<br/>collective: level trim MINUS break_drop (D.3)<br/>-> aircraft sinks, by design"]
+  REL -->|"fading toward 0, near floor/budget"| RECOV["RECOVERING<br/>bank: still 30 deg (B, fixed)<br/>a_u_d fades back to ordinary height-tracking (D.2)<br/>break_drop fades to 0 (D.3)<br/>-> collective comes up, sink arrested BEFORE the floor"]
+  REL -->|"= 0 from frame 1 (BE7, called low)"| HELD["HELD FROM ENTRY<br/>bank: still 30 deg (B, fixed)<br/>a_u_d = ordinary (height held) from the start<br/>-> a level turn, steeper than ordinary, height held"]
+  RECOV -->|"shortfall persists despite recovery<br/>(effective_shortfall, D.4, SAFETY NET, kept unchanged)"| EASE["phi_scale eases bank<br/>theta_speed_give pitches back<br/>-- the EXCEPTION path (BE6), not scheduled"]
+  TERRAIN{"M3 terrain_binding?"} -.->|"yes, at any regime"| FREE
+  TERRAIN -.-> RECOV
+  TERRAIN -.-> HELD
+  TERRAIN -->|"overrides release outright (D.2)"| GROUND["a_u_d = full ordinary, break_drop = 0<br/>ground/terrain safety first, always"]
+  FREE --> SETTLE["heading reached: settle (UNCHANGED)<br/>+ alt_goal_m := height reached (E, NEW)<br/>-> level at the height reached, no climb back"]
+  RECOV --> SETTLE
+  HELD --> SETTLE
+```
+
+**2. Who owns what, by channel — contrast with the superseded design.**
+
+```mermaid
+flowchart LR
+  subgraph OLD["Superseded (LV-2 amendment, failed sortie)"]
+    OB["bank 60 deg (~2.37 G)"] --> OA["a_u_d tracks break-floor altitude"]
+    OA --> ON["n_d solved for bank+climb demand (~2 G+)"]
+    ON --> OC["u_c_ff chases it -- FULL COLLECTIVE"]
+    OC --> OP["nose pitches up against full forward cyclic"]
+  end
+  subgraph NEW["Rework"]
+    NB["bank 30 deg (1.15 G), FIXED"] --> NP["pitch: speed loop only (C, unchanged)"]
+    NB --> NA["a_u_d blended toward 0 by break_release (D.2)"]
+    NA --> ND["u_c_ff = level trim MINUS break_drop (D.3)"]
+    ND --> NS["aircraft sinks -- height is the currency, not a target"]
+    NA -.->|"margin shrinks / terrain_binding"| NR["a_u_d -> full ordinary tracking<br/>(D.2), collective comes up"]
+  end
+```
+
+### Implementation Plan
+
+1. **Cache `measured_ias_kmh`** in `state` every `law_update` frame (alongside `measured_v_t_mps`)
+   and at `law_init_at_take`'s seed — no behaviour change by itself, just the data `break_entry_
+   ias_kmh` needs.
+2. **Capture/clear `break_entry_ias_kmh`** at every site in the Co-moving Fields table.
+3. **Bank**: change `break_max_bank_deg` to 30.0. No other code change in section B.
+4. **Collective & vertical channel (D)**: hoist `break_release`'s computation after `break_floor`
+   (D.1); blend `a_u_d` (D.2); add the explicit drop to `u_c_ff` (D.3); re-point `effective_
+   shortfall`'s `height_available_frac` input at the same `break_release` value (D.4, formula
+   unchanged). Add the four new/changed tuning constants.
+5. **Roll-out (E)**: add the `alt_goal_m` write to the settling-clear block.
+6. **Pitch-loop anti-windup (F)**: change the freeze condition for `t_p` and `t_r` to also check the
+   estimated combined output. No profile constants.
+7. **Toy-plant tests** (below) before any card flight.
+
+### Tests (real-Lua toy-plant harness)
+
+- **Bank cap, three card speeds (120/200/250 km/h):** steady-state bank settles at 30° (within the
+  toy plant's own tolerance), not 60°; `n_d` at settle ≈ 1.15.
+- **Release/collective-offset, height to spare:** break entered well above the floor with the whole
+  budget free — `a_u_d` reads ≈ 0 for the duration, `u_c_ff` sits `break_drop` below the level-trim
+  value computed independently in the test, altitude sinks monotonically (never oscillates), no
+  collective saturation.
+- **Speed-scaled drop:** same scenario at a 110 km/h entry vs. a 200 km/h entry — the 110 km/h
+  case's measured `u_c_ff` offset is ≈ half the 200 km/h case's, both read against the test's own
+  independently-computed level-trim baseline.
+- **BE7, no margin from entry:** a break commanded with the plant already at/near the floor —
+  `break_release` reads 0 from the first `law_update` step, `a_u_d` tracks the ordinary height
+  reference from the first frame (no sink-then-recover pumping), bank still reaches 30°.
+- **Recovery before the floor (Finding 3):** a break with a fast artificial sink rate injected —
+  `effective_band_m` (hence `break_release`'s fall-off) starts earlier than the fixed 30 m band
+  alone would predict, and the plant's altitude never crosses below the floor in the scenario.
+- **Terrain override:** `terrain_binding` forced true mid-break — `a_u_d` reads the full ordinary
+  value and `break_drop` reads 0 for that frame regardless of `break_release`.
+- **Roll-out height:** break settles (heading in-band) at a height below the pre-break standing
+  goal — the plant holds that height afterward, no climb back; a speed or altitude command given
+  after roll-out still works normally (re-commanding height is unaffected).
+- **Anti-windup:** a scenario that drives the combined pitch output to saturation (e.g., a large
+  commanded deceleration at low rotor-RPM-gated collective rate) while `t_p` itself is still well
+  inside [-1, 1] — `t_p` stops advancing in the saturating direction the frame the *combined*
+  output saturates, not later; a companion scenario confirms `t_r` behaves the same way on roll.
+  Regression: every existing anti-windup test (the ones written against the old, `t_p`-own-bound-
+  only condition) still passes — the new condition only ever freezes earlier or at the same time,
+  never later.
+- **Regression:** every LV-1 card scenario and every non-break LV-2/LV-3 toy-plant test is
+  bit-identical (bank cap and `a_u_d`/`u_c_ff` changes are gated on `class == "break"`; the
+  anti-windup change is the one exception that is *meant* to change ordinary-flight behaviour in the
+  rare case it would have wound up, by design — F above).
+
+### LV-2 card (rewritten against BE1–BE10)
+
+SAU off before every take. Break left and right at **120, 180 and 250 km/h** (watch: bank reaches
+~30° promptly, collective visibly comes down at entry, nose does *not* rise, speed stays near entry,
+rotor RPM stays clear of 88%, height loss ≤ 100 m and never below the floor, roll-out holds the
+height reached — no climb back). **For each of these three, time the 90° break and compare it
+against an ordinary "turn right 90" at the same entry speed, and record the height used by
+each** — this is BE5's own test, and the number that tells whether 30° is "a break" rather than a
+slightly brisker ordinary turn (Finding 4). One break started at **55–70 m AGL** (BE7: watch for a
+level turn held from the first second, not a sink-then-recover pump). One break entered at **100–
+120 km/h** (BE/Q4: collective offset about half; watch roll-in gentleness, U6). One break away
+(180°) at **30°** — record whether the 100 m budget is used up before the heading is reached
+(Finding 4's own flag) and whether it needs a steeper bank, per Q6. One right break, watched
+specifically for the pedal cap and yaw at the roll-out (item H below). Each row: note whether the
+pitch stays near the speed-loop's own target throughout (no excursion toward the old +19°/−52°
+pattern) — that comparison is this card's real pass/fail criterion, more than any single number.
+
+### Risks & Unknowns (amendment-specific)
+
+- **`break_collective_drop_frac` (0.25), the speed schedule's breakpoints, and `break_recovery_
+  lead_s` (4.0 s) are all first cuts**, like every gain in this plan — this card is where they are
+  measured, not derived analytically. A drop too small may not read as "visibly less collective"; a
+  drop too large, combined with a long break away at cruise, may still spend the whole 100 m budget
+  before the heading is reached (Finding 4's own flag, carried forward — 30° spends roughly 3× the
+  height per degree of heading change that 60° did, for the same sink rate).
+- **The near-floor safety net (D.4) is now the only mechanism standing between a genuinely
+  under-powered recovery and the floor.** At 30° bank the demand is modest (≈1.15 G) compared to
+  the old design, so this path should rarely engage — but if the card's 55–70 m AGL row or the
+  break-away row shows `phi_scale` easing bank and it still sinks past the intended arrest point,
+  `break_recovery_lead_s` (widen it) is the first tunable to revisit, not a new mechanism.
+- **The anti-windup fix (F) changes ordinary (non-break) behaviour in the rare case where it would
+  have wound up** — by design, but it is the one change in this amendment not gated to `class ==
+  "break"`, so any LV-1/LV-3 card regression involving pitch should be checked against this fix
+  first, not assumed unrelated.
+- **Out of scope, named for where it would interact (per the task brief):** the right-pedal cap
+  (DCS adjustable stops cap the effective pedal at ~0.57 right, `pedal_limit_positive` is 1.0) could
+  bite during the D.4 recovery path's torque feed-forward (more collective coming back up → more
+  right-pedal demand) and at the BE8 roll-out in a right break specifically — the card's right-break
+  row (above) is where this would first show as a yaw/ball excursion, not a break-recipe defect. The
+  λ-from-total-ground-speed defect (second sortie, slow-speed pedal runaway) is orthogonal to this
+  amendment (it only matters once a break decays into LV-3's low-speed regime, BE9, which this
+  amendment does not touch) but is named so a BE9 card row that misbehaves is not misdiagnosed as a
+  break defect. The M4 SAU-at-take delay bug (sortie 2) must be fixed or worked around (confirm SAU
+  off before the take, by hand if needed) before this card is flown, since SAU H/K/T on is a
+  confound this amendment cannot be judged against.
+- **`break_recovery_lead_s` uses `state.w_ref`, not measured vertical speed** — consistent with the
+  rest of this file's "reference, not raw measurement, drives the law" posture, but it means the
+  lead only grows once the shaper's own reference has started sinking, one frame or so behind a
+  sudden real sink. Not expected to matter at `law_hz`, flagged because it is a design choice, not
+  an oversight.
+
+### Decisions Requiring User Input
+
+None — every open question from the goal check (`alignment.md`, "Goal check — 2026-11-28 — LV-2
+rework", Questions 1–6) was answered "as recommended" before this pass began, and Findings 1–6 are
+each addressed above: Finding 1 (roll-out climbs back) by E; Finding 2 ("more turn rate" collapsing
+to an ordinary turn) by B's fixed 30° regardless of margin; Finding 3 (floor reaction re-engaging
+too late) by D.1's sink-rate lead; Finding 4 (30° spends more height per degree) carried forward as
+a Risk and a card measurement, not a design change (the user chose 30° "for now"); Finding 5 (slow
+entry) by D.3's speed schedule; Finding 6 (right breaks and the pedal cap) named in Risks, out of
+this amendment's scope. The task brief's own two "out of scope, name the dependency" items (pedal
+cap, λ-from-ground-speed) are named in Risks, not decided here.
+
 ## LV-3 amendment (2026-11-27)
 
 Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `origin/feature/bl16-lift-vector-
