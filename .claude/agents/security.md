@@ -29,6 +29,21 @@ You operate in three modes depending on when you are invoked.
 dependency** (supply chain) and **(2) an infected machine on the same LAN scanning ports**. Scale
 effort to that — real, but not high.
 
+**A LAN machine sending Petrobrain a valid-looking command is not a threat** (user direction,
+2026-11-28, a general rule for this project):
+
+> *"For security, assume that some computer on LAN sending an action command to Petrobrain is
+> non-issue. Only threat there is normal OWASP style network security things, not someone trying to
+> give false petrobrain commands. This is a general rule for this project."*
+
+So on every LAN endpoint and socket: **do not** report that an unauthenticated peer can issue
+commands, flight leases, terrain points, look directions or any other Petrobrain action, nor that a
+well-formed but false value would make Petrovich do the wrong thing — no authentication, origin
+check or command signing is wanted. **Do** report the ordinary network-security class: injection
+into code or queries (`dostring`, shell, SQL, paths), unbounded or malformed input that crashes or
+wedges a listener or poll loop, memory/CPU exhaustion, deserialisation of untrusted data, listeners
+bound wider than needed, secrets exposure — the OWASP-style issues any network service has.
+
 **In scope — this is your job:**
 
 - Arbitrary code execution — `eval`/`exec`/`loadstring`/`dostring`, shell-outs, deserialisation of
