@@ -1230,3 +1230,90 @@ needed beyond that.
 ### Questions for the user
 
 1. For BE6 (reaching the floor or the 100 m budget mid-break, having flown most of it released): do you want the turn to actually slow down as collective comes back up — which needs bank to ease as part of the ordinary recovery, not only through the rare `phi_scale` safety net — or is "slower turn" in your answer just describing the overall manoeuvre (collective recovering, height arrested) without the bank itself coming off unless recovery is genuinely failing? The current plan only eases bank in the second (rare) case.
+
+## Plan check R2 — 2026-11-28 — LV-2 rework BE6 amendment
+
+**Verdict:** CONCERNS
+
+Checked `plan.md` "### LV-2 rework — BE6 amendment (2026-11-28)" against this file's BE6/BE7 (Goal
+check, "LV-2 rework") and the Plan check above whose Finding 1/Question 1 it answers ("A, ease bank
+too"). `memory-search.py w_ref shaped vertical speed reference measured sink` — not indexed.
+`gq.sh` on the w_ref/measured-sink question returned generic graph noise (no node on this
+mechanism) — undocumented, confirmed by reading the code directly rather than assumed absent.
+Not yet implemented at this tip (`grep break_release aircraft-layer/dcs-export/Petrobrain/
+flight_control.lua` finds nothing) — checked against the plan's own described mechanism and the
+code it amends (`a_ref_h`/`w_ref` integration ~L1279–1322, `a_u_d` blend D.2 ~L1592–1607,
+`k_vs_error` feedback ~L1436, the collective-saturation lead clauses ~L1347–1353).
+
+| expectation | stage | status |
+|---|---|---|
+| BE6 | D.4a (`recovery_phi_scale`, new) | **contradicted** — see Finding 1: the easing signal is weak exactly when BE6 needs it |
+| BE7 | D.4a's own floor case (`sink_being_arrested_mps ≈ 0` since `a_u_d` is ordinary from frame 1) | met — confirmed with either signal, see Finding 1 |
+
+### Findings
+
+1. **`state.w_ref` is a free-running virtual reference, decoupled from the real aircraft during
+   RELEASED — so by the time BE6's recovery needs easing, the signal the amendment reads can have
+   already decayed to ~0.** Lens: world truth (of the law).
+   - **Assumption (the pointed question):** in RELEASED, `a_u_d` blends toward 0, so `w_ref` then
+     follows the real sink, and `-w_ref` at the start of RECOVERING ≈ the actual descent rate.
+   - **In the sim:** `alt_goal_agl` is floored at `break_floor` unconditionally the instant a break
+     starts (`state.rate_override_deg_s ~= nil`, ~L1274–1278) — **not gated by `break_release` at
+     all**. `w_ref`'s own update (`a_ref_h` from `err_h`/`omega_alt`/`law_zeta`, then `next_state.
+     w_ref = state.w_ref + a_ref_final * dt`, ~L1279–1322) runs every frame from this floored
+     target, entirely before and independent of D.2's `a_u_d` blend (D.2 only scales `a_u_d`, which
+     feeds the collective solve downstream — it has no path back into `w_ref`'s own integration).
+     The only feedback from the real aircraft into `w_ref` is the saturation-lead clause
+     (`collective_was_capped`/`floored`, ~L1347–1353), gated on `u_c >= 0.999` or a positive
+     `dbg_shortfall` — during ordinary RELEASED flight (collective deliberately *reduced* by D.3's
+     `break_drop`, not pinned at the ceiling) this does not engage. So `w_ref` is a second-order,
+     critically-damped (`law_zeta = 1.0`), accel-capped (`alt_accel_cap_mps2 = 1.0 * schedule_g`,
+     ≈ 0.86–1.0 at 120–250 km/h) model that chases `break_floor` **on its own clock** — roughly a
+     15–25 s settle for a 100 m error at this cap/`omega_alt = 0.5` — regardless of how long the
+     real aircraft actually takes to use up its real margin, since the real sink is governed by
+     bank + `break_drop` physics that D.2 has just removed from the collective solve, not by this
+     shaper. The goal check's own table has 180° breaks away at cruise taking 31–38 s — longer than
+     the virtual model's settle time — so for any break flown released longer than the model's own
+     ~20 s, `state.w_ref` reaches ~0 (virtual "floor reached, sink arrested") **before** the real
+     margin (`height_margin_m = measured.h_m - break_floor`, which correctly uses real height) runs
+     out and `break_release` starts falling.
+   - **The pilot would see:** exactly BE6's failure case, now via a different mechanism than the
+     one the amendment fixed — flying released long enough for the virtual model to "settle," then
+     reaching the real floor: `sink_being_arrested_mps = max(0, -w_ref) ≈ 0`, so
+     `recovery_phi_scale ≈ 1.0` and bank does *not* ease, while the real aircraft is still sinking
+     at whatever rate bank + reduced collective actually produced. Collective comes up (D.2/D.3,
+     unaffected) but the turn does not slow — the precise "not 'more collective, slower turn'"
+     complaint Finding 1 of the prior Plan check raised, reopened by a signal choice rather than by
+     a missing mechanism this time.
+   - **Grounded in:** `plan.md` D.4a formula (~L1936–1949) and its own commentary ("at
+     `break_release = 1`... `recovery_phi_scale = 1.0` — bank stays at 30° while the aircraft
+     sinks, exactly as designed" — true for the *virtual* sink, silent on whether it still tracks
+     the *real* one by the time release falls); `flight_control.lua` ~L1274–1322, ~L1347–1353,
+     `flight_profile.lua` L60 (`law_zeta`), L68 (`omega_alt`), L105 (`alt_accel_cap_mps2`).
+   - **Suggests:** read `sink_being_arrested_mps` off **`measured.w_mps`** (the real vertical
+     speed the estimator already produces, used throughout this same function, e.g. the `a_u_d`
+     error term at ~L1436) instead of `state.w_ref`: `math.max(0.0, -(measured.w_mps or 0.0))`.
+     This does not change BE7 — there, `a_u_d` is ordinary from frame 1, so if the collective loop
+     is actually holding height, `measured.w_mps` stays near zero through the scenario just as
+     `w_ref` does (both read ~0; checked both ways). It fixes BE6 because `measured.w_mps` decays
+     to zero only when the real sink is actually arrested, not on the shaper's own unrelated
+     clock. Trade-off to weigh against the tuning note already in the plan (`k_phi_recovery_ease`'s
+     own first-cut caveat about "ordinary turbulence-scale `w_ref` noise"): raw `measured.w_mps`
+     is at least as noisy as the shaped `w_ref` it would replace, so the same noise-flicker risk
+     near the RECOVERING floor applies, possibly more so — worth a light filter (or reusing
+     whatever smoothing the estimator already applies to `measured.w_mps` elsewhere) rather than
+     the raw per-frame value, not a reason to keep `w_ref`.
+
+No other BE regressed: BE1–BE5, BE8–BE10 are untouched by this amendment (it adds only D.4a, gated
+`class == "break"`, folded into `phi_scale` via `math.min` alongside D.4's existing term — D.4
+itself, the M3 terrain override, and every other channel are explicitly "not touched by a single
+character," confirmed against the diff described in the amendment text; no code to re-read since
+nothing is implemented yet).
+
+### Questions for the user
+
+1. Swap D.4a's `sink_being_arrested_mps` from `state.w_ref` to `measured.w_mps` (the real vertical
+   speed), so the easing tracks what the aircraft is actually doing rather than a virtual reference
+   that can settle to zero on its own clock well before a long released break's real margin runs
+   out? (Recommend: yes — `state.w_ref` has no feedback path from the real aircraft during
+   RELEASED, so it is the wrong signal for "is a real sink being clawed back.")
