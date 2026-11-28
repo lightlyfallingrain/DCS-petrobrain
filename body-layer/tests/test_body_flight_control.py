@@ -32,10 +32,17 @@ from body import _apply_flight_requests
 class _FakeRunner:
     """Stands in for `ConsolePerceptionRunner` -- `_apply_flight_requests`
     only reads/writes `command_seq`, mission-wide per the plan's own
-    "one body-layer counter" (section 5)."""
+    "one body-layer counter" (section 5). BL-16 M3 (`plans/
+    flight-lift-vector/plan.md`, section E) also reads `last_ownship_
+    state` (via `_compose_and_relay_terrain`) -- `None` here (no
+    telemetry simulated in this file) takes that function's own early
+    return, so `_terrain_sent`/`_terrain_seq` are never touched."""
 
     def __init__(self, command_seq: int = 0) -> None:
         self.command_seq = command_seq
+        self.last_ownship_state = None
+        self._terrain_sent: dict[int, Any] = {}
+        self._terrain_seq = 0
 
 
 class _FakeAircraftClient:
@@ -236,7 +243,7 @@ class TestApplyFlightRequests:
         _apply_flight_requests(runner, console, client, 7, 1.0)  # type: ignore[arg-type]
 
         assert len(client.flight_lease_calls) == 2
-        for epoch, _limits in client.flight_lease_calls:
+        for epoch, _limits, _terrain in client.flight_lease_calls:
             assert epoch == 7
 
     def test_a_stale_transition_is_discarded_while_overlay_flying(self) -> None:

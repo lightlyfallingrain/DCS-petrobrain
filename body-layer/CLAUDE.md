@@ -626,6 +626,23 @@ Belief — observation *consumption*:
   `flight_control_limits()` no longer sends `min_ias_kmh` on the wire — the real law change (the
   lift-vector control law itself) lives in `Export.lua`'s `flight_control.lua`/`flight_profile.lua`
   on the aircraft-layer side; this module only carried the floor that used to protect it.
+  **BL-16 M3** (`plans/flight-lift-vector/plan.md`, "M3 amendment", section A) raises `FLOOR_AGL_M`
+  40 → 50 (now THE one effective floor `Export.lua`'s law derives as `F_eff` every step, not only
+  a spoken-height clamp) and removes `clamp_altitude`'s own AGL floor entirely — "allow player to
+  command any altitude and then accept it"; it now only rejects a negative height. `MAX_CLIMB_VS_
+  MPS` is removed from this module and the wire outright (not widened) — "no number limit, limit
+  comes from available power" — a power governor inside `Export.lua`'s law replaces it.
+- `src/belief/terrain_ahead.py` (`[[BL-16]]` M3, `plans/flight-lift-vector/plan.md`, section B/E)
+  — composes the grid of terrain points ahead of the nose (`compose_terrain_grid`, pure, from
+  telemetry position/heading) and encodes the newest answered grid for the `flight_lease`'s own
+  `terrain` relay field (`build_terrain_relay`). No I/O of its own: `body._compose_and_relay_
+  terrain` is the one production caller, composing/sending a fresh grid every poll (never "on
+  change" — position and heading change every poll by construction), reading back the aircraft
+  layer's latest `GET /line_of_sight/latest` `"terrain"` answer, and joining it against whichever
+  `seq` it was sent under via `ConsolePerceptionRunner._terrain_sent` (a small ring of recent
+  grids, since the answer lags by at least one poll). Coarsens (doubles the row spacing) rather
+  than truncating whenever the configured geometry would exceed the protocol's `MAX_TERRAIN_
+  POINTS` (32) — the user's own default numbers (1 + 5×3 = 16) never reach it.
 
 Mission memory — the worth-remembering ledger (BL-8, `plans/bl8-mission-memory/plan.md`):
 

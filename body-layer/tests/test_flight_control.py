@@ -236,9 +236,16 @@ class TestReleaseControls:
 
 
 class TestClampHelpers:
-    def test_clamp_altitude_agl_floors_at_floor_agl_m(self) -> None:
-        assert clamp_altitude(FLOOR_AGL_M - 10.0, "agl") == FLOOR_AGL_M
+    def test_clamp_altitude_agl_has_no_floor_only_a_non_negative_bound(self) -> None:
+        """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section A): the
+        AGL floor clamp is gone -- "allow player to command any
+        altitude and then accept it." `FLOOR_AGL_M` is applied inside
+        `Export.lua`'s law (against the goal, as `F_eff`), never here;
+        this clamp now only rejects a negative height."""
+        assert clamp_altitude(FLOOR_AGL_M - 10.0, "agl") == FLOOR_AGL_M - 10.0
         assert clamp_altitude(FLOOR_AGL_M + 10.0, "agl") == FLOOR_AGL_M + 10.0
+        assert clamp_altitude(-5.0, "agl") == 0.0
+        assert clamp_altitude(0.0, "agl") == 0.0
 
     def test_clamp_altitude_baro_passes_through_unclamped(self) -> None:
         assert clamp_altitude(0.0, "baro") == 0.0
@@ -263,13 +270,15 @@ class TestWireHelpers:
 
     def test_flight_control_limits_carries_m2s_shaper_limits_and_bands(self) -> None:
         """M2's own additions to the wire `limits` bundle -- the
-        shaper's own rate limits (`max_turn_bank_deg`/`max_climb_vs_
-        mps`/`max_accel_mps2`) and A9's bands, all sent so `Export.
-        lua`'s control law has one source of truth for behaviour."""
+        shaper's own rate limit (`max_turn_bank_deg`/`max_accel_mps2`)
+        and A9's bands, all sent so `Export.lua`'s control law has one
+        source of truth for behaviour. **`max_climb_vs_mps` removed
+        (BL-16 M3, `plans/flight-lift-vector/plan.md`, section C)** --
+        "no number limit, limit comes from available power"; a power
+        governor inside `Export.lua`'s law replaces it."""
         limits = flight_control_limits(12.5)
         for key in (
             "max_turn_bank_deg",
-            "max_climb_vs_mps",
             "max_accel_mps2",
             "speed_band_frac",
             "alt_band_frac",
@@ -279,6 +288,7 @@ class TestWireHelpers:
         ):
             assert key in limits
             assert isinstance(limits[key], float)
+        assert "max_climb_vs_mps" not in limits
 
     def test_goal_request_fields_omits_none_and_false_fields(self) -> None:
         assert goal_request_fields(FlightControlGoalRequest()) == {}

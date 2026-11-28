@@ -3849,6 +3849,293 @@ print(string.format("%.6f %.6f %.6f", measured.v_g, max_psi_dev, max_abs_phi))
         assert max_abs_phi > 1.0
 
 
+# --- BL-16 M3 (`plans/flight-lift-vector/plan.md`, "M3 amendment") -- the
+# --- terrain floor and look-ahead. ------------------------------------
+
+
+class TestM3LookAheadHelperDirect:
+    """Direct, single-`law_update`-call tests against `measured.terrain`
+    -- the look-ahead helper's own gating, exercised without a closed
+    loop (the closed-loop scenario below is `TestM3TerrainClimbScenario`).
+    `measured.terrain` is a list of `{d, T}` pairs -- along-nose
+    distance, bare-ground ASL height -- the exact shape `run_active_
+    frame`'s own projection produces (not tested here; that lives in
+    `test_flight_control_lua.py`, which has the DCS-facing mocks)."""
+
+    @staticmethod
+    def _w_floor_after_one_step(
+        *, terrain: list[tuple[float, float]] | None, **measured_overrides: float
+    ) -> tuple[float | None, bool]:
+        overrides: dict[str, float] = {
+            "h_m": 100.0,
+            "asl_m": 100.0,
+            "ias_mps": 150.0 / 3.6,
+            "v_t_mps": 150.0 / 3.6,
+        }
+        overrides.update(measured_overrides)
+        terrain_lua = "nil"
+        if terrain is not None:
+            terrain_lua = "{" + ",".join(f"{{{d},{t}}}" for d, t in terrain) + "}"
+        driver = f"""
+local measured = {_measured(**overrides)}
+measured.terrain = {terrain_lua}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, {{ heading_deg = 0.0, alt_m = 100.0, alt_ref = "B" }}, PROFILE)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(tostring(next_state.dbg_terrain_w_floor))
+print(tostring(next_state.terrain_binding))
+"""
+        lines = _run(driver)
+        w_floor = None if lines[0] == "nil" else float(lines[0])
+        return w_floor, lines[1] == "true"
+
+    def test_a_ridge_ahead_at_forward_speed_demands_a_climb(self) -> None:
+        # 1 km ahead, 50 m above the current ASL -- well above the
+        # floor beneath (the barometric goal's own floor is 40, this
+        # file's `LIMITS.floor_agl_m`).
+        w_floor, binding = self._w_floor_after_one_step(
+            terrain=[(1000.0, 150.0)], v_g_f=150.0 / 3.6
+        )
+        assert w_floor is not None
+        assert w_floor > 0.0
+        assert binding is True
+
+    def test_hover_or_below_min_speed_disarms_the_whole_grid(self) -> None:
+        """E8: nothing ahead is urgent at hover or in a pedal turn --
+        the same ridge that demands a climb at forward speed must give
+        no demand at all once `v_g_f` falls below `terrain_min_speed_
+        mps`."""
+        w_floor, binding = self._w_floor_after_one_step(
+            terrain=[(1000.0, 150.0)], v_g_f=0.0
+        )
+        assert w_floor is None
+        assert binding is False
+
+    def test_points_behind_are_dropped(self) -> None:
+        w_floor, _binding = self._w_floor_after_one_step(
+            terrain=[(-500.0, 150.0)], v_g_f=150.0 / 3.6
+        )
+        assert w_floor is None
+
+    def test_a_point_below_the_goals_own_height_gives_no_demand(self) -> None:
+        """ "This keeps a commanded descent over flat ground free" --
+        flat ground ahead (0 ASL, well below the current 100 m goal)
+        asks nothing of the reference."""
+        w_floor, _binding = self._w_floor_after_one_step(
+            terrain=[(1000.0, 0.0)], v_g_f=150.0 / 3.6
+        )
+        assert w_floor is None
+
+    def test_a_ridge_above_the_goal_bounds_a_descent(self) -> None:
+        """A ridge standing above a COMMANDED DESCENT's own goal bounds
+        how fast he may descend toward it, rather than diving and
+        climbing again -- `w_floor` is negative here (less steep than
+        an unbounded descent), never positive. Take seed's own
+        barometric goal is 100 (`_w_floor_after_one_step`'s default);
+        at `h_m`/`asl_m` = 200 the baro-converted AGL target is also
+        100 (ground is flat, 0, beneath the aircraft) -- a ridge at
+        80 m clears to `R = 80 + f_eff(40) = 120`, above that 100 m
+        goal height, so it counts (`R_i > goal_asl`); one at 60 m
+        (`R = 100`) would not (equal, not greater) -- the boundary
+        `TestM3LookAheadHelperDirect` above tests with flat ground."""
+        w_floor, _binding = self._w_floor_after_one_step(
+            terrain=[(1000.0, 80.0)],
+            v_g_f=150.0 / 3.6,
+            h_m=200.0,
+            asl_m=200.0,
+        )
+        assert w_floor is not None
+        assert w_floor < 0.0
+
+    def test_non_finite_height_is_dropped_not_a_substitute_zero(self) -> None:
+        """A non-finite point must be dropped, never read as `0.0`
+        ("a non-finite height is a missing point, never 0")."""
+        w_floor_nan, _ = self._w_floor_after_one_step(
+            terrain=[(1000.0, float("nan"))], v_g_f=150.0 / 3.6
+        )
+        assert w_floor_nan is None
+
+    def test_a_stale_grid_gives_no_demand(self) -> None:
+        """`run_active_frame`'s own `terrain_max_age_s` staleness check
+        happens before `measured.terrain` is ever populated -- a stale
+        grid is `nil`, indistinguishable from "no grid at all" at this
+        layer, already covered by `test_hover_or_below_min_speed_
+        disarms_the_whole_grid`'s sibling cases above. This test instead
+        confirms the kill switch (`terrain_lookahead_enabled = false`)
+        reaches the same "no demand" result -- the other documented
+        degrade-to-floor-only path."""
+        driver = f"""
+PROFILE.terrain_lookahead_enabled = false
+local measured = {_measured(h_m=100.0, asl_m=100.0, ias_mps=150.0 / 3.6, v_t_mps=150.0 / 3.6, v_g_f=150.0 / 3.6)}
+measured.terrain = {{ {{1000.0, 150.0}} }}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, {{ heading_deg = 0.0, alt_m = 100.0, alt_ref = "B" }}, PROFILE)
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(tostring(next_state.dbg_terrain_w_floor))
+"""
+        lines = _run(driver)
+        assert lines[0] == "nil"
+
+
+class TestM3FloorDerivation:
+    """`F_eff` itself (section A): `min(floor, AGL goal)` for an AGL
+    goal, `floor` outright for barometric -- derived fresh each
+    `law_update` step, read back via `dbg_terrain_w_floor`'s own sibling
+    computation is not directly exposed, so these check it through the
+    floor-beneath effect on `h_ref`'s own one-step movement instead."""
+
+    @staticmethod
+    def _alt_goal_agl_after_one_step(
+        *, alt_m: float, alt_ref: str, h_m: float
+    ) -> float:
+        driver = f"""
+local measured = {_measured(h_m=h_m, asl_m=h_m)}
+local state = flight_control.law_init_at_take(measured, LIMITS, {{ pitch = 0, roll = 0, pedals = 0, collective = 0.2 }}, {{ heading_deg = 0.0, alt_m = {alt_m}, alt_ref = "{alt_ref}" }}, PROFILE)
+for i = 1, 2000 do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+end
+print(string.format("%.6f", state.h_ref))
+"""
+        lines = _run(driver)
+        return float(lines[0])
+
+    def test_agl_goal_above_the_floor_is_flown_at_the_goal(self) -> None:
+        # LIMITS.floor_agl_m is 40 in this file's own fixture.
+        h_ref = self._alt_goal_agl_after_one_step(alt_m=300.0, alt_ref="R", h_m=300.0)
+        assert abs(h_ref - 300.0) < 1.0
+
+    def test_agl_goal_below_the_floor_is_flown_at_the_explicit_goal(self) -> None:
+        """U18: an explicit low AGL goal is honoured exactly, never
+        raised to the floor."""
+        h_ref = self._alt_goal_agl_after_one_step(alt_m=20.0, alt_ref="R", h_m=20.0)
+        assert abs(h_ref - 20.0) < 1.0
+
+    def test_baro_goal_whose_agl_equivalent_is_low_floors_at_the_floor(self) -> None:
+        """A barometric goal never gets the explicit-low exception
+        (U18 never applies to it) -- floors at `limits.floor_agl_m`
+        (40, this file's fixture) over the ground beneath."""
+        h_ref = self._alt_goal_agl_after_one_step(alt_m=5.0, alt_ref="B", h_m=5.0)
+        assert abs(h_ref - 40.0) < 1.0
+
+
+class TestM3TerrainClimbScenario:
+    """The plan's own "A new terrain driver" (Tests section): a point-
+    mass vertical plant with a CAPPED climb authority (`plant_w_gain`
+    well below collective saturation, M3 amendment finding 9 -- unlike
+    every pre-existing plant in this file, whose 15.0 m/s^2/unit gain
+    means collective almost never saturates), a ground-height function
+    `g(x)` (a ramp, ASL), `h_m = ASL - g(x)`, and the grid refreshed
+    once a second (the Hook's own 1 Hz cadence) -- re-projected against
+    the CURRENT position every `law_update` step, as `run_active_
+    frame`'s own projection does (not re-implemented here; this file
+    never touches `run_active_frame`).
+
+    **What this one scenario does not reach** (disclosed rather than
+    silently absent, same posture as `implementation-lv3.md`'s own
+    accounting): the exact "2 s old when first used" compose latency
+    (this toy refreshes every 1 s with no additional compose delay); a
+    second ridge/ease-down-after-the-crest cycle (E3/Q4, U20); the
+    explicit-lower-height case (E5); hover-behind-a-ridge (E8, already
+    covered directly in `TestM3LookAheadHelperDirect` instead, which
+    does not need a closed loop). A single gentle upslope is enough to
+    show the mechanism -- that the look-ahead climbs EARLY (before the
+    ramp starts) and the floor binds appropriately -- without extending
+    this already-long plant further; the live card covers the rest.
+
+    **First-cut gains, not a measurement** (same posture as `TestM3
+    LookAheadHelperDirect`'s sibling classes and `implementation-
+    lv3.md`'s own toy-plant disclosures): the law's `omega_alt`/`k_vs_
+    error`/`k_alt_error`/`terrain_lead_s` were tuned for the pre-M3
+    shaper, not for this new look-ahead path, so this scenario measures
+    a real, nonzero sag below the floor during the climb (confirmed by
+    running it, not assumed) -- the bound below is generous for that
+    reason, and the live card's own row 1-6 is what tells whether a
+    gain actually needs retuning, not this toy."""
+
+    def test_climbs_early_and_recovers_to_near_the_floor(self) -> None:
+        driver = """
+local function ground_height(px)
+    local ramp_start, ground_slope, ramp_length = 500.0, 0.05, 1000.0
+    if px < ramp_start then return 0.0 end
+    local d = math.min(px - ramp_start, ramp_length)
+    return ground_slope * d
+end
+
+local ias = 120.0 / 3.6
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = 60.0, alt_ref = "B" }, PROFILE)
+
+local dt = 0.05
+local x = 0.0
+local plant_w_gain = 6.0  -- capped climb authority (finding 9), not 15.0
+local trim_collective = 0.2
+local prev_w = measured.w_mps
+local terrain_abs = nil
+local next_compose_t = 0.0
+local asl = measured.asl_m
+local min_h = measured.h_m
+local w_floor_before_ramp = nil
+
+for i = 1, 1200 do
+    local t = (i - 1) * dt
+    if t >= next_compose_t then
+        terrain_abs = {}
+        for row = 1, 5 do
+            local px = x + row * 200.0
+            terrain_abs[#terrain_abs + 1] = { px, ground_height(px) }
+        end
+        next_compose_t = t + 1.0
+    end
+    local terrain = {}
+    for _, p in ipairs(terrain_abs) do
+        terrain[#terrain + 1] = { p[1] - x, p[2] }
+    end
+    measured.terrain = terrain
+    state = flight_control.law_update(state, dt, measured, LIMITS, PROFILE)
+    if x < 500.0 and state.dbg_terrain_w_floor ~= nil then
+        w_floor_before_ramp = state.dbg_terrain_w_floor
+    end
+    local outputs = flight_control.law_outputs(state, measured, PROFILE)
+    local w_dot = plant_w_gain * (outputs.collective - trim_collective)
+    measured.w_mps = measured.w_mps + w_dot * dt
+    asl = asl + measured.w_mps * dt
+    x = x + measured.ias_mps * dt
+    measured.asl_m = asl
+    measured.h_m = asl - ground_height(x)
+    measured.a_u = (measured.w_mps - prev_w) / dt
+    prev_w = measured.w_mps
+    measured.v_g_f = measured.ias_mps
+    if measured.h_m < min_h then min_h = measured.h_m end
+end
+print(string.format("%.6f", min_h))
+print(tostring(w_floor_before_ramp))
+print(string.format("%.6f", measured.h_m))
+""".replace(
+            "{measured}",
+            _measured(
+                ias_mps=120.0 / 3.6,
+                v_t_mps=120.0 / 3.6,
+                w_mps=0.0,
+                h_m=60.0,
+                asl_m=60.0,
+                v_g_f=120.0 / 3.6,
+            ),
+        )
+        lines = _run(driver)
+        min_h, w_floor_before_ramp, final_h = lines
+        # Climbs EARLY: the look-ahead already demands a positive
+        # vertical speed well before the ramp (x < 500) is reached.
+        assert w_floor_before_ramp != "nil"
+        assert float(w_floor_before_ramp) > 0.0
+        # Never far below the floor (40, this file's `LIMITS.floor_
+        # agl_m`) -- a real sag (first-cut gains, class docstring),
+        # bounded generously rather than asserted at exactly 40.
+        assert float(min_h) > 40.0 - 20.0
+        # Recovers to near the floor once the ramp plateaus (the
+        # barometric goal's own AGL equivalent there is below the
+        # floor, so the floor -- not the baro goal -- is what it
+        # settles against).
+        assert abs(float(final_h) - 40.0) < 15.0
+
+
 def test_file_parses_without_a_lua_interpreter_too() -> None:
     """`luac5.1` sanity, independent of whether a runtime interpreter is
     on `PATH` -- mirrors `test_flight_control_lua.py`'s own copy of

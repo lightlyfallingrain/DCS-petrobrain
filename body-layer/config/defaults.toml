@@ -262,10 +262,10 @@ ARM_LEASE_S = 3.0
 # source: belief/flight_control.py:BREAK_MAX_HEIGHT_LOSS_M
 BREAK_MAX_HEIGHT_LOSS_M = 100.0
 
-# The terrain floor mode 1 holds once M3 builds the climb-for-terrain logic (the user's own Q5 number, reused here -- mode 2 never declared it, see the plan's "Behaviour constants" section: "P4 is unbuilt... mode 1 declares its own constants with those defaults").
+# The one effective floor mode 1 holds above bare ground, lowered only by an AGL height the pilot explicitly commanded (the AGL goal itself, when it is lower -- `Export.lua`'s own `flight_control.lua`) -- `plans/flight-lift-vector/plan.md`'s "M3 amendment", section A.
 # status: agreed-guess | range: 0.0 .. 500.0
 # source: belief/flight_control.py:FLOOR_AGL_M
-FLOOR_AGL_M = 40.0
+FLOOR_AGL_M = 50.0
 
 # How long a take request waits for `Export.lua`'s own ack (`fd_acks`) before giving up, kept at least one poll plus `Export.lua`'s own push cadence above `belief.flight_authority.FLIGHT_REQUEST_ACCEPT_WINDOW_S`, the Lua-side half of the same deadline pair (`test_handover_ack_timeout_exceeds_accept_window_with_margin` pins the inequality).
 # status: judgement | range: 0.5 .. 30.0
@@ -281,11 +281,6 @@ HEADING_BAND_DEG = 5.0
 # status: agreed-guess | range: 0.1 .. 5.0
 # source: belief/flight_control.py:MAX_ACCEL_MPS2
 MAX_ACCEL_MPS2 = 2.0
-
-# The altitude channel's own vertical-speed ceiling -- M0-A's reference manoeuvre flew a "5 m/s climb and descent of 100 m", reused here as the shaper's own rate limit rather than measured for this purpose.
-# status: judgement | range: 1.0 .. 15.0
-# source: belief/flight_control.py:MAX_CLIMB_VS_MPS
-MAX_CLIMB_VS_MPS = 5.0
 
 # The ceiling `set_speed`/`step_speed`/`set_speed_max` clamp to -- mode 2's own Q5 ceiling (280 km/h), reused as a judgement call the same way `belief.ai_pilot_wheel.AI_PILOT_ALTITUDE_RADAR_CAP_AGL_M`'s docstring already reuses a mode-2 figure elsewhere.
 # status: judgement | range: 100.0 .. 500.0
@@ -465,6 +460,27 @@ SLEW_AZ_DPS = 20.0
 # status: derived | range: 2.0 .. 20.0
 # source: belief/sight_head.py:SLEW_EL_DPS
 SLEW_EL_DPS = 10.0
+
+[belief.terrain_ahead]
+# Column half-width across the nose -- the user's own number.
+# status: agreed-guess | range: 0.0 .. 1000.0
+# source: belief/terrain_ahead.py:TERRAIN_HALF_WIDTH_M
+TERRAIN_HALF_WIDTH_M = 200.0
+
+# BL-16 M3, section B (the user's own numbers, *"a rectangular shaped grid: 1 km ahead of aircraft, 200 m to both sides"*) -- how far ahead of the nose the grid reaches.
+# status: agreed-guess | range: 0.0 .. 3000.0
+# source: belief/terrain_ahead.py:TERRAIN_LOOKAHEAD_M
+TERRAIN_LOOKAHEAD_M = 1000.0
+
+# A grid older than this (by the collector's own receive time) is not relayed -- judgement call, "~3 polls past the slowest normal route" (the plan's own reasoning; a ~1 Hz poll and a 1 Hz Hook both feed this one path).
+# status: judgement | range: 1.0 .. 30.0
+# source: belief/terrain_ahead.py:TERRAIN_RELAY_MAX_AGE_S
+TERRAIN_RELAY_MAX_AGE_S = 5.0
+
+# Row spacing along the nose -- the user's own number.
+# status: agreed-guess | range: 50.0 .. 1000.0
+# source: belief/terrain_ahead.py:TERRAIN_STEP_M
+TERRAIN_STEP_M = 200.0
 
 [belief.tool_api]
 # `plans/brain-tool-calls/plan.md` D5 -- `recall_memory`'s "near a place" filter radius.

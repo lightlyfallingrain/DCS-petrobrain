@@ -67,9 +67,9 @@ TAKEOVER_LEVEL_BANK_DEG: Final[float] = tuning.real(
 )
 
 #: The one effective floor mode 1 holds above bare ground, lowered only
-#: by an AGL height the pilot explicitly commanded (`F_eff = min(this,
-#: AGL goal)`, `Export.lua`'s own `flight_control.lua`) -- `plans/
-#: flight-lift-vector/plan.md`'s "M3 amendment", section A. **Raised
+#: by an AGL height the pilot explicitly commanded (the AGL goal itself,
+#: when it is lower -- `Export.lua`'s own `flight_control.lua`) --
+#: `plans/flight-lift-vector/plan.md`'s "M3 amendment", section A. **Raised
 #: 40 -> 50 (M3)**: the old 40 m value only ever clamped a *spoken* AGL
 #: height at the unpark seed (M3's own "What reading the code turned
 #: up" finding 1: no ordinary-flight floor existed in the law at all);
@@ -80,7 +80,7 @@ FLOOR_AGL_M: Final[float] = tuning.real(
     50.0,
     lo=0.0,
     hi=500.0,
-    status="user",
+    status="agreed-guess",
 )
 
 #: BL-16 lift-vector law, Stage LV-1 (`plans/flight-lift-vector/

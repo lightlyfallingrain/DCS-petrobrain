@@ -404,7 +404,14 @@ class TestDecideCarriedValueSpeech:
         digits = " ".join(str(int(MAX_IAS_KMH)))
         assert decisions[0].says == f"Speed {digits}."
 
-    def test_a_carried_agl_altitude_below_the_floor_is_announced(self) -> None:
+    def test_a_carried_agl_altitude_below_the_old_floor_is_flown_exactly_no_floor_no_announcement(
+        self,
+    ) -> None:
+        """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section A, E10):
+        `clamp_altitude`'s own AGL floor is gone -- "allow player to
+        command any altitude and then accept it," so a carried low AGL
+        height is flown exactly as carried, not clamped up to `FLOOR_
+        AGL_M`, and says nothing new (no jump at the unpark)."""
         prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
         new = FlightAuthorityState(
             fd_mode="m1",
@@ -413,9 +420,26 @@ class TestDecideCarriedValueSpeech:
             alt_m=FLOOR_AGL_M - 10.0,
             alt_ref="agl",
         )
+        assert decide_carried_value_speech(prev, new) == []
+
+    def test_a_carried_negative_agl_altitude_is_clamped_to_zero_and_announced(
+        self,
+    ) -> None:
+        """The one clamp branch `clamp_altitude`'s AGL side still has
+        after M3 (section A): `>= 0` (a negative height is not an
+        altitude) -- a carried negative value is the one case this
+        announcement still fires for."""
+        prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
+        new = FlightAuthorityState(
+            fd_mode="m1",
+            mode_n=4,
+            mode_cause="unpark",
+            alt_m=-5.0,
+            alt_ref="agl",
+        )
         decisions = decide_carried_value_speech(prev, new)
         assert len(decisions) == 1
-        assert decisions[0].says == f"{int(FLOOR_AGL_M)} meters."
+        assert decisions[0].says == "0 meters."
         assert decisions[0].urgent is False
 
     def test_a_carried_baro_altitude_is_never_floored(self) -> None:
@@ -431,11 +455,13 @@ class TestDecideCarriedValueSpeech:
         )
         assert decide_carried_value_speech(prev, new) == []
 
-    def test_only_altitude_is_carried_badly_now_speed_has_no_floor(self) -> None:
-        """BL-16 lift-vector law, Stage LV-1 (U8, "no floor"): `ias_kmh
-        = 0.0` used to be a second badly-carried part (clamped up to
-        `MIN_IAS_KMH`) alongside the altitude floor -- that floor is
-        gone, so only the altitude part announces now."""
+    def test_neither_part_floors_any_more_zero_speed_and_zero_altitude_say_nothing(
+        self,
+    ) -> None:
+        """BL-16 lift-vector law, Stage LV-1 (U8, "no floor") removed
+        the speed floor; BL-16 M3 (section A) removed the altitude
+        floor too -- `ias_kmh = 0.0`/`alt_m = 0.0` are both flown
+        exactly as carried now, so this says nothing at all."""
         prev = FlightAuthorityState(fd_mode="m2", mode_n=3)
         new = FlightAuthorityState(
             fd_mode="m1",
@@ -445,9 +471,7 @@ class TestDecideCarriedValueSpeech:
             alt_m=0.0,
             alt_ref="agl",
         )
-        decisions = decide_carried_value_speech(prev, new)
-        assert len(decisions) == 1
-        assert all(decision.urgent is False for decision in decisions)
+        assert decide_carried_value_speech(prev, new) == []
 
     def test_a_voice_take_edge_is_never_this_announcement(self) -> None:
         """`mode_cause == "take"` (a voice take) never carries anything

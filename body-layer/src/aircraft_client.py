@@ -633,16 +633,24 @@ class AircraftLayerClient:
             )
         return result
 
-    def write_flight_lease(self, epoch: int, limits: dict[str, float]) -> None:
+    def write_flight_lease(
+        self, epoch: int, limits: dict[str, float], terrain: str = ""
+    ) -> None:
         """`POST /command/flight_lease` -> BL-16 Stage 2's own unnumbered
         lease (`plans/flight-desired-state/plan.md`, refinement 3) --
         replaces the old `write_flight_control(..., "arm", ...)` send.
         Sent every poll while the aircraft layer is up (`body.py`'s own
         `_apply_flight_control`), so `Export.lua` can self-arm on a park
-        edge without body-layer ever stating the mode. Raises
+        edge without body-layer ever stating the mode. `terrain` (BL-16
+        M3, `plans/flight-lift-vector/plan.md`, section E) is the newest
+        answered grid, `belief.terrain_ahead.build_terrain_relay`'s own
+        encoding, or `""` ("nothing to relay this poll"). Raises
         `AircraftLayerError` on any failure, mirroring `write_flight_
         control` -- see the module docstring for why."""
-        self._post_json("/command/flight_lease", {"epoch": epoch, "limits": limits})
+        self._post_json(
+            "/command/flight_lease",
+            {"epoch": epoch, "limits": limits, "terrain": terrain},
+        )
 
     def write_flight(
         self,
@@ -714,6 +722,22 @@ class AircraftLayerClient:
         must be able to see rather than guess past."""
         self._post_json(
             "/command/probe_points",
+            {"seq": seq, "points": [list(point) for point in points]},
+        )
+
+    def post_terrain_points(self, seq: int, points: Sequence[tuple[int, int]]) -> None:
+        """`POST /command/terrain_points` -> pushes the current poll's
+        terrain grid (`aircraft-layer/src/collector/command_sender.
+        LookDirectionSender.send_terrain_points`, BL-16 M3, `plans/
+        flight-lift-vector/plan.md`, section E -- "a sibling op on the
+        same mechanism" as `post_probe_points` above). `belief.body`
+        (via `belief.terrain_ahead.compose_terrain_grid`) is the one
+        caller, every poll. Same raise-on-failure posture as `post_
+        probe_points` -- a dropped push leaves the law without a fresh
+        grid for this poll, which `terrain_max_age_s` already degrades
+        gracefully from."""
+        self._post_json(
+            "/command/terrain_points",
             {"seq": seq, "points": [list(point) for point in points]},
         )
 

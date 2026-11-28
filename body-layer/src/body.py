@@ -249,6 +249,7 @@ from belief.sight_effector import sight_ready as guidance_unit_sight_ready
 from belief.sight_head import SightHead, advance_sight_head, head_body_direction
 from belief.speech_worker import SpeechWorker
 from belief.tasks import TaskStore
+from belief.terrain_ahead import TerrainGrid, build_terrain_relay, compose_terrain_grid
 from belief.tool_api import BRAIN_TOOLS_BY_NAME, ToolContext, ToolObservation
 from belief_truth_log import BeliefTruthLogWriter
 from connection_reporter import ConnectionReporter
@@ -772,6 +773,20 @@ class ConsolePerceptionRunner:
     )
     _last_probe_seq: int = field(default=0, init=False, repr=False)
 
+    #: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- the
+    #: terrain grid is composed and sent EVERY poll (never "on change",
+    #: unlike the probe points above: position/heading change every
+    #: poll by construction), so this is a small ring of recent `seq ->
+    #: TerrainGrid` entries (the aircraft layer answers one poll behind
+    #: at best) rather than a single "last sent" value -- `_apply_
+    #: flight_requests` prunes it to `_TERRAIN_SENT_KEEP` entries each
+    #: poll. `_terrain_seq` is the monotonic counter the next grid is
+    #: sent under.
+    _terrain_sent: dict[int, TerrainGrid] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _terrain_seq: int = field(default=0, init=False, repr=False)
+
     #: `plans/expected-area-check/plan.md` Stage 1 (Co-moving Fields,
     #: "external: scan command issued or cancelled") -- the previous
     #: poll's `ScanPlan.command_t_sim`, compared by identity change
@@ -999,6 +1014,11 @@ class ConsolePerceptionRunner:
         # trap `_last_look_direction` above already documents.
         self._last_probe_points = ()
         self._last_probe_seq = 0
+        # BL-16 M3 -- `_terrain_sent` (a `default_factory=dict` field) is
+        # already reassigned fresh by the `self.__init__()` re-invocation
+        # above; `_terrain_seq` (a plain `default=0`, same trap as `_last_
+        # probe_seq` above) needs this explicit line.
+        self._terrain_seq = 0
 
     def run_once(self, *, flying: bool = False) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -4291,6 +4311,83 @@ def _apply_ai_pilot_wheel_goal(
         crew_console.ai_pilot_cbtm_transition = None
 
 
+#: BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- how many
+#: recent `seq -> TerrainGrid` entries `ConsolePerceptionRunner.
+#: _terrain_sent` keeps, so the aircraft layer's own answer (which lags
+#: by at least one poll) can still be joined back to the points it was
+#: computed against. Generous relative to the one-poll lag this project
+#: measures elsewhere on the same Hook (`ATTACK_RUN_RELATIVE_MAX_AGE_S`
+#: is 2 polls); not a behaviour tunable (bounds a bookkeeping dict, same
+#: posture as `MAX_PROBE_POINTS`'s own protocol-constant status).
+_TERRAIN_SENT_KEEP = 8
+
+
+def _compose_and_relay_terrain(
+    runner: ConsolePerceptionRunner,
+    aircraft_client: AircraftLayerClient,
+) -> str:
+    """BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) --
+    composes this poll's own grid from the current ownship position/
+    heading, sends it (every poll, never "on change": position and
+    heading change every poll by construction), reads back the
+    aircraft layer's latest `terrain` answer, joins it against whichever
+    grid it was sent under, and returns the encoded relay string for
+    this poll's own `flight_lease` (`""` when there is nothing to
+    relay -- `aircraft_client.write_flight_lease`'s own default).
+
+    A dropped send/read degrades to "nothing relayed this poll" --
+    `Export.lua`'s own `terrain_max_age_s` already treats a missing/
+    stale grid as "floor beneath only," never a crash or a guessed
+    value, the same fail-soft posture every other best-effort push in
+    this loop has."""
+    ownship = runner.last_ownship_state
+    if ownship is None:
+        return ""
+
+    runner._terrain_seq += 1
+    grid = compose_terrain_grid(
+        ownship.x, ownship.z, ownship.heading_true_deg, runner._terrain_seq
+    )
+    runner._terrain_sent[grid.seq] = grid
+    while len(runner._terrain_sent) > _TERRAIN_SENT_KEEP:
+        del runner._terrain_sent[min(runner._terrain_sent)]
+
+    try:
+        aircraft_client.post_terrain_points(grid.seq, grid.points)
+    except AircraftLayerError:
+        logger.warning("terrain-points push failed (continuing)", exc_info=True)
+
+    try:
+        los = aircraft_client.get_line_of_sight_latest()
+    except AircraftLayerError:
+        los = None
+    if los is None:
+        return ""
+    terrain_answer = los.get("terrain")
+    if not isinstance(terrain_answer, dict):
+        return ""
+    answer_seq = terrain_answer.get("seq")
+    if isinstance(answer_seq, bool) or not isinstance(answer_seq, int):
+        return ""
+    answered_grid = runner._terrain_sent.get(answer_seq)
+    heights = terrain_answer.get("heights")
+    if not isinstance(heights, list):
+        return ""
+    received_wall = los.get("received_wall_clock_s")
+    if (
+        isinstance(received_wall, bool)
+        or not isinstance(received_wall, (int, float))
+        or not math.isfinite(received_wall)
+    ):
+        return ""
+    return build_terrain_relay(
+        answered_grid,
+        tuple(heights),
+        received_wall_clock_s=float(received_wall),
+        now_wall_clock_s=time.time(),
+    )
+
+
 def _next_command_seq(runner: ConsolePerceptionRunner) -> int:
     """BL-16 Stage 3 (`plans/flight-desired-state/plan.md`, section 5),
     widened by `[[BL-B141]]` (`plans/bl-b141-single-command-seq/plan.md`)
@@ -4412,10 +4509,16 @@ def _apply_flight_requests(
                 )
             )
 
+    # BL-16 M3 (`plans/flight-lift-vector/plan.md`, section E) -- compose/
+    # send/relay the terrain grid before the lease it rides on. Never
+    # raises on its own (every failure degrades to `""`, "nothing to
+    # relay").
+    terrain_relay = _compose_and_relay_terrain(runner, aircraft_client)
+
     # BL-16 Stage 2 (`plans/flight-desired-state/plan.md`, refinement
-    # 3) -- the lease, unchanged. Sent every poll this function runs.
+    # 3) -- the lease. Sent every poll this function runs.
     try:
-        aircraft_client.write_flight_lease(epoch, limits)
+        aircraft_client.write_flight_lease(epoch, limits, terrain_relay)
     except AircraftLayerError:
         logger.warning("flight-lease write failed (continuing)", exc_info=True)
 
