@@ -63,6 +63,37 @@ User's words (verbatim):
 Confound: SAU H/K/T were **on** for this flight (the M4 failure above), against U4 — the heading
 channel acts on the pedals' hydraulics. The pedal result has to be re-flown with SAU off.
 
+## Third sortie, ~19:03 — hand-flown hover transitions (pedal authority probe)
+
+**Logs:** `docs/acceptance/logs-2026-11-28/hover-hand-flight_trace.log`, `hover-hand-debug.log`.
+
+User's words (verbatim):
+
+> *"Here's logs of me hand flying several transitions to/from hover. first few without SAU, with
+> adjustable stops; then without SAU and without adjustable stops; last with SAU and with
+> adjustable stops. I held full right pedal on several occasions. In cockpit I could see the pedals
+> fully right, but the controls overlay showed maybe less than half right pedal. I do not know what
+> causes that (possibly the trim or something) or how to affect that. I did not use the trim button
+> until the last phase where I turned SAU on."*
+
+Reading (phase times inferred from the trace, not marked in the log):
+
+- With adjustable stops ON, the player's own full right pedal puts arg 1103 at **−0.569** and it
+  pins there (12 runs, up to 11 s, mostly at hover / below 50 km/h, t ≈ 54–290 and 419–469). Left
+  side tops out at **+0.247** (seen repeatedly in cruise).
+- In the stops-OFF phase (t ≈ 300–400) the arg goes **past** that cap: −0.647, −0.676, −0.635
+  (t = 341, 361, 368).
+- Petrovich's own full-right write in sortie 2 landed at the same −0.567. **So the right-pedal cap
+  is DCS's adjustable stops, applied to the player's hardware pedal and to our writes alike — not
+  our write path.** The main loop's earlier reading (the ~0.32 learned write offset plus the ±1 write
+  clamp eating our travel) was wrong; corrected here.
+- Arg 1103 behaves as the *effective* pedal (what the controls overlay shows), not the cockpit pedal
+  animation the user sees at full travel.
+- The player at hover also sat at that cap for seconds at a time — hover in DCS's Mi-24 uses almost
+  all the right pedal the stops allow. Petrovich has the same authority as the pilot; what he lacks
+  is knowing where it ends: `pedal_limit_positive` is 1.0 since LV-3's U13, so the near-limit
+  collective guard never sees the real ~0.57 cap.
+
 ## Mode-2 fixes card (`2026-11-27-mode2-fixes-card.md`)
 
 User's words (verbatim):
