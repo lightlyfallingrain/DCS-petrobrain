@@ -94,6 +94,26 @@ Reading (phase times inferred from the trace, not marked in the log):
   is knowing where it ends: `pedal_limit_positive` is 1.0 since LV-3's U13, so the near-limit
   collective guard never sees the real ~0.57 cap.
 
+### User's answers on the pedal cap (verbatim, 2026-11-28)
+
+Questions: (1) stops off ≈ 300–400 s and full right held then? (2) what the pilot does when right
+pedal hits the stop at low speed; (3) stops stay on for Petrovich?
+
+> *"1 - about right. I did hold full right.*
+> *2 - ease collective. That causes slight descent -> if there's no altitude to spare, then speeding
+> up is the only option. left yaw can get out of control fast and then there's no more right pedal
+> to do anything about it.*
+> *3 - we can turn stops off if it helps*
+>
+> *Additionally, adjustable stops do have a controller knob for adjusting the stops. Not sure what
+> it's effect is since I controlling a hover is difficult enough without trying to spin a knob with
+> mouse -> I haven't tried. But Petrovich could try."*
+
+So: stops off → right cap −0.676 (full right held), stops on → −0.569; about 19 % more right pedal
+with stops off. At the cap: ease collective and accept a slight descent; with no height to spare,
+gain speed. Act early — once the left yaw runs there is nothing left to stop it. The stops knob's
+effect is unknown; worth a probe.
+
 ## Mode-2 fixes card (`2026-11-27-mode2-fixes-card.md`)
 
 User's words (verbatim):
