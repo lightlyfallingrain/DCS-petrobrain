@@ -306,6 +306,29 @@ button, knob sweep, P/t switch) were **not** flown.
   hand-flown sortie). Above 80 km/h untested.
 - The mission starts the knob at **0.5** and the P/t switch centred.
 
-**Still open:** what the knob (276) and the P/t switch (277) do; whether the on-cap moves with the
-knob, OAT or altitude; whether the off-cap (−0.678) is itself a further limit or full travel at
-this density (the ground measurement read −1). One data point: 13 °C, ≈ 1.1 km.
+## Probe flown, second run — every step (2026-11-28)
+
+**Source:** `docs/acceptance/logs-2026-11-28/pedal-stops-probe-2.log` (the file also holds the first
+run). Same mission and OAT. All steps flown, full right pedal held throughout, IAS 35 → 140 km/h.
+
+| step | write | full-right effective pedal (arg 1103) |
+|---|---|---|
+| BASELINE (power on, knob 0.5) | — | −0.567, pinned 37–118 km/h |
+| POWER-OFF | 270 → 0 | **−0.678** |
+| POWER-ON | 270 → 1 | **−0.566** |
+| OFF-BUTTON on / off | 275 → 1 / 0 | −0.566 / −0.566 (no effect) |
+| KNOB 0.0 / 0.5 / 1.0 / 0.0 | 276 | −0.566 throughout (no effect) |
+| SWITCH P / NONE / T / NONE | 277 pulses | −0.565…−0.566 (no effect) |
+
+**Verified:**
+- **The power switch (270) is the only control that moves the right-pedal cap**, reproducibly:
+  off −0.678, on −0.566, switched both ways by Petrovich's own write.
+- **The OFF button (275), the knob (276) and the P/t switch (277) change nothing measurable** in the
+  cap in DCS (each write `ok=true`, the args moved). Whatever they model in the real SPUU-52, DCS does
+  not expose it through the pedal ceiling here.
+- **No airspeed schedule from 14 to 140 km/h**: with power on the cap is −0.565…−0.567 flat across
+  the whole range flown (both runs); with power off −0.678 flat across 21–78 km/h.
+- Side effect: the run left the knob at 0.0 (mission default 0.5) — immaterial, since it does nothing.
+
+**Still open:** whether the caps move with OAT or altitude (one data point: 13 °C, ≈ 1.1 km); whether
+−0.678 is a further limit or full travel at this density (the ground measurement read −1).
