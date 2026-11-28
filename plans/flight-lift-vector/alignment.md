@@ -990,3 +990,202 @@ mentions this plan's M3 as its "second consumer" — the deferral has a tracked 
 
 None — the three Findings are text the main loop can correct directly before Implementer; no
 decision beyond what is already on record (U18–U22) is needed to fix them.
+
+## Goal check — 2026-11-28 — LV-2 rework (break as attitude manoeuvre)
+
+**Verdict:** CONCERNS
+
+Branch `goal-lv2-rework` cut at `2c509723` (`fix/bl16-flight-epoch-bound`). Inputs:
+`explore-notes.md` "LV-2 re-explore — what a break turn actually needs" and its five answers (the
+specification), and "LV-2 explore — breaks (2026-11-27)", which they supersede in part;
+`docs/acceptance/2026-11-28-sortie-feedback.md` (both sorties); `plan.md` LV-2 amendment and fix
+pass, LV-3 C, M3 A; this file's E5, E17, E18–E21 and the M3 goal check's E7; `flight_control.lua`
+at this tip, read only to confirm two existing behaviours (altitude shaper ~L1240–1280, heading
+step ~L1077 and ~L1170). Expectation IDs carry a `BE` prefix so they cannot collide with E1–E21 or
+the M3/LV-3 sets.
+
+### Why
+
+A break is the pilot's **escape**: something is shooting, or about to, and he wants the aircraft
+off its current line **now** and pointed 90° (or 180°) away, **with the energy to keep going** —
+not left slow, sinking and wallowing at the end of it. Asked once more, why hand that to
+Petrovich? Because when the pilot calls the break his attention is on the threat, and a crewmate
+who flies the break the way the pilot would — steep bank, nose low, rotor unloaded — leaves him
+able to keep looking. The failed sortie (213 → 81 km/h, nose +19° then −52°, below the floor) is
+the opposite: the break itself became the emergency.
+
+So the purpose is **heading changed fast, speed and rotor kept, height spent as the currency —
+never the ground**. The attitude recipe is the user's mechanism for that; the plan is judged by
+the four outcomes, seen from the seat.
+
+### Player expectations
+
+All in mode 1, Petrovich on the controls, SAU off (or off by M4 at the take).
+
+- **BE1 — Entry looks like the user's own break.** On "break left/right" with height to spare:
+  bank rolls in promptly to the break bank (30° for now, a profile value), pedal goes in with the
+  bank, the **collective visibly goes down** (about 20–30 % of lever travel) and the nose goes
+  down. While height remains in budget the collective **does not rise** at any point in the turn.
+- **BE2 — Speed is kept.** IAS stays near the entry speed through the turn (some fluctuation);
+  the nose is wherever that takes (≈ −10° in the user's own flying, not a target). No bleed like
+  213 → 81, and no run-away the other way at a fast entry (250 km/h does not become 280).
+- **BE3 — Rotor is kept.** Rotor RPM stays clear of the 88 % warning; no sudden slow-down.
+- **BE4 — Height is spent, within both budgets.** Altitude falls through the turn: at most 100 m
+  below entry and never below the effective floor (50 m AGL, or an explicitly commanded lower AGL
+  height). No nose-up excursion against forward cyclic, no nose-down plunge after it.
+- **BE5 — A break is visibly faster than a turn.** At the same speed, "break right" reaches its
+  heading clearly sooner than "turn right 90". At 30° bank that is about 1.6× the ordinary rate
+  (table below) — this is the line on which 30° is judged.
+- **BE6 — Near the floor, ground wins and it is smooth.** Approaching the floor (or the 100 m
+  budget's bottom) the sink is arrested **by the time he gets there**: collective comes up **and**
+  the bank comes off together ("more collective, slower turn"), the nose does not rise, and he is
+  never below the floor. The turn finishes more slowly.
+- **BE7 — No height to spare: a faster level turn.** A break called low (e.g. 55–70 m AGL) holds
+  height and turns faster than an ordinary turn — steeper than an ordinary turn's bank — rather
+  than starting the sink recipe and reversing it seconds later.
+- **BE8 — Roll-out.** On the break heading (one overshoot of ~5–10° accepted, 2026-11-27) the
+  wings come level, the collective comes back to what level flight needs, the sink stops and he
+  **flies level at the height he has reached**, at the commanded speed. (Which height: Finding 1.)
+- **BE9 — Same at every entry speed.** BE1–BE8 hold from about 100 to 250 km/h; a slow entry does
+  not decay into the LV-3 low-speed regime (λ < 1), where a break becomes a calm pedal turn.
+- **BE10 — Nothing new to hear** (E10 stands).
+
+What 30° buys, by speed (steady level-turn rate `g·tanφ/V`, roll-in/out excluded; ordinary turns
+cap at `max_turn_bank_deg` = 20°, ~23° peak in the toy plant):
+
+| entry | 30° break: rate / 90° / 180° | ordinary (20°): rate / 90° | old 60° cap: 90° | 100 m over the 90° = avg sink |
+|---|---|---|---|---|
+| 120 km/h | 9.7 °/s / 9 s / 18 s | 6.1 °/s / 15 s | 3 s | 11 m/s |
+| 200 km/h | 5.8 °/s / 15 s / 31 s | 3.7 °/s / 24 s | 5 s | 6.5 m/s |
+| 250 km/h | 4.7 °/s / 19 s / 38 s | 2.9 °/s / 31 s | 6 s | 5 m/s (break away: 2.6) |
+
+### Open assumptions
+
+- **Roll-out height** — serves the why: level at the height reached; would not: climb back to the
+  standing altitude goal, which is what the code does now by construction (Finding 1).
+- **The no-spare-height turn's bank** — serves: steeper than ordinary, e.g. the break bank (30°)
+  with height held; would not: an ordinary turn sent a higher rate, which the 20° cap reduces to an
+  ordinary turn (Finding 2).
+- **Where "no altitude to spare" is decided** — serves: continuously, one rule — the collective
+  drop shrinks as the margin to floor/budget shrinks, so a low entry barely drops it (BE7) and a
+  high one reaches the floor with the sink already arrested (BE6); would not: a one-time entry
+  switch (a break at 60 m AGL drops collective, meets the floor 2–3 s later and reverses — the
+  pumping the user calls attitude changes), or entry-only with no reaction mid-turn. The user's two
+  answers ("if there is no altitude to spare…" and "more collective, slower turn") read as one rule
+  seen at its two ends.
+- **The floor reaction's order** — serves: bank off and collective up together, started early;
+  would not: the vertical channel simply re-engaged at the floor while the bank stays on (Finding 3).
+- **The 100 m budget's bottom, far above the ground** — serves: the same reaction as the floor (the
+  user's own rule, *"should not lose more than 100 m"*); would not: treating only 50 m AGL as real.
+- **Collective drop size** — serves: a first cut (25 %) held while the margin allows; would not, on
+  long breaks: a fixed 25 % that spends the whole 100 m in the first third of a break away at cruise
+  and flies the rest as BE6's slow recovery (Finding 4 — question, not concern).
+- **Which speed is kept** — serves: the entry IAS, which equals the commanded speed in nearly every
+  case; would not: a speed change in progress dropped silently (a break called mid-acceleration
+  should not lose the commanded speed afterwards).
+- **Pedal** — serves either reading below, but they differ: ball centred ("coordinated turn",
+  2026-11-28) or the 2026-11-20 Q6 *"deliberate extra in hard turns"*. Question 5.
+- **Terrain ahead during the break** — serves: M3's look-ahead keeps working as the nose swings,
+  so a break toward rising ground arrests the sink earlier; would not: a floor that only reads the
+  ground directly below while sinking toward a slope.
+
+### Findings
+
+1. **Roll-out: the existing law climbs back to the pre-break height; the user's words say level.**
+   Lens: purpose / crew sense.
+   - **Assumption:** main-loop reading, *"on roll-out, back to the ordinary level-flight law, which
+     finds what is needed"*.
+   - **In the sim:** the shaper's goal during a break is `max(alt_goal, break_floor)`; *"a break
+     never writes `alt_goal_m`"* (`flight_control.lua` ~L1259–1262). When the break settles the
+     floor drops away and the shaper drives back to the standing goal — up to 100 m of climb.
+   - **The pilot would see:** a break that escapes low, then an uncommanded climb straight back to
+     the height he left, re-exposing the aircraft to whatever he broke away from.
+   - **Grounded in:** user, verbatim, *"On roll out, restore to whatever is needed for level
+     flight"* — level flight, not a climb; and the code comment above.
+   - **Suggests:** the roll-out height becomes the held height (the player re-commands one if he
+     wants it). The user's words support this reading; confirm (Question 1). Contradicts **BE8**.
+
+2. **"Just command more turn rate" changes nothing if it goes to the ordinary turn.** Lens: world
+   truth (of the law).
+   - **Assumption:** the no-height fallback is an ordinary heading goal with a higher rate.
+   - **In the sim:** an ordinary turn's rate ceiling is `law_turn_rate_at_bank(max_turn_bank_deg =
+     20°)` (`flight_control.lua` ~L1077); only a break's `rate_override` raises it. More commanded
+     rate on an ordinary turn is clipped to the same 20° turn.
+   - **The pilot would see:** "break right" at 60 m AGL flying exactly like "turn right 90".
+   - **Grounded in:** user, *"fly a more normal turn, just command more turn rate"*; the code.
+   - **Suggests:** the fallback keeps a steeper bank than ordinary (the break bank, height held) —
+     Question 2. Contradicts **BE7**.
+
+3. **The floor reaction cannot be "re-engage the vertical channel" while banked.** Lens: the
+   envelope / non-obvious case.
+   - **Assumption:** at the floor, the existing break-floor clamp plus LV-2 C's 30 m height-give
+     band produce "more collective, slower turn".
+   - **In the sim:** that machinery was in place on the failed sortie and it ended at h_ref 45 m,
+     below the floor; the failure mechanism was collective driven up at steep bank at 200+ km/h,
+     pitching the nose up harder than full forward cyclic could hold. A break sinking at 6–10 m/s
+     that meets the floor and only then asks for collective repeats it at smaller scale.
+   - **The pilot would see:** the nose rising and speed bleeding at the bottom of the break — the
+     first sortie again.
+   - **Grounded in:** the 2026-11-28 sortie log reading; user, *"more collective, slower turn. Not
+     hitting the ground is priority."* (both actions, ground first).
+   - **Suggests:** the sink is arrested before the floor (lead grows with sink rate), bank comes off
+     with the collective, not after it. Contradicts **BE6** if filled the obvious way.
+
+4. **30° is a break mostly in its energy, not its rate — and it spends more height per degree than
+   60° did.** Lens: purpose. *Advice, not a veto: the user chose 30° "for now".*
+   - At 30° the rate is ~1.6× an ordinary turn's (table): 90° in ~15 s at 200 km/h against ~24 s;
+     the old 60° cap did it in ~5 s. At 250 km/h it is 4.7 against 2.9 °/s — distinguishable, not
+     dramatic. What makes it a break is BE2/BE3: speed and rotor kept.
+   - At a given sink rate, height lost is proportional to time in the turn, so a 30° break loses
+     about 3× the height a 60° one would for the same heading change. A break away at cruise
+     (31–38 s) fits the 100 m budget only at ≤ 2.6–3.2 m/s average sink, which a 25 % collective
+     drop will very likely exceed (my estimate — unmeasured): the budget goes in the first part
+     and the rest is BE6's slower recovery turn.
+   - **Grounded in:** the user's own *"steep bank turns aircraft fast"* and *"30–60 degrees"*;
+     arithmetic above.
+   - **Suggests:** 30° is a sound first step — it tests the vertical-channel change (the sortie's
+     root cause) where a failure is recoverable. The card should record the 90° time against an
+     ordinary 90° at the same speed and the height used, so the next bank value is chosen from a
+     measurement, and so "it works but it isn't a break" is not mistaken for the recipe failing.
+
+5. **Low entry speed (100–120 km/h).** Lens: envelope. *My understanding of the aircraft, so a
+   question, not a finding.* At 120 km/h a 30° break is already brisk (~9 s for 90°) and the
+   budget allows ~11 m/s average sink, so height is not the constraint there; speed is. If the
+   same 25 % drop sinks harder at low speed, holding speed may need little nose-down or even
+   nose-up — and if speed is lost the break slides into LV-3's λ blend (BE9). Whether the drop
+   should shrink at low entry speed is Question 4.
+
+6. **Right breaks and the right-pedal cap — flag only.** Lens: world truth. User, verbatim
+   (2026-11-20): *"As collective increases, more right pedal is needed"* — so lowering collective
+   in a break **reduces** the right-pedal need, and the known authority cap (pedal arg ≈ 0.32 −
+   command, `2026-11-18-bl16-m0-flight-axes-findings.md`; arg pinned at −0.567 at full command,
+   second sortie 2026-11-28) should bite less *during* a right break than in slow flight. Where it
+   could bite is where collective comes back up while still in a right bank: BE6's floor reaction
+   and the BE8 roll-out. The card should fly right breaks and watch the ball and yaw there; a
+   right-yaw problem at those moments belongs to the pedal-cap item, not to the break recipe. The
+   SAU confound (H/K/T on, sortie 2) has to be ruled out on the same card.
+
+Vignette walked (non-obvious): break left at 200 km/h, 150 m AGL, the new heading pointing up a
+valley side. Budget bottom is at 50 m (both budgets meet). Collective drops, sink ~8 m/s; the
+ground ahead rises as the nose swings, so the margin shrinks from both ends. BE6 holds only if the
+floor sees the terrain ahead (open assumption above) and arrests the sink early; if it reads only
+the ground below, the floor reaction starts late, with bank on, into rising ground — Finding 3's
+case with terrain added. The turn finishing slower here is the right answer, by the user's own
+priority.
+
+### Questions for the user
+
+1. After the roll-out, does he fly level at the height he has reached, or climb back to the height
+   you had before the break? (Recommend: level at the height reached — your *"whatever is needed
+   for level flight"*; you re-command a height when you want one.)
+2. With no height to spare, should the turn bank steeper than an ordinary turn (e.g. the break's
+   30°, height held)? (Recommend: yes — otherwise "more turn rate" flies exactly like an ordinary
+   turn.)
+3. Should the collective drop shrink as the height left to spend shrinks — so a low break barely
+   drops it and a long break away does not spend its 100 m in the first ten seconds? (Recommend:
+   yes; it is your two answers as one rule.)
+4. At a slow entry (100–120 km/h), the same 20–30 % collective drop, less, or none?
+5. Pedal in a break: ball centred ("coordinated turn"), or still the deliberate extra pedal into
+   the turn from 2026-11-20?
+6. Break away (180°) at 30° takes ~31–38 s at cruise and will likely use the whole 100 m — fine for
+   now, or should break away bank steeper?
