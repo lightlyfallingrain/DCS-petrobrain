@@ -5249,15 +5249,20 @@ class CrewConsole:
         heading`'s own `s.direction == "left" and -s.degrees or s.degrees`
         already uses.
 
-        **The old `stepped is None -> NOT_READY` branch is removed**
-        (D16/D18): the `"flight_control_speed"` category gate now
-        guarantees `held_speed is not None` by the time this runs, so the
-        module-level `step_speed(current_kmh, direction)` helper's own
-        `current_kmh is None` branch is unreachable here -- asserted, not
-        re-checked."""
+        **`stepped is None -> NOT_READY` is a real branch, not an
+        assert.** The `"flight_control_speed"` gate reads `flight_
+        authority_state.ias_kmh` (BL-16 Stage 2), this action reads the
+        overlay's own `parked_flight_state.held_speed` -- two mirrors, so
+        the gate passing does not guarantee this one is known. The
+        2026-11-28 sortie hit exactly that (overlay text "MAX" parsed as
+        `None`, gate passed, the assert fired and the engine spoke
+        "Action file error." -- blaming the rules file for a state gap).
+        `_parse_held_speed` closes that cause; this branch keeps any
+        other mismatch an ordinary "unable, not ready"."""
         direction: Literal["up", "down"] = "up" if sign > 0 else "down"
         stepped = step_speed(self.parked_flight_state.held_speed, direction)
-        assert stepped is not None
+        if stepped is None:
+            return {"ok": False, "reason": "NOT_READY"}
         self.ai_pilot_goal_transition = AiPilotGoalRequest(
             param="speed",
             speed_kmh="max" if stepped >= AI_PILOT_SPEED_MAX_SENTINEL_KMH else stepped,

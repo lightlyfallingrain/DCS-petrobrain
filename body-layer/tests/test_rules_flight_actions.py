@@ -34,6 +34,7 @@ from dataclasses import replace
 import pytest
 
 from belief.ai_pilot_wheel import (
+    AI_PILOT_SPEED_MAX_SENTINEL_KMH,
     AiPilotGoalRequest,
     AiPilotWheelGoal,
     ParkedFlightState,
@@ -513,6 +514,30 @@ class TestSpeedStep:
         )
         lines = console.drain_pending_rule_dispatch(now_sim=1.0)
         assert lines == ["Speed 1 5 0."]
+
+    def test_slows_down_from_max_to_the_top_step(self) -> None:
+        """2026-11-28 sortie: "speed 250", "speed up" (MAX), "slow down"
+        spoke "Action file error." -- from MAX it steps to 250."""
+        console = _dispatching_console(
+            parked_active=True, held_speed=AI_PILOT_SPEED_MAX_SENTINEL_KMH
+        )
+        lines = console.handle_command(
+            "speed_step", now_sim=0.0, slots={"verb": "slow", "direction": "down"}
+        )
+        assert lines == ["Speed 2 5 0."]
+
+    def test_gate_passing_on_a_mirror_the_overlay_lacks_is_not_ready(self) -> None:
+        """The gate reads `flight_authority_state.ias_kmh`, the action the
+        overlay's own `held_speed` -- when only the first is known, the
+        answer is "unable, not ready", never "Action file error."."""
+        console = _dispatching_console(parked_active=True, held_speed=None)
+        console.flight_authority_state = replace(
+            console.flight_authority_state, ias_kmh=250.0
+        )
+        lines = console.handle_command(
+            "speed_step", now_sim=0.0, slots={"verb": "slow", "direction": "down"}
+        )
+        assert lines == ["Unable, not ready."]
 
 
 class TestSetAltitude:

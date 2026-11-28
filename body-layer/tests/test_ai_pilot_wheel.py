@@ -218,6 +218,31 @@ class TestAdvanceParkedFlightState:
         assert state.takeover_stage == "correcting_altitude"
         assert state.correction_path == "hold"
 
+    def test_a_held_max_speed_is_the_max_sentinel_not_unknown(self) -> None:
+        """2026-11-28 sortie: the overlay reads the literal "MAX" once
+        "speed up" passes 250; `held_speed` must be a known step there,
+        or the next "slow down" has nothing to step from."""
+        body: dict[str, Any] = {
+            "t": 123.5,
+            "received_wall_clock_s": 1000.0,
+            "apw_parked_active": True,
+            "apw_speed_text": "MAX",
+        }
+        httpd = HTTPServer(("127.0.0.1", 0), _make_handler(body))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = AircraftLayerClient(
+                base_url=f"http://127.0.0.1:{httpd.server_port}"
+            )
+            state = advance_parked_flight_state(ParkedFlightState(), client)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+        assert state.held_speed == AI_PILOT_SPEED_MAX_SENTINEL_KMH
+
     def test_a_boolean_arg_value_is_never_treated_as_a_number(self) -> None:
         """`isinstance(True, int)` is true in Python -- `_as_optional_
         float` must exclude `bool` explicitly or a malformed `true`/

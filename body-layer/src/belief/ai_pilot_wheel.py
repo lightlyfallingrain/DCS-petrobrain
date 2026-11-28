@@ -408,6 +408,19 @@ def _parse_float(value: object) -> float | None:
         return None
 
 
+def _parse_held_speed(value: object) -> float | None:
+    """`apw_speed_text` is a discrete step ("250") or the literal overlay
+    string `"MAX"` -- the latter maps to `AI_PILOT_SPEED_MAX_SENTINEL_KMH`,
+    the same value a spoken "speed max" is represented by, so a held MAX
+    is a known step (one rung above the top finite step), not an unknown
+    reading. 2026-11-28 sortie: "speed up" from 250 reached MAX, and the
+    following "slow down" read `None` here and failed as "Action file
+    error." (`docs/acceptance/2026-11-28-sortie-feedback.md`)."""
+    if value == "MAX":
+        return AI_PILOT_SPEED_MAX_SENTINEL_KMH
+    return _parse_float(value)
+
+
 def _as_optional_float(value: object) -> float | None:
     """Unlike `_parse_float` above, `apw_arg852`/`apw_arg952` arrive as
     JSON numbers, not numeric strings -- `bool` is excluded explicitly
@@ -517,7 +530,7 @@ def advance_parked_flight_state(
         held_heading=_parse_float(sample.get("apw_course_text")),
         held_altitude=_parse_float(sample.get("apw_alt_text")),
         held_altitude_ref=sample.get("apw_alt_add_text"),
-        held_speed=_parse_float(sample.get("apw_speed_text")),
+        held_speed=_parse_held_speed(sample.get("apw_speed_text")),
         last_press=sample.get("apw_last_press"),
         raw_arg_852=_as_optional_float(sample.get("apw_arg852")),
         raw_arg_952=_as_optional_float(sample.get("apw_arg952")),
@@ -716,16 +729,9 @@ def step_speed(
     the caller's job to pick which, matching every other "current" slot
     in this vocabulary. `None` in, `None` out -- a missing reading is
     never treated as a known step, same posture every other state-param
-    read in this module takes.
-
-    **Known gap**: `held_speed` parses `speed_text` as a plain number
-    (`belief.ai_pilot_wheel.advance_parked_flight_state`'s own `_parse_
-    float`), which returns `None` for the literal overlay string
-    `"MAX"` -- so "speed down" spoken while already at MAX currently
-    reads as "unable, not ready" rather than stepping down from MAX.
-    Flagged, not fixed in this stage; the parse-time fix belongs with
-    whichever stage first needs `held_speed` to distinguish "unknown"
-    from "MAX" for its own reasons."""
+    read in this module takes. A held MAX arrives as `AI_PILOT_SPEED_MAX_
+    SENTINEL_KMH` (`_parse_held_speed`), so "slow down" from MAX steps to
+    the top finite step."""
     if current_kmh is None:
         return None
     ladder = (*AI_PILOT_SPEED_STEPS_KMH, AI_PILOT_SPEED_MAX_SENTINEL_KMH)
