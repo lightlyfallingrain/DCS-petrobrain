@@ -1189,3 +1189,44 @@ priority.
    the turn from 2026-11-20?
 6. Break away (180°) at 30° takes ~31–38 s at cruise and will likely use the whole 100 m — fine for
    now, or should break away bank steeper?
+
+## Plan check — 2026-11-28 — LV-2 rework
+
+**Verdict:** CONCERNS
+
+Checked `plan.md` "## LV-2 rework amendment (2026-11-28)" against this file's "Goal check —
+2026-11-28 — LV-2 rework" (BE1–BE10) and the answers in `explore-notes.md` "LV-2 re-explore" /
+"Goal check's six questions". `memory-search.py break bank floor collective turn slower` — not
+indexed; this is a fresh design with no prior decision to check against, so no `gq.sh` query was
+needed beyond that.
+
+| expectation | stage | status |
+|---|---|---|
+| BE1 | B (bank 30°), D.3 (collective drop), pedal unchanged | met |
+| BE2 | C (speed loop unchanged) | met |
+| BE3 | D.2/D.3 (collective reduced, rotor unloaded); card watches 88% | met |
+| BE4 | D.1/D.4 (release fraction, unchanged safety net), E (roll-out) | met |
+| BE5 | B (bank-derived rate ceiling); card times 90° break vs ordinary turn | met |
+| BE6 | D.2/D.3 (collective), D.4/G (bank) | **contradicted** — see Finding 1 |
+| BE7 | B + D.1, walked explicitly in G | met |
+| BE8 | E (roll-out writes `alt_goal_m` to height reached) | met |
+| BE9 | D.3 (speed-scaled drop, 100–120 km/h floor at 0.5); λ-decay defect named as out-of-scope risk, not a BE9 gap — see Finding 2 | met |
+| BE10 | no new vocabulary or audio-path change | met |
+
+### Findings
+
+1. **BE6's "bank comes off" is reserved for an exception the plan itself says should rarely fire — so the normal near-floor path does not deliver "the turn finishes more slowly."** Lens: world truth (of the law) / purpose.
+   - **Assumption:** D.2/D.3 (collective recovery: `a_u_d` fades back to ordinary, `break_drop` fades to 0) plus D.4 (the existing `phi_scale`/`effective_shortfall` safety net) jointly deliver BE6.
+   - **In the sim:** Section B states bank is "not scaled by margin or anything else... full stop," and Section D.4/G label the case where `phi_scale` actually eases bank as "the exception path, not the common one" — "most breaks at 30° never reach this." Turn rate is `g·tanφ/V` (goal check's own table); with bank fixed at 30° and speed held per BE2, rate — and therefore how long the 90°/180° takes — cannot change. Only collective moves in the normal (non-exception) path.
+   - **The pilot would see:** approaching the floor, the collective visibly comes up (sink arrests) but the turn keeps going at the same rate it had the whole way — not "the turn finishes more slowly," which BE6 states as the expected outcome of the ordinary floor reaction, not a rare recovery.
+   - **Grounded in:** `plan.md` lines ~1537–1542, ~1625–1629, ~1693–1698, ~1755 (the architect's own wording); user, verbatim, *"more collective, slower turn. Not hitting the ground is priority"* — paired as one instruction, not collective-only.
+   - **Suggests:** either BE6's "slower turn" is only meant to describe the rare under-recovery case (in which case BE6's wording should be narrowed, since as written it reads as the ordinary approach-to-floor behaviour), or the design should widen D.4's trigger so bank genuinely eases as margin runs out mid-break, not only when collective provably cannot keep up. This also leaves the "floor reaction's order" open assumption only half-settled: the collective half (early engagement via `break_recovery_lead_s`) avoids the "re-engages late" failure mode the goal check warned against, but the bank half does not — bank staying on through the recovery is exactly the "would not" case the open assumption named, just arrived at earlier rather than at the floor itself.
+
+2. **BE9's own speed range never reaches the flagged λ-decay defect, so naming it as an out-of-scope risk rather than tracking it as a deferred BE9 item is correct, not a gap.** Lens: envelope.
+   - **In the sim:** `λ = 1` at or above 80 km/h (LV-3 amendment, superseding the 25 km/h breakpoint); BE9's stated range is "about 100 to 250 km/h," entirely inside `λ = 1`. The "λ-from-total-ground-speed defect" the plan names in Risks only bites once a break decays into the `λ < 1` regime, which BE9 excludes by construction (and BE2 guards against via speed-hold).
+   - **Grounded in:** `plan.md` ~line 2033 (`lambda = 1` at ≥80 km/h), ~line 1873 (defect named as orthogonal).
+   - No action needed; noted so a future pass does not mistake the unlinked risk note for a dropped expectation.
+
+### Questions for the user
+
+1. For BE6 (reaching the floor or the 100 m budget mid-break, having flown most of it released): do you want the turn to actually slow down as collective comes back up — which needs bank to ease as part of the ordinary recovery, not only through the rare `phi_scale` safety net — or is "slower turn" in your answer just describing the overall manoeuvre (collective recovering, height arrested) without the bank itself coming off unless recovery is genuinely failing? The current plan only eases bank in the second (rare) case.
