@@ -226,6 +226,8 @@ flowchart TB
 **4. Under limits, who gives first: the order travels with the manoeuvre.** The envelope (RPM floor,
 blade stall, VRS, 40 m floor, physical stops) is never crossed; when it caps the lift length, the
 shortfall goes down the manoeuvre's own chain. (Orders confirmed by the user, U3.)
+**Superseded in part, 2026-11-28** ("M3 amendment" below): the 40 m floor is one 50 m floor,
+`min(50, AGL goal)`; speed giving now yields the speed reference (J built for speed, D there).
 
 ```mermaid
 flowchart TB
@@ -439,6 +441,8 @@ is handed down that class's chain, each absorber until its own limit:
   back alone; a rule for the speed channel generally, not only under limits;
 - **turn gives**: `φ_ff` is scaled down (shallower bank, less lift needed) until a minimum share;
 - **height gives**: `a_u,d` is allowed below zero, bounded by the break floor or the 40 m floor.
+  **Superseded 2026-11-28** ("M3 amendment", A): the 40 m floor was never read by this chain; M3
+  adds one floor, `F_eff`, to the altitude target itself.
 - `low_slow_rpm`: `θ_i` integrates nose-**down** (accelerate) and height gives.
 The orders are profile data (ordinary: speed, turn rate, height; break: height, speed, turn rate;
 U3, answered yes); the chain code is one place. The when (class) is separate from the actions
@@ -1292,6 +1296,10 @@ untouched:
 
 ### D. The floor — both budgets, and whether the 50 m is break-only
 
+**Superseded 2026-11-28** ("M3 amendment", A): one floor, `limits.floor_agl_m` = 50, for every goal
+(user: *"one floor is better, use 50 m"*); `profile.break_floor_agl_m` is removed and the break floor
+is `max(F_eff, entry − 100 m)`. The 100 m loss budget is unchanged.
+
 The user's words apply to a break specifically (*"below which we must not descend **in a break**"*).
 `limits.floor_agl_m` (40.0) is shared today by the break-floor clamp **and** the ordinary chain's
 own passive height-giving and the unpark seed clamp (`flight_control.lua:2612-2613`) — raising it
@@ -1418,6 +1426,8 @@ pass/fail, more than any single number.
 **Answered (user, 2026-11-27, verbatim):** *"U11, only breaks"* — `break_floor_agl_m` (50 m) is
 break-only; ordinary flight and the unpark seed keep `floor_agl_m` (40 m). Diagrams (throwaway
 artifact): *"diagrams approved"*.
+**U11 REVISED 2026-11-28** by the user's M3 answer *"one floor is better, use 50 m"*: see "M3
+amendment", A (one floor; the unpark seed clamp is removed, E10).
 
 **Plan-check CONCERNS resolved (main loop, 2026-11-27):** `alignment.md` Finding 1 — 65° binds at
 every card speed, so a break sits at ~2.37 G for seconds, above the user's own *"about 2 G"*.
@@ -2091,4 +2101,665 @@ yaw too: the SAU plan must decide which of the two owns yaw damping when H is on
   `k_yaw_damp = 0` as a comparison if needed.
 - **U17:** the low-slow-RPM "accelerate" class leaves LV-3 and becomes its own open item inside
   `[[BL-16]]` (the entry's "Open, within BL-16" list).
+
+## M3 amendment (2026-11-28)
+
+Architect pass. Branch `fix/bl16-flight-epoch-bound` (pushed as `feature/bl16-lift-vector-law`),
+tip `5154e45c`. LV-3 is built, not flown. **The specification is the user's own words**:
+`explore-notes.md` "M3 terrain floor explore (2026-11-28)" to the end, including the answers to
+`alignment.md`'s M3 Q1–Q6, and the main loop's later direction (user, verbatim, 2026-11-28): *"Even
+if I fly at 200 km/h, it takes a couple of seconds to travel 200m. Elevation polling can be 1 Hz or
+even 0.5 Hz."* Inputs read in full: those notes; `alignment.md` "M3 terrain floor — goal check"
+(E1–E10, Findings 1–4); `aircraft-layer/research/2026-11-28-bl16-m3-terrain-ahead-and-visibility.md`,
+`2026-10-05-elevation-cost-probe-results.md`, `2026-09-29-bridge-call-cost-at-scale.md`,
+`2026-09-29-bridge-terrain-probe-results.md`; this plan's A–K and the LV-1..LV-3 amendments; the old
+`plans/flight-control/plan.md` Stage 3 (~L1895) and M3 (~L3045), history only. Code read at the tip:
+`flight_control.lua` (`fc_limits`/`FC_LIMIT_BOUNDS`, `law_apply_goal`, `law_init_at_take`,
+`law_update`'s altitude, speed and shortfall blocks, `read_measured`, the unpark seed),
+`flight_profile.lua`, `flight_desired.lua` (`desired`, `reseed_from_measured`, `reseed_from_overlay`,
+`apply_set`, `write_internal`), body-layer `belief/flight_control.py` (`FLOOR_AGL_M`,
+`MAX_CLIMB_VS_MPS`, `clamp_altitude`, `flight_control_limits`), `belief/crew_console.py`'s
+`axes_set_altitude`/`axes_step_altitude`/`axes_hold_altitude`/`axes_level_flight`,
+`config/rules/flight.lua`'s altitude rules, `belief/flight_authority.py`'s carried-value check, the
+BL-B111 `probe_points` path (`schema/line_of_sight.py`, `collector/command_sender.py`,
+`api/server.py`), and the toy-plant drivers in `tests/test_flight_control_law.py`.
+
+**Superseded by this amendment** (originals stay; each carries a pointer): the 40 m floor
+everywhere it appears (diagram 4, G's "height gives" bullet, LV-2's card text); LV-2 section D's
+separate `break_floor_agl_m` and its U11 answer (*"only breaks"*), now one floor by the user's later
+*"one floor is better, use 50 m"*; `max_climb_vs_mps` (5 m/s) both ways; and, in the old
+`plans/flight-control/plan.md`, M3's AGL-trend × `FLOOR_LOOKAHEAD_S` look-ahead and the "Climbing for
+terrain." callout (E7 there).
+
+### Goal
+
+In mode 1, Petrovich never flies into terrain and the pilot still decides how low they go: one
+floor, 50 m above bare ground, lowered only by an AGL height the pilot gave; a grid of terrain points
+ahead of the nose lets him climb early enough to clear each point by the time he reaches it, slowing
+down first when the climb does not fit; and he says nothing about any of it.
+
+### Value against effort (1a)
+
+Proportionate, now that the route is settled. Terrain heights at a point are **proven and cheap**:
+`land.getHeight` through the Hook's scripting bridge is bit-identical to the mission-editor surface
+(`2026-09-29-bridge-terrain-probe-results.md` Finding 1), ~1–9 µs a point, with ~0.5 ms fixed bridge
+overhead (`2026-10-05-elevation-cost-probe-results.md`, `2026-09-29-bridge-call-cost-at-scale.md`);
+16 points at 1 Hz is noise. The Hook → collector → body-layer → lease → Lua path is the shipped
+BL-B111 shape. The real work is in the law, and most of it is owed regardless: the old 5 m/s cap goes
+(user), and with it the altitude channel needs a power-based limit and a working "speed gives"
+absorber, which section J promised and nobody built (finding 3 below).
+
+### What reading the code turned up (step 3a), before designing
+
+1. **No ordinary-flight floor exists in the law.** `limits.floor_agl_m` (40) is read in exactly one
+   place, the unpark seed clamp (`flight_control.lua` ~L2892). G's "height gives, bounded by … the
+   40 m floor" was never implemented, and a barometric goal has no floor at all. Today the only
+   ordinary floor is body-layer's `clamp_altitude` on a *spoken* AGL height. So M3 is a floor in the
+   law for the first time, not a 40 → 50 edit.
+2. **The AGL hold sags on a slope, today, by `V·slope·6 s`.** The altitude shaper runs in the AGL
+   frame, but its rate `w_ref` is compared with world vertical speed (`k_vs_error·(w_ref − w)`), and
+   there is no integral on height. Over steadily rising ground the reference stays at the goal with
+   `w_ref = 0`, so the steady climb is bought by height error: `k_vs·w = k_alt·Δh`, so
+   `Δh = w·k_vs/k_alt = w·6 s`. **At 200 km/h up a 10 % slope (5.6 m/s) he sits ~33 m below the
+   commanded AGL height; at 120 km/h on 5 %, ~10 m.** A barometric goal over rising ground has the
+   same 6 s factor. This is the existing reactive AGL hold, never flown over a slope (old Flight M-B
+   is unflown). It bears on E4 and on U21.
+3. **Section J's absorber re-seat was never built, so "speed gives" fights the speed loop.** The
+   shortfall chain pitches back (`theta_speed_give`), but `v_ref` stays at the commanded speed, so
+   as speed falls `k_speed_error·(v_ref − V)` pushes the nose back down through `Δθ_ff` and the trim.
+   With a 5 m/s cap this rarely mattered: the cap kept most climbs inside the collective's reach.
+   With the cap gone (settled), a sustained shortfall is the normal case for a big climb, and
+   "speed gives first, commanded speed resumes afterwards" needs J for the speed absorber.
+4. **With no cap, nothing stops the altitude reference running away.** The shaper's own peak climb
+   rate for a step is `err·ω/e` (500 m at `omega_alt` 0.5: ~92 m/s unconstrained; the accel cap
+   brings it to ~20 m/s). The aircraft cannot follow, `h_ref` leads by tens of metres, and the
+   position term winds up. "The limit is available power" therefore needs the reference held within
+   reach of what the aircraft actually does while the lift is capped (C below).
+5. **"Explicit" needs no flag** (U18). Every path that writes an AGL altitude goal is one of the cases
+   the user named as explicit: `altitude <n>` (radar or no reference), `climb/descend <n>` in an AGL
+   reference, `hold altitude`, `level flight`, the take (`reseed_from_measured` sets `alt_m = AGL`;
+   `law_init_at_take` uses the stopping height of the current AGL: Q3, "maintain current altitude"),
+   and the unpark carry of a mode-2 height (E10). Petrovich never chooses an AGL goal himself. So
+   `F_eff = min(50, AGL goal)` for an AGL goal and 50 for a barometric one, derived each law step from
+   the altitude goal the law already holds. Explicitness then travels with the goal by construction,
+   across speed/heading/turn commands, park/unpark and the take seed (alignment Finding 2), and the
+   desired state and its wire need no new field.
+6. **`probe_points` cannot carry this as it is.** It answers `land.isVisible` (`"<seq>|<i>:<0|1|>"`),
+   not heights; it is a single last-wins setter owned by BL-B111's expected-area checks, so a second
+   user would overwrite them; and it is capped at 6 points by a fixed-shape template. M3 adds a
+   **sibling op on the same mechanism**, `terrain_points`: same listener, same coalescing, same
+   envelope-key pattern, `land.getHeight` only, its own cap and its own answer key.
+7. **Relay points, not a floor.** The brief's fallback relayed a floor computed in body-layer. That
+   puts the law in two places and makes routing latency a control error: a climb rate computed from a
+   2 s old altitude and speed is wrong by however much both changed. Points in world coordinates do
+   not go stale geometrically: Lua re-projects them against its *current* position, altitude and
+   speed every law step, so age only shortens the reach (by `V·age`, ~110 m at 200 km/h and 2 s) and
+   lets the grid lag the nose in a turn. The law then stays in one place whatever the sampler is.
+8. **The recon note's lateral vector is the left one.** With heading `ψ` clockwise from north and
+   `x` north / `z` east, the nose is `(cos ψ, sin ψ)` and the **right** is `(−sin ψ, cos ψ)`
+   (heading 0 → east; heading 90 → south). The note's `(sin ψ, −cos ψ)` points left. Harmless for a
+   symmetric ±200 m grid; it matters for the trace and the card's side check.
+9. **The toy plants do have vertical dynamics**, contrary to the brief: several drivers integrate
+   `w` from collective deflection (`plant_w_gain` 15 m/s² per unit) and `h` from `w`. What they lack:
+   **terrain** (`h_m` is ASL over flat ground), **a power ceiling** below collective saturation (15
+   m/s² of authority means the collective almost never saturates in a climb), and any **speed → climb
+   capability** coupling. Test strategy below.
+
+**Constants checked (widened 4a rule).** Grepped `flight_profile.lua` in full, `fc_limits`/
+`FC_LIMIT_BOUNDS`, `api/server.py`'s lease bounds, and `body-layer/config/defaults.toml` for floor,
+climb, descent, look-ahead, range, stale/age and ease terms. **Reused:** `FLOOR_AGL_M`/`floor_agl_m`
+(value 40 → 50, meaning widened from "spoken-AGL clamp" to "the floor"), `BREAK_MAX_HEIGHT_LOSS_M`
+(100), `VRS_IAS_THRESHOLD_KMH`/`VRS_MAX_DESCENT_MPS` (kept), `alt_accel_cap_mps2 × schedule_g` (the
+floor's approach rate), `omega_alt`, `k_vs_error`/`k_alt_error`, `k_theta_speed_give`/
+`speed_give_capacity`/`k_phi_give`, `on_ground_agl_threshold_m` (10 m, still refuses a take at or
+below it), `alt_band_*` (end of the ease-down return). **Removed:** `MAX_CLIMB_VS_MPS`/
+`max_climb_vs_mps` (tuning, limits, `FC_LIMIT_BOUNDS`, `fc_limits`, `api/server.py` bounds — removed,
+not widened, the project's convention), `profile.break_floor_agl_m` (one floor). **No existing
+constant governs** the look-ahead geometry, the lead, the look-ahead's minimum speed, terrain-data
+age, the reference's lead over measured vertical speed, the speed-give floor or the ease-down rate;
+all new, listed under Tuning constants. The nearest age constant, `ATTACK_RUN_RELATIVE_MAX_AGE_S`
+(2 s, two crew polls), is a different concept and too tight for a ~1–3 s route.
+
+**Investigator not invoked (step 3), deliberately.** The primary route rests on `land.getHeight`
+through the scripting bridge, already proven live (three notes above). Two things remain inferred:
+the `x` north / `z` east frame for the composed points (the project's working convention, already
+used by every position read) and that `land.getHeight` and `LoGetAltitudeAboveSeaLevel` share one
+vertical datum. Both are checked on the first card row by a control point: the grid's point 0 is the
+ground **beneath** the aircraft at compose time, and `(ASL − AGL)` from telemetry at that moment must
+match its height to within a metre over open ground (a swapped `x`/`z` or a datum offset shows at
+once over sloping ground). `LoGetAltitude(x, z)` is not used (note at the end).
+
+### Affected Modules / Files
+
+- `aircraft-layer/dcs-export/Petrobrain/flight_control.lua` — `F_eff`, floor beneath, one break
+  floor, look-ahead floor into the altitude shaper, `h_ref` follow while binding, ease-down return,
+  power governor (cap removed), speed absorber (J), `asl_valid`, lease `terrain` parse into
+  `fc_terrain`, projection into `measured.terrain`, unpark seed clamp removed, status/trace fields.
+- `aircraft-layer/dcs-export/Petrobrain/flight_profile.lua` — new loop constants; `break_floor_agl_m`
+  removed.
+- `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — `terrain_points` op and `"terrain"`
+  envelope key (`land.getHeight` only).
+- `aircraft-layer/src/schema/line_of_sight.py` (`TerrainAnswers`, `MAX_TERRAIN_POINTS`),
+  `collector/line_of_sight_receiver.py`, `collector/command_sender.py` (`send_terrain_points`, lease
+  `terrain` passthrough), `api/server.py` (`POST /command/terrain_points`, lease `terrain` validation,
+  `max_climb_vs_mps` bound removed); `aircraft-layer/CLAUDE.md`.
+- `body-layer/src/belief/terrain_ahead.py` — **new**, pure: grid composition, answer join, relay
+  encoding, age drop.
+- `body-layer/src/belief/flight_control.py` — `FLOOR_AGL_M` 50, `MAX_CLIMB_VS_MPS` removed,
+  `clamp_altitude` without the floor, limits dict; the four `TERRAIN_*` tuning constants (here or in
+  `terrain_ahead.py`, the implementer's call; one home).
+- `body-layer/src/body.py`, `src/aircraft_client.py` — compose and send per poll, read the
+  answers, relay in the lease.
+- `body-layer/config/defaults.toml` (regenerated), `body-layer/CLAUDE.md`.
+- Tests: `aircraft-layer/tests/test_flight_control_law.py`, `test_flight_control_lua.py`, the API,
+  schema, parity and local-order tests; `body-layer/tests/test_flight_control.py`,
+  `test_flight_authority.py`, a new `test_terrain_ahead.py`, `test_body_flight_control.py`.
+- `body-layer/ROADMAP/BL-16.md` (M3), `body-layer/ROADMAP/BL-B138.md` (range input),
+  `docs/acceptance/<date>-bl16-m3-card.md`.
+- **Not touched:** `flight_desired.lua`, the `flight` op, `ai_pilot_wheel.lua`, speech, rules.
+
+### Design Overview (diagrams)
+
+**1. Who owns what.** Grey seams unchanged; `NEW` marks what M3 adds. Body-layer owns the floor
+number and the grid geometry (the user-facing, configurable numbers, `tuning.py` → `defaults.toml`)
+and composes the points; the Hook is a height oracle; Lua owns every decision.
+
+```mermaid
+flowchart LR
+  subgraph BL["body-layer"]
+    TUN["tuning.py<br/>FLOOR_AGL_M 50 (on the wire)<br/>TERRAIN_LOOKAHEAD_M 1000<br/>TERRAIN_STEP_M 200, HALF_WIDTH 200"]
+    CMD["altitude commands<br/>clamp_altitude: no floor any more"]
+    CMP["belief/terrain_ahead.py NEW<br/>1 + 15 points along the nose<br/>from telemetry x, z, heading<br/>joins answers by seq, drops old ones"]
+    LEASE["flight_lease, every poll<br/>limits + terrain points NEW"]
+  end
+  subgraph COL["collector (aircraft-layer)"]
+    API["POST /command/terrain_points NEW<br/>GET /line_of_sight/latest .terrain NEW"]
+  end
+  subgraph HOOK["LOS Hook, scripting bridge, 1 Hz"]
+    GH["terrain_points op NEW<br/>land.getHeight per point<br/>failed point = missing, never 0"]
+  end
+  subgraph LUA["Export.lua"]
+    FT["fc_terrain NEW<br/>latest grid + receipt time<br/>(every mode, outside fc_law)"]
+    LAW["law_update, mode 1 only<br/>F_eff from the altitude goal<br/>vertical-speed floor from points ahead<br/>power governor, speed absorber"]
+    PROF["flight_profile.lua<br/>lead, min speed, max age,<br/>ease-down, speed-give floor"]
+  end
+  FOG["BL-B138, later:<br/>range = min(TERRAIN_LOOKAHEAD_M, fog)"] -.-> CMP
+  TUN --> CMP
+  TUN --> LEASE
+  CMP -- "points + seq" --> API --> GH
+  GH -- "heights by index" --> API -- "polled" --> CMP
+  CMP --> LEASE --> FT --> LAW
+  CMD -- "set: alt_m, alt_ref (wire unchanged)" --> LAW
+  PROF --> LAW
+```
+
+**2. How the floor and the look-ahead reach the vertical goal.** Everything right of the shaper is
+new; the shaper, the VRS cap and the collective loop are kept.
+
+```mermaid
+flowchart TB
+  G["altitude goal, by stamp<br/>AGL n, or barometric"] --> FE["F_eff = min(50, n) for an AGL goal<br/>50 for a barometric goal<br/>derived every step, never stored"]
+  G --> TA["target AGL = goal (baro converted, kept)<br/>raised to F_eff over the ground beneath"]
+  FE --> TA
+  BRK["break active"] --> BF["break floor = max(F_eff, entry - 100 m)"] --> TA
+  TA --> SH["altitude shaper (kept): w_shaper"]
+  PTS["points ahead: along-nose d > 0, fresh,<br/>ground speed along the nose >= v_min<br/>R_i = T_i + c   (c = F_eff, or the AGL goal: U21)"] --> SEL{"R_i above the<br/>goal's own height?"}
+  SEL -- "no: falling ground,<br/>or below the goal" --> IGN["ignored"]
+  SEL -- yes --> WI["w_i = (R_i - A) / max(d_i / V_f - lead, tau_min)<br/>clear it on arrival, a little early"]
+  WI --> WF["w_floor = max over i"]
+  SH --> MX["w_ref = max(w_shaper, w_floor)<br/>approached at the accel cap (no step)<br/>while the floor binds: h_ref follows measured AGL"]
+  WF --> MX
+  MX --> EZ["ease-down cap on the return (U20)<br/>VRS cap below 50 km/h (kept)"]
+  EZ --> GOV["power governor (replaces the 5 m/s cap)<br/>w_ref within a lead of measured w<br/>while the lift is capped"]
+  GOV --> AU["a_u,d, then collective (kept)"]
+```
+
+**3. The effective floor across commands, take, unpark and hand-back.** Nothing is stored, so
+nothing can be carried wrong or forgotten: at every arrow the floor is whatever the altitude goal
+now implies.
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  Off: Off (player flies), no floor
+  M1: Mode 1, F_eff = min(50, AGL goal), or 50 for baro
+  M2: Mode 2 (ED AI flies), floor and look-ahead inactive, desired altitude kept
+  Off --> M1: voice take, goal = current AGL
+  M2 --> M1: unpark, goal = carried height, no clamp
+  M1 --> M1: altitude n / climb / descend / hold, F_eff follows the new goal
+  M1 --> M1: speed / heading / turn / break, goal untouched, F_eff unchanged
+  M1 --> M2: park
+  M1 --> Off: hand-back, release, envelope
+  M2 --> Off: hand-back
+```
+
+**4. When the climb does not fit, speed gives first.** The commanded speed itself is never changed,
+so the readback and the desired state stay true; only the reference the law chases yields.
+
+```mermaid
+flowchart TB
+  D["vertical demand<br/>(goal, floor, look-ahead)"] --> C{"collective can deliver it?<br/>no shortfall: not at its stop,<br/>rotor RPM above the warning,<br/>stall and pedal guards quiet"}
+  C -- yes --> OK["climb as demanded,<br/>commanded speed held"]
+  C -- no --> S1["1. speed gives<br/>pitch back (kept) AND the speed reference<br/>yields to measured speed, NEW (section J)<br/>never below the speed-give floor (U19)"]
+  S1 --> S2["2. turn gives: shallower bank (kept)"]
+  S2 --> S3["3. height gives: he climbs slower<br/>(governor keeps the reference in reach)"]
+  S1 -. "shortfall ends" .-> R["speed reference returns to the<br/>commanded speed through its S-curve"]
+  BRK["break, or terrain floor binding:<br/>height is not available to give"] -.-> S1
+```
+
+**5. The terrain route and its latency.** One poll is 1 s; the Hook ticks at 1 Hz. A grid is
+typically 1–3 s old when the law first uses it, which the user accepted (*"Elevation polling can be
+1 Hz or even 0.5 Hz"*). The points are world coordinates, so age shortens the reach and lags a turn;
+it does not bend the geometry.
+
+```mermaid
+sequenceDiagram
+  participant B as body-layer (1 s poll)
+  participant C as collector
+  participant H as LOS Hook (1 Hz)
+  participant L as Export.lua law
+  B->>C: POST /command/terrain_points (seq, 16 points x,z)
+  C->>H: UDP op terrain_points (coalesced, last wins)
+  H->>H: land.getHeight x16 (~0.1 ms)
+  H->>C: envelope key "terrain" (seq, then height by index)
+  B->>C: GET /line_of_sight/latest (next poll)
+  B->>L: flight_lease (limits, terrain: seq + x,z,h list)
+  L->>L: new seq stamped at receipt (model time), projected against the current position every law step
+```
+
+### A. One floor, no spoken-height clamp
+
+- **`FLOOR_AGL_M` = 50.0** (`tuning.py`, status `user`, the user's *"one floor is better, use
+  50 m"*), still sent as `limits.floor_agl_m`; `fc_limits.floor_agl_m` startup default 50.0.
+  Docstring rewritten: the floor of normal flight, above bare ground.
+- **`profile.break_floor_agl_m` is removed.** The break floor becomes
+  `max(F_eff, break_entry_h_m − break_max_height_loss_m)` (same formula, one floor), and LV-2
+  section C's height margin reads it unchanged.
+- **`F_eff`**, derived in `law_update` every step: `alt_goal_ref == "agl"` → `min(limits.floor_agl_m,
+  alt_goal_m)`; `"baro"` → `limits.floor_agl_m`. Never stored.
+- **The floor beneath**: after the baro conversion, `alt_goal_agl = max(alt_goal_agl, F_eff)`. A
+  no-op for an AGL goal (its floor is itself, or 50 below it); for a barometric goal whose AGL
+  equivalent falls below 50 m, the target is 50 m over the ground beneath (*"the 40 m floor is
+  especially for barometric mode, we don't want to fly to terrain"*). Uses `measured.h_m` as today
+  (radar when valid, else `LoGetAltitudeAboveGroundLevel`: *"for radar alt, use the telemetry AGL"*).
+- **`clamp_altitude`**: the AGL floor clamp goes; an AGL goal is clamped only to `≥ 0` (a negative
+  height is not an altitude). `"altitude 20"` reads back *"20 meters."* and is flown at 20 m
+  (*"Allow player to command any altitude and then accept it"*). `flight_authority.py`'s carried-
+  value check follows `clamp_altitude` and needs no edit.
+- **The unpark seed clamp goes** (`flight_control.lua` ~L2892): a mode-2 height is carried as given
+  (E10, no jump at the unpark). Its ceiling-only speed clamp is untouched.
+
+### B. The look-ahead: clear each point by the time he reaches it (Q1 → A)
+
+**Points (body-layer, `belief/terrain_ahead.py`, pure).** From the telemetry position `(x, z)` and
+true heading `ψ`: point 0 directly beneath (the control point, not used by the law's floor), then
+rows at `TERRAIN_STEP_M, 2·step, …, TERRAIN_LOOKAHEAD_M` along `(cos ψ, sin ψ)`, each with columns
+at `0, ±step, …, ±TERRAIN_HALF_WIDTH_M` along the right vector `(−sin ψ, cos ψ)`: 1 + 5 × 3 = 16
+points at the user's numbers (*"a rectangular shaped grid: 1 km ahead of aircraft, 200 m to both
+sides"*). Boresight, not track (*"for simplicity use boresight as ahead"*); same at any light level
+(Q6). A geometry that would exceed `MAX_TERRAIN_POINTS` (32, protocol constant) coarsens its rows,
+never silently drops the far ones. A new `seq` per compose; composed every poll the lease is sent
+(warm at a take, the estimator's own "every mode" posture; the law reads it in mode 1 only).
+
+**Range is one input** (`TERRAIN_LOOKAHEAD_M`, body-side): `[[BL-B138]]` later clips it to
+`min(TERRAIN_LOOKAHEAD_M, fog visibility)` in the composer, with no Lua change (Q5 → deferred; until
+then he looks the full configured range in fog, the user's accepted gap, alignment Finding 4/E6).
+
+**What the law does with them** (`law_update`, mode 1, a new pure helper beside it). Each law step,
+from fresh points (received within `terrain_max_age_s`): along-nose distance `d_i` from the
+**current** position, terrain height `T_i`, clearance height `R_i = T_i + c` with `c = F_eff` (or
+the AGL goal, U21), current altitude `A = measured.asl_m`, ground speed along the nose `V_f =
+measured.v_g_f`:
+
+- Only points with `d_i > 0`, and only when `V_f ≥ terrain_min_speed_mps`: at hover and in a pedal
+  turn nothing ahead is urgent, so nothing lifts him and the height does not pump as the nose sweeps
+  (E8). Backward flight is not covered (the grid is ahead only; Risks).
+- Only points whose `R_i` stands above **the goal's own height** (`goal_asl = A − h + alt_goal_agl`):
+  falling ground, or a point already below where the shaper is taking him, says nothing. This keeps a
+  commanded descent over flat ground free, and keeps the look-ahead from inventing a target.
+- `w_i = (R_i − A) / max(d_i / V_f − terrain_lead_s, terrain_tau_min_s)`: the vertical speed that
+  reaches `R_i` on arrival, with the arrival brought forward by the lead so the climb is established
+  before it is needed (*"climb early"*). `w_floor = max_i w_i`.
+- On a steady slope `s` at speed `V` this settles at `w = V·s`, the user's own *"climb needed ≈ speed
+  × slope"*, riding `V·s·lead` above the clearance height (11 m at 200 km/h, 10 %, lead 2 s: every
+  row agrees, so there is no hunting between rows).
+- **Positive `w_floor`** climbs him early; **negative `w_floor`** bounds a descent toward a ridge
+  that stands above the goal, so he arrives at its clearance height rather than diving and climbing
+  again.
+- A hill he is not moving toward contributes nothing (`d_i ≤ 0`, or `V_f` below the minimum); a hover
+  behind a ridge stays behind it (Q1).
+
+### C. The vertical channel: floor, ease-down, power governor
+
+- **Floor into the shaper.** `w_ref = max(w_shaper, w_floor)`, approached at `alt_accel_cap ×
+  schedule_g` so a new grid or a passing point never steps the reference; the lead covers the ramp.
+  **While the floor binds, `h_ref` follows `measured.h_m`**: without that, an AGL-frame reference
+  integrating a world climb rate would run ahead of the measured AGL on every upslope (finding 2's
+  frame mismatch, the other way round) and add a climb nobody asked for. When it releases, the shaper
+  continues from the measured state: no step.
+- **Ease down past the crest (Q4).** The return after a terrain-driven climb is the ordinary shaper
+  from the current climb, which turns it into a descent through its S-curve, never a push-over,
+  bounded below by any ridge still ahead (B). How gently is U20: measured on the shaper with today's
+  profile, a 100 m return at cruise peaks at ~10.6 m/s down (50 m: ~6.6 m/s; 200 m: ~16 m/s);
+  U20 adds `terrain_ease_down_mps` on the return only. The return state `terrain_return` is set the
+  step the floor stops binding, and cleared when altitude is back in band, on a new altitude goal
+  (an ordinary command flies ordinarily), or by any `fc_law = nil`.
+- **No numeric vertical-speed cap** at normal speed, either way (*"no number limit, limit comes from
+  available power"*; *"At faster speeds there is no descent rate limit"*): the `max_climb_vs_mps`
+  clamp goes. **Decision 31's VRS guard stays** (below 50 km/h, ≥ −4 m/s).
+- **Power governor** (finding 4). While the lift length is capped (`shortfall > 0`, or collective at
+  +1), `w_ref ≤ w + w_ref_lead_max_mps`; while collective is at −1, `w_ref ≥ w − w_ref_lead_max_mps`.
+  The reference then tracks what the aircraft can actually do, which is the user's limit made
+  literal, and the margin keeps the collective asking, so the shortfall persists and speed gives.
+  It replaces the cap in the same line of `law_update`.
+
+### D. Speed gives first, then resumes (settled 5; section J built for speed)
+
+- **Trigger:** the existing shortfall (collective at its stop, the rotor-RPM warning ease, the
+  blade-stall and pedal-limit guards, the engine-RPM schedule). No power model: feedback only, as
+  throughout.
+- **Action**, in the same block as `theta_speed_give` (which is kept): while `shortfall > 0`, the
+  speed reference **yields**: `v_ref = min(v_ref, max(V_m, v_floor))`, `dv_ref = min(dv_ref, 0)`, so
+  the speed error no longer pushes the nose down against the pitch-back. `v_floor` is
+  `speed_give_floor_kmh` (U19). `speed_goal_mps` and `desired.ias_kmh` are never touched: what he
+  read back is still the goal.
+- **Resume:** once the shortfall ends, the speed shaper brings `v_ref` back to `speed_goal_mps`
+  through its S-curve and braking ceiling (unchanged): *"commanded speed resumes afterwards."*
+- **Which climbs it applies to** is U22, and it maps onto one number: the governor's lead (C).
+  While the terrain floor binds, the lead is `w_ref_lead_max_mps`, so the collective keeps asking,
+  the shortfall persists and speed gives. For a commanded climb with no terrain in the way, U22
+  "terrain only" sets the lead to 0: the reference sits at what the aircraft achieves, `e_u` falls
+  to ~0, the shortfall ends, speed is held and he climbs as fast as the power left allows (height
+  gives). U22 "every climb" uses the same lead in both cases (U3's ordinary order). Transient
+  shortfalls in turns and breaks are untouched either way: LV-1's `theta_speed_give` stays as built.
+- **Break and terrain together:** while `w_floor` binds, LV-2's `height_available_frac` is 0 (the
+  height a break would give is wanted for the ground ahead), so a break near rising ground gives
+  speed, then turn rate, instead of height.
+- **Steeper than he can climb:** with speed at its floor and power at its limit, the floor is not
+  guaranteed. The look-ahead's early start makes this rare (at 100 km/h, 1 km is 36 s), and the pilot
+  sees the terrain too (*"the player can see the terrain just as well"*). Risks.
+
+### E. The data path (primary: Hook `land.getHeight`)
+
+- **Hook** (`petrobrain-line-of-sight-hook.lua`): a `terrain_points` op on the 7797 listener,
+  `{"op": "terrain_points", "seq", "points": [[x, z], ...]}`, at most `MAX_TERRAIN_POINTS`, coalesced
+  to one setter call per frame (last wins), evaluated in the same scripting chunk after the probes:
+  `land.getHeight({x = px, y = pz})` per point, `pcall`-wrapped; a failed or non-finite height
+  answers **empty (missing)**, never 0, because 0 reads as low ground and would suppress a climb.
+  Answer key `"terrain": "<seq>|<i>:<h>;..."` in the envelope, beside `"probes"`. The bridged chunk is
+  a string literal, so its `luac5.1 -p` and `GETGLOBAL` checks run on the extracted literal
+  (`aircraft-layer/CLAUDE.md`).
+- **Collector/API:** `POST /command/terrain_points` (shape, count ≤ `MAX_TERRAIN_POINTS`, every
+  coordinate `math.isfinite` and inside ±10⁷ m, else 400) → `command_sender.send_terrain_points`;
+  `schema/line_of_sight.py` gains `TerrainAnswers.from_wire` (each height `math.isfinite`, else that
+  index is `None`; a malformed key drops `terrain` alone, never the snapshot, the `probes` posture).
+- **Body-layer:** composes (B), sends, reads the next snapshot's answers, joins by `seq` to the
+  points it sent, and relays the newest answered grid in the lease as
+  `"terrain": "<seq>|x,z,h;x,z,h;..."` (missing heights omitted). A grid older than
+  `TERRAIN_RELAY_MAX_AGE_S` by the collector's own receive time is not relayed (empty field). The
+  beneath control point is logged against `(ASL − AGL)` at compose time (the card's first row).
+- **Lease** (`POST /command/flight_lease`): the `terrain` field is validated on its own (length,
+  pattern, finite numbers); a bad `terrain` drops terrain only, **never the lease or its limits**,
+  whose whole-message rejection is a safety property of its own.
+- **Lua:** a new `seq` is parsed into module-level `fc_terrain` (points + receipt `LoGetModelTime`),
+  outside `fc_law`, reset at `on_stop`/`reset(epoch)`; each height re-checked `h == h` and
+  `|h| < 1e5`. `read_measured` gains `asl_valid`: the look-ahead is used only when ASL was actually
+  read (today a failed ASL read falls back to the AGL value, the wrong datum for `A`).
+  `run_active_frame` projects the fresh points into `measured.terrain = {{d, T}, ...}` (nil when
+  stale, absent, or `asl_valid` is false), so `law_update` stays pure and the toy plant can feed it
+  directly. With no fresh grid the law keeps only the floor beneath: today's reactive behaviour,
+  silent (no callouts), visible in the status line and trace.
+- **Kill switch** `profile.terrain_lookahead_enabled` (true): one profile edit flies the floor
+  without the look-ahead if the data path misbehaves on the card.
+- **Why body-layer composes, not the Hook or the collector** (local, reversible, decided here):
+  BL-B111's shape is exactly "body-layer composes, Hook answers", the geometry is then typed Python
+  with the user's numbers in `defaults.toml` where BL-B138 can clip them, and the Hook stays a height
+  oracle. The collector could close the loop on the Windows box with less latency, but this layer
+  holds no interpretation logic (`aircraft-layer/CLAUDE.md`); that is the next step only if a card
+  shows latency mattering.
+
+### F. Not changed
+
+Mode 2 entirely (E10: the AI wheel's altitude is never clamped, the floor and look-ahead run in the
+mode-1 law only). The `desired` table and the `flight` op (no new field, finding 5). The AGL source.
+No speech at all: no callout is added and none existed to remove (E9, *"drop all call-outs"*). The
+LV-3 hover regime, goal slew and yaw channel.
+
+### Tuning constants
+
+| constant | where | first cut | status |
+|---|---|---|---|
+| `FLOOR_AGL_M` (value change, was 40) | `tuning.py`, wire `floor_agl_m` | 50.0 m, lo 0, hi 500 | user |
+| `TERRAIN_LOOKAHEAD_M` | `tuning.py` (composer) | 1000 m, lo 0, hi 3000 | user (*"1 km (configurable)"*) |
+| `TERRAIN_STEP_M` | `tuning.py` | 200 m, lo 50, hi 1000 | user |
+| `TERRAIN_HALF_WIDTH_M` | `tuning.py` | 200 m, lo 0, hi 1000 | user |
+| `TERRAIN_RELAY_MAX_AGE_S` | `tuning.py` | 5.0 s, lo 1, hi 30 | judgement (~3 polls past the slowest normal route) |
+| `terrain_lead_s` | `flight_profile.lua` | 2.0 s | judgement (time to set up a climb at the accel cap) |
+| `terrain_tau_min_s` | `flight_profile.lua` | 1.0 s | judgement (bounds `w_i` for a point almost reached) |
+| `terrain_min_speed_mps` | `flight_profile.lua` | 3.0 m/s (~11 km/h) | judgement (below it, nothing ahead is urgent: E8) |
+| `terrain_max_age_s` | `flight_profile.lua` | 5.0 s | judgement (model time since receipt of the newest seq) |
+| `terrain_lookahead_enabled` | `flight_profile.lua` | true | kill switch |
+| `w_ref_lead_max_mps` | `flight_profile.lua` | 2.0 m/s | judgement (replaces `max_climb_vs_mps`) |
+| `speed_give_floor_kmh` | `flight_profile.lua` | 100 km/h | judgement, U19 |
+| `terrain_ease_down_mps` | `flight_profile.lua` | 5.0 m/s | judgement, U20 (the descent rate every LV card flew under the old cap) |
+| `MAX_TERRAIN_POINTS` | protocol constant, schema + Hook, parity test | 32 | not behaviour |
+
+**Removed:** `MAX_CLIMB_VS_MPS`/`max_climb_vs_mps`, `profile.break_floor_agl_m`. The split follows
+the existing one: the numbers the user set and may configure (floor, range, step, width) live in
+`tuning.py` and render in `defaults.toml`; loop values live in the profile.
+
+**Non-finite paths (standing rule).** Terrain heights: `math.isfinite` in `TerrainAnswers.from_wire`
+and again in Lua; a non-finite height is a **missing point**, never 0. Composed coordinates: checked
+before sending (a non-finite telemetry position composes no grid that poll); re-checked by the API.
+The lease `terrain` string: API and Lua, failing to "no terrain". `asl_m`: `asl_valid` gates the
+look-ahead. New `tuning.py` values: `lo`/`hi` bounds as usual; `floor_agl_m` keeps its
+`FC_LIMIT_BOUNDS` entry. Every path lands on "no look-ahead, floor beneath only", never on a
+plausible-looking default.
+
+### Co-moving fields
+
+Trigger (6a) checked: the altitude goal is written externally (`set`, the unpark carry) and
+internally (the take seed), and M3 adds law state that must move with it. The floor itself is
+**derived, never stored**, which is the point of finding 5. Construction sites grepped at `5154e45c`
+as for LV-3: `law_init_at_take` (only creation), `law_apply_goal`/`law_update` copy with `pairs`,
+`fc_law = nil` at `request_release`, `check_envelope` failure, the two park/arm sites, `on_stop`,
+`reset`. `fc_terrain` lives outside `fc_law`, like the estimator.
+
+| Field | Written by | Transition | Must hold true after |
+|---|---|---|---|
+| `F_eff` | derived each step | any | `min(floor, AGL goal)` or `floor` for baro; nothing to carry |
+| `alt_goal_m`, `alt_goal_ref` | internal (take) | voice take | stopping height of current AGL, `"agl"`; `F_eff` = min(50, it) |
+| same | external (desired seed) | unpark | carried value as given, **no clamp**; `F_eff` follows it |
+| same | external (`set`) | altitude command | new goal; `F_eff` follows; `terrain_return = false` |
+| same | — | speed/heading/turn/break `set` | untouched (no `alt_m` in the message), so `F_eff` unchanged |
+| `terrain_return` (NEW) | internal | take (any) | `false` |
+| same | internal | floor stops binding | `true` |
+| same | internal | altitude in band, new altitude goal, `fc_law = nil` | `false` |
+| `h_ref`, `w_ref` | internal | floor binds | `h_ref = measured.h_m`, `w_ref` rising toward `w_floor` at the accel cap |
+| same | internal | floor releases | shaper continues from them: no step |
+| `v_ref`, `dv_ref` | internal | shortfall begins/continues | `v_ref ≤ max(V_m, v_floor)`, `dv_ref ≤ 0`; `speed_goal_mps` untouched |
+| same | internal | shortfall ends | free; shaper returns `v_ref` to `speed_goal_mps` |
+| `break_entry_h_m` floor | derived | break active | `max(F_eff, entry − 100)` |
+| `fc_terrain` (NEW, module) | external (lease) | new `seq` | parsed, receipt time stamped; bad field leaves the previous grid to age out |
+| same | internal | `on_stop`, `reset(epoch)` | empty |
+| every law field above | internal | release, envelope, park, stop, reset | `fc_law = nil`; next take rebuilds all |
+
+### Implementation plan (one batch)
+
+1. **One floor and the vertical channel, no terrain yet.** A (floor 50, `F_eff`, floor beneath, one
+   break floor, `clamp_altitude`, unpark seed), C's cap removal and power governor, D's speed
+   absorber (U19, U22 as answered). Toy plant first: a driver with a **capped climb authority** (a
+   power ceiling below collective saturation) that reproduces the problem — with `v_ref` not
+   yielding, a 300 m climb at 200 km/h shows the speed loop fighting the pitch-back — before the fix.
+   body-layer and aircraft-layer checks.
+2. **Terrain data path, in shadow.** E end to end (Hook op, schema, collector, API, composer, relay,
+   lease field, `fc_terrain`, projection), with `w_floor` computed and put in the status line and
+   trace but **not applied**.
+3. **The look-ahead applied.** B and C (floor into the shaper, `h_ref` follows while binding, ease-
+   down return, U20/U21), the break interaction, the hover gate.
+4. **Trace, status, docs, card.** Status: `fc_floor_eff_m`, `fc_terrain_n`, `fc_terrain_age_s`,
+   `fc_terrain_w_floor`, `fc_terrain_binding`, `fc_speed_giving`. Trace: the same plus `v_ref`,
+   `h_ref`, `w_ref`, `terrain_return`. `aircraft-layer/CLAUDE.md` (LOS Hook op, lease field),
+   `body-layer/CLAUDE.md` (flight_control entry), `[[BL-16]]` (M3 status), `[[BL-B138]]` (one line:
+   `TERRAIN_LOOKAHEAD_M` is the single input its fog clip changes), `defaults.toml` regenerated.
+
+Built back to back, so **one performance pass and one security pass after stage 4**. The security
+surface is a new inbound Hook op and a new lease field, both bounded and failing to "no terrain".
+Lua budget: `flight_control.lua` is at 122 top-level locals of 200; M3 adds `fc_terrain` and one
+parse helper. `law_update` gains at most two upvalues (the helper and nothing else).
+
+### Tests
+
+**Lua, real-Lua toy plant** (`test_flight_control_law.py`, `test_flight_control_lua.py`):
+
+- `F_eff`: AGL 20 → 20; AGL 300 → 50; baro → 50; a baro goal whose AGL equivalent is 20 is flown at
+  50 m over the ground beneath; a break at 70 m AGL never goes below 50, after "altitude 40" never
+  below 40.
+- The look-ahead helper alone: hover (`V_f` < min) → no demand; a steady 10 % slope at 200 km/h →
+  `w_floor ≈ V·s`, every row within 0.2 m/s of the others; points behind dropped; a ridge 200 m to
+  the side counts; a non-finite height is dropped (and a 0 m height is **not** a substitute); a stale
+  grid gives no demand; points whose clearance is below the goal give no demand; a ridge above the
+  goal during a descent bounds the descent rate.
+- **A new terrain driver**: ground height `g(x, z)` under a moving aircraft (ramp, ridge, crest then
+  second ridge), `h_m = ASL − g`, the capped climb authority from stage 1, and the grid delivered
+  **2 s late** at 1 Hz. Asserts: baro hold toward a rise never below 50 m and back to the goal after
+  (E1); low cruise into a ridge clears it, speed falls and comes back, `speed_goal_mps` unchanged
+  (E2); over the crest no push-over and the descent within U20's cap (E3/Q4); a long 10 % upslope
+  with "altitude 60" stays within the U21 answer's band, not 150 m (E4); "altitude 30" clears a rise
+  at 30 (E5); hover 300 m behind a ridge with ±90° pedal turns: height within band, no climb (E8);
+  the reference never leads measured AGL by more than its band while the floor binds (finding 2's
+  frame trap).
+- Take and unpark: bit-exact first frame unchanged; unpark with a mode-2 25 m radar height seeds 25
+  (no clamp); a take at 25 m AGL holds ~25.
+- No cap: `max_climb_vs_mps` absent from `fc_limits`/`FC_LIMIT_BOUNDS`; a 300 m climb with authority
+  to spare is not held to 5 m/s; with authority capped, `w_ref − w ≤ w_ref_lead_max_mps`; the VRS
+  test stays green.
+- Regression: with no terrain data and the floor not binding, every pre-M3 scenario whose climbs
+  never reached 5 m/s is bit-identical (the cap and the floor were not involved).
+- Harness hygiene: new fields, `fc_terrain`, getters in the extraction tuples and parity tests;
+  `MAX_TERRAIN_POINTS` parity Lua ↔ Python.
+
+**Python:** composer geometry (heading 0 → rows north, columns east/west; heading 90 → rows east,
+right column south), coarsening past the cap, seq join, relay encoding and age drop, non-finite
+telemetry; `clamp_altitude(20, "agl") == 20`, `clamp_altitude(-5, "agl") == 0`; limits dict (no
+`max_climb_vs_mps`, floor 50); API validation of `terrain_points` and of the lease `terrain` field
+(a bad one leaves `limits` applied); `TerrainAnswers` parse (empty, missing indices, non-finite,
+malformed).
+
+**What the plant cannot show**, so the card must: the DCS frame and datum (`x`/`z`, `land.getHeight`
+vs `LoGetAltitudeAboveSeaLevel`); whether slowing down actually buys climb in the DCS Mi-24P (the
+plant has no speed-dependent climb capability); real rotor-RPM and engine behaviour at the power
+limit; radar AGL over forest against bare ground; the real route's latency and jitter; transitional
+lift at low speed.
+
+### Card rows (mode 1, SAU handled at take by M4 once built, else H, K, T off; branch named in the card; the LOS Hook must be deployed)
+
+1. **Data check, first:** status shows `fc_terrain_n` ≈ 15 and age ≤ 3 s in flight; the logged
+   beneath control point matches `(ASL − AGL)` within ~1 m over open ground; along a valley wall the
+   high column is on the correct side in the trace.
+2. **"Altitude 20"** over flat ground: reads back *"20 meters."*, flown at 20 m.
+3. **Barometric hold toward rising ground (E1):** a baro goal that brings the ground within 50 m:
+   climbs early, never below 50 m, back to the baro goal afterwards; silent.
+4. **Low cruise into a ridge at 200 km/h, 50 m (E2):** climbs early; on a steep one, nose back and
+   speed falls (to no less than U19's floor), commanded speed back after the crest.
+5. **Past the crest (E3/Q4):** eases down; note how gentle it feels against U20.
+6. **Long upslope with "altitude 60" (E4):** stays near 60 (U21), not far above; note the sag if U21
+   was answered no.
+7. **"Altitude 30" toward a rise (E5)**, then "speed 150" and a heading change: still clears at 30;
+   park and unpark: still 30, no jump (E10).
+8. **"Hold altitude" at 25 m** (*"Holding 25 meters"*, flown at 25, Q2); **a take at 25 m** with no
+   height: holds ~25 (Q3).
+9. **Hover 300 m behind a ridge (E8):** pedal turns ±90°: no climb, no pumping; then "speed 20"
+   toward it: a gentle climb only as he closes.
+10. **Break at 70 m AGL (E7):** never below 50.
+11. **"Climb 300" at 220 km/h:** no 5 m/s cap; speed per U22; no overshoot at the top. **"Descend
+    200" at cruise:** no rate cap; then **"speed 40", "descend 100":** at most 4 m/s (VRS kept).
+12. **Mode 2 near terrain (E10):** nothing from M3 while parked.
+13. **Forest:** 50 m AGL over forest edge: note radar AGL against the terrain beneath (Risks).
+14. **Pause** during a terrain climb, then unpause: no jump; the grid ages out and refreshes.
+15. **Silence throughout (E9).**
+
+### Risks & unknowns
+
+- **Frame and datum are inferred** until card row 1: a swapped `x`/`z` probes the wrong ground, a
+  datum offset biases every clearance. The beneath control point is there to catch both before
+  anything depends on them.
+- **Routing latency** (~1–3 s, user-accepted): the reach shortens by `V·age`, and in a hard turn the
+  grid lags the nose (a 15 °/s turn and a 3 s old grid: 45° off; the ±200 m columns cover part of it).
+  If row 4 or a turn near terrain shows it biting, the collector-local loop (E) is the next step.
+- **The LOS Hook must be running.** Without it there is no look-ahead, silently; the floor beneath
+  still holds. Whether the user's deploy script copies `Scripts/Hooks/` is unconfirmed; the card
+  must say so either way.
+- **Steeper than the aircraft can climb at the speed floor**: not guaranteed (D). U19's choice
+  decides how much margin a cliff gets.
+- **Removing the 5 m/s cap changes every altitude command**, not only terrain: big climbs go to
+  available power (U22) and big descents at speed are fast (~16 m/s peak for 200 m). Row 11.
+- **Radar over trees**: if the radar altimeter reads to the canopy, the floor beneath flies higher
+  than 50 m over bare ground (conservative); the look-ahead uses bare ground (`land.getHeight`; trees
+  are not scenery objects and no `land.*` call sees them). The user's *"My 40 m floor includes tree
+  avoidance"* is why the floor rose to 50; below 50 m the trees are the pilot's.
+- **The ±200 m corridor** lifts him for a peak 200 m beside the track, by the user's own choice of
+  grid; on a narrow valley floor that may read as an unneeded climb.
+- **Backward and sideways flight at speed** are outside the grid (ahead only). At hover speeds the
+  gate makes this moot; sideways translate (BL-16 "Later") will need its own look.
+- **Fog** (`[[BL-B138]]`): until it lands he anticipates terrain he could not see (E6 deferred by
+  the user).
+- **The governor's lead and the lead time are first cuts**; too small a governor lead lets the
+  shortfall vanish and speed stop giving early, too large lets the reference wind up.
+- **The AGL shaper's frame mismatch (finding 2) remains for goals above the floor** unless U21 is
+  yes; the plan does not re-frame the shaper (a larger change to flown behaviour than M3 needs).
+
+### Second-order effect
+
+The floor becomes a function of the altitude goal, so **any future feature that sets an AGL goal on
+Petrovich's own initiative** (BL-16 "Later" hover move up/down, an attack-run height) silently lowers
+the floor with it, and must state its own floor; the vertical-speed floor is the slot those and
+BL-B138's range clip plug into. Building J for the speed absorber also changes what LV-2's ordinary
+chain does under any sustained shortfall, so the LV-2 card's break rows fly on it. When this plan
+merges, step 10 applies to the old `plans/flight-control/plan.md` M3 (REVISED pointer, done here) and
+to `[[BL-B138]]` (range input).
+
+### Note: `LoGetAltitude(x, z)` in-process (not planned)
+
+If the user's grep of `Scripts/Export.lua` later confirms it returns bare terrain height at a point,
+the sampler can move into Export.lua (fill `fc_terrain` locally at 1 Hz from the same 16 points),
+removing the Hook op, the composer and the lease field; the law and every test of it are unchanged,
+because `measured.terrain` is the only seam. **Optional probe, testing-aid path only:** a flag file
+`aircraft_layer_terrain_probe.flag` makes Export.lua log once a second, `pcall`-wrapped,
+`LoGetAltitude(x, z)`, `LoGetAltitude(z, x)` and `ASL − AGL` at the ownship position over sloping
+ground; the call that matches `ASL − AGL` settles both existence and argument order. Not needed for
+M3.
+
+### Decisions Requiring User Input (M3)
+
+- **U18: "Explicitly commanded" = every AGL height goal.** Every AGL goal in the system comes from
+  you: "altitude n", climb/descend, hold, level flight, the take (your Q3), the mode-2 height carried
+  at unpark (E10). So the floor is simply `min(50, AGL goal)`, or 50 for a barometric goal, with no
+  flag to carry or lose. — recommend: yes; why: it is exactly your list, and it travels with the goal
+  through every command, park and unpark by construction. The cost: a future feature where
+  Petrovich picks a low AGL height himself must state its own floor (Second-order effect).
+- **U19: How far speed gives.** — recommend: down to about **100 km/h**, then he simply climbs
+  slower; why: your *"slow down a bit"*, and below roughly that speed a helicopter of this class
+  climbs worse, not better (more power to hover). The alternative: let a terrain climb that still
+  does not fit keep slowing, toward a hover, since with ground ahead clearing it matters more than
+  climb rate (a slower helicopter gets more time per metre). First cut either way; row 4 measures it.
+- **U20: How gently "ease down" past a crest.** Today's altitude shaper, starting from the climb,
+  comes back down from a 100 m terrain climb peaking at about 10 m/s (6–7 m/s from 50 m, 16 m/s from
+  200 m). — recommend: cap the return after a terrain climb at **5 m/s**, the rate every LV card
+  descended at under the old cap; why: "ease down" was your choice over "straight down"; ordinary
+  descents you command keep no limit.
+- **U21: Should the look-ahead also protect the height you commanded, not only the floor?** Today
+  an AGL hold sags on a slope by speed × slope × 6 s: "altitude 100" up a 10 % slope at 200 km/h is
+  flown at about 67 m (finding 2). With the floor-only reading the look-ahead acts only on ground
+  rising more than 50 m above the ground beneath him, so on shorter rises the sag stays. —
+  recommend: yes, clear the commanded AGL height (one term, `c = AGL goal`); why: "altitude
+  100" means 100 over the ground he is crossing, and it removes the sag with the same grid; a
+  barometric goal still gets only the 50 m floor. No would keep your words literally (the floor only)
+  and leave the sag for the card to show.
+- **U22: Does a commanded climb also trade speed, now the 5 m/s cap is gone?** "Altitude 500" at
+  220 km/h, nothing in the way. — recommend: **no, terrain climbs only**: a commanded climb keeps the
+  commanded speed and climbs as fast as the remaining power allows (height gives); why: you asked for
+  a speed and a height and nothing is in the way, while with terrain ahead the clearance comes first.
+  The alternative is your U3 order (speed, turn, height) for every climb: faster to the height, at
+  the cost of slowing to U19's floor on every big climb.
 

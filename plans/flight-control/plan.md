@@ -3042,6 +3042,11 @@ already flies "hold still against a stirred stick", so a hold-only flight of M1 
 in order. `sortie-log-triage` gains a flight-trace section reporting time-to-band, time-in-band and
 zero crossings, not RMS error.
 
+**M3 REVISED 2026-11-28** — superseded by `plans/flight-lift-vector/plan.md`, "M3 amendment
+(2026-11-28)": one 50 m floor (lowered only by a commanded AGL height), a terrain grid ahead instead
+of the AGL trend × `FLOOR_LOOKAHEAD_S`, no 5 m/s climb cap, and no "Climbing for terrain." callout.
+The text below is kept as history.
+
 **M3 — terrain floor (logic is Mac-buildable; τ comes from M0-A).** This is the old Stage 3, kept, in
 Lua:
 
