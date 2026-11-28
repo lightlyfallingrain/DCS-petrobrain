@@ -489,3 +489,29 @@ in normal flight. Trade speed for lift when necessary, but slowing to 100 km/h i
 slow down enough to get lift, but speed delta should typically not exceed 50 km/h."* Same message:
 *"Do the efficiency clean ups."* Carried into `plan.md`, "M3 revision R1 (2026-11-28)".
 
+## LV-2 re-explore — what a break turn actually needs (user, verbatim, 2026-11-28)
+
+After the failed LV-2 break flight (`docs/acceptance/2026-11-28-sortie-feedback.md`: collective
+went full up chasing height at 60°+ bank, nose rose against full forward cyclic, 213 → 81 km/h):
+
+> # what a break turn actually needs
+>
+> When I fly it:
+> - start with bank, 30-60 degrees, increase pedal with bank
+> - nose down to about -10 degrees
+> - *less* collective, maybe 20-30% less
+>
+> From this follows
+> - steep bank turns aircraft fast
+> - coordinated turn
+> - nose low keeps speed up
+> - low collective unloads the rotor -> no RPM drop, no sudden slow down
+> - altitude drop is unavoidable. If there is no altitude to spare, fly a more normal turn, just
+>   command more turn rate.
+
+Main-loop reading: the break becomes an **attitude manoeuvre**, not trajectory tracking — bank,
+pitch and collective are set (bank 30–60°, pitch ≈ −10°, collective 20–30 % below entry), pedal
+keeps it coordinated, and height is *not* held: the vertical channel is released, which removes
+the sortie's root cause (collective chasing a sinking height reference). With no height to spare,
+the break degrades to an ordinary height-holding turn at a higher commanded turn rate.
+
