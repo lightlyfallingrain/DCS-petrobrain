@@ -740,3 +740,168 @@ same-day corrections in `flight-lift-vector/plan.md`.
 None — both findings are plan-hygiene corrections the main loop can apply directly (redraw diagram
 2's hover note; rewrite the Risks entry) without needing a decision from you. Flagging here so the
 implementer does not build diagram 2's uncorrected reading.
+
+## M3 terrain floor — goal check (2026-11-28)
+
+**Verdict:** CONCERNS
+
+Inputs: `explore-notes.md` "M3 terrain floor explore (2026-11-28)" to the end (the specification);
+`plans/flight-control/plan.md` old M3 (~L3045), old Stage 3 (~L1895), the 2026-10-31 AGL-over-trees
+risk (~L2026); `body-layer/ROADMAP/BL-16.md`; this plan's LV-1..LV-3 law (priority chain G, LV-2 D);
+today's code at `34c1ecb4` (`flight_control.lua` altitude shaper ~L1100–1140 and take seed
+~L2880–2925, `belief/flight_control.py` `clamp_altitude`, `config/rules/flight.lua` altitude rules).
+Superseded by the explore and not re-raised: the "Climbing for terrain." callout (E7 of the old
+plan), the 40 m floor, the 5 m/s climb cap, the AGL-trend × 5 s look-ahead.
+
+### Why
+
+When Petrovich flies in mode 1 the pilot's eyes are elsewhere — on the 9K113 sight, on targets, on
+the map — and a barometric hold knows nothing about the ground under it. The floor exists so that
+**handing him the controls never means flying into terrain**, while **the pilot still decides how
+low they go**: 50 m above bare ground is the height he keeps when nobody has said otherwise, and a
+height the pilot explicitly names is flown as named. Asked once more — why not simply always 50 m?
+Because low is how this helicopter is flown, and a crewmate who overrides "height 20" is one the
+pilot stops trusting (*"Allow player to command any altitude and then accept it"*).
+
+### Player expectations
+
+- **E1 — Barometric hold toward rising ground.** He starts climbing before the rise, crosses it no
+  closer than 50 m to bare ground, and comes back to the commanded barometric altitude once the
+  ground falls away. The commanded altitude stays the goal throughout (a later speed or heading
+  command does not lose it). Nothing is said.
+- **E2 — Low cruise toward a ridge.** He climbs early enough to cross the crest at ≥ 50 m (or the
+  explicit lower height, E5). If the climb does not fit, **speed gives first**: nose back, less
+  speed, more climb; the commanded speed comes back once the climb fits again. No numeric climb
+  cap — the aircraft's own power is the limit. Nothing is said.
+- **E3 — Past the crest.** He returns to the commanded height without lingering high; at cruise
+  speed there is no descent-rate limit, at low speed the existing VRS guard (Decision 31) applies.
+- **E4 — Clearance is owed where he will be, not everywhere within 1 km.** On a long, steady
+  upslope he stays near the commanded height (or 50 m) over the ground he is flying over, not far
+  above it because higher ground lies further along. *(Derived from "accept any altitude" and the
+  user's worked table, `climb needed = speed × slope ahead`; at stake in Finding 1.)*
+- **E5 — An explicitly commanded height below 50 m is flown as commanded.** "Altitude 20" reads
+  back "20 meters." and is flown at 20 m over the ground; the look-ahead protects 20 m, not 50. The
+  height stays in force across later speed, heading and turn commands, and across park/unpark,
+  until another altitude command or a hand-back. Trees at that height are the pilot's problem
+  (*"My 40 m floor includes tree avoidance"* — below it, he owns the trees).
+- **E6 — In fog he sees less far, so he anticipates less.** He reacts to terrain only once it is
+  inside the atmospheric visibility (and never beyond the configured 1 km); in thick fog the climb
+  starts later and the slowing is harder. He never climbs for a ridge he could not have seen.
+- **E7 — A break near the floor.** A break never takes him below the effective floor (50 m, or the
+  explicit lower height); height gives first down to it, then speed, then turn rate (LV-2's order,
+  now against the one floor).
+- **E8 — Hover and slow flight.** The floor still holds him above the ground beneath him; a hill
+  ahead that he is not moving toward does not lift him, and yawing on the pedals at hover (LV-3)
+  does not make his height pump as the nose sweeps across terrain. *(At stake in Finding 1.)*
+- **E9 — Silence.** No terrain callouts in any of the above (*"drop all call-outs, the player can
+  see the terrain just as well"*).
+- **E10 — Mode 2 is untouched.** While ED's AI flies (parked) the floor and look-ahead do nothing;
+  an explicit low height commanded during mode 2 still holds when he takes over in mode 1 on unpark
+  — no 50 m jump at the unpark.
+
+### Open assumptions
+
+- **What drives the climb from the 15–18 grid points** — serves the why: each point's clearance
+  owed in proportion to how soon he reaches it, started early (a lead), so slowing down really does
+  reduce what is needed; would not: climb now to clear the highest point in the grid (the main
+  loop's reading, "climb early against the highest point ahead" — not the user's words). Finding 1.
+- **What "explicitly commanded" covers** — serves the why: any altitude command whose readback
+  names the lower height ("altitude 20", "descend 30" ending below 50, "hold altitude" read back as
+  "Holding 20 meters"), carried with the altitude goal itself; would not: only the
+  `altitude <n>` form, or a flag that does not survive park/unpark or the take seed. Finding 2.
+- **A later command that changes only speed, heading or turn** — serves the why: explicitness is a
+  property of the altitude goal and survives (the desired state's altitude stamp does not move);
+  would not: re-deriving it per goal message, which drops it on the first speed-only command.
+- **An explicit barometric goal whose AGL equivalent is below 50 m** — serves the why: floored at
+  50 m (*"the 40 m floor is especially for barometric mode, we don't want to fly to terrain"*);
+  "explicit lower" is an AGL ("radar") height. Would not: treating any spoken barometric number as
+  an explicit permission to go low.
+- **Visibility source** — serves the why: the look-ahead shrinks to what the fog allows; would
+  not: a silent fallback to the full configured 1 km when visibility cannot be read, which is
+  seeing through fog (`visibility.py` ~L120 already notes there is no fog input). Question.
+- **Which floor a break uses** — serves the why: the one effective floor, min(50 m, explicit), with
+  LV-2 D's 100 m loss budget beside it; LV-2 D's separate `break_floor_agl_m` beside the 40 m
+  ordinary floor was "kept separate, deliberately" under U11 ("only breaks") and is now superseded
+  by *"one floor is better, use 50 m"*. Would not: keeping two floors.
+- **"Ahead"** — serves the why: boresight, as the user chose (*"for simplicity use boresight as
+  ahead"*); in coordinated forward flight track and nose are close. It only matters at hover and in
+  a pedal turn, where Finding 1's filling decides whether it matters at all.
+- **Mode 2** — serves the why: floor and look-ahead are mode 1's only, as the SAU was left to ED's
+  AI (*"Let ED AI do whatever it does with SAU"*); would not: body-layer clamping the AI wheel's
+  altitude goal.
+
+### Findings
+
+1. **"Highest point ahead" climbs him far above the commanded height on any long upslope and in a
+   hover near a ridge** — lens: purpose / non-obvious case
+   - **Assumption:** the climb target is the highest of the grid's points plus the floor, flown now
+     (the explore's own reading: *"Climb early against the highest point ahead"*).
+   - **In the sim:** the grid reaches 1 km whatever the speed. On a steady 10 % upslope the point
+     1 km ahead is 100 m above the ground below him, so the target is ~150 m over the ground he is
+     actually flying over, for as long as the slope lasts (5 %: ~100 m). At hover, 50 m up, masked
+     30 m below a crest 400 m ahead, the target becomes crest + 50 m: he climbs ~80 m and ends 50 m
+     **above** the ridge he was hiding behind — the BL-16 key case is exactly the pilot on the 9K113
+     with Petrovich flying. A pedal turn at hover (LV-3) sweeps the grid across hills, so his height
+     follows the yaw.
+   - **The pilot would see:** "height 60" toward rising ground flown at 150 m; a hover behind cover
+     turning into a pop-up nobody asked for. Contradicts **E4**, **E8**, and E5 at low heights.
+   - **Grounded in:** the user's *"Allow player to command any altitude and then accept it"*; the
+     main loop's own worked table shown to the user, *climb needed = speed × slope ahead* — a
+     clearance-on-arrival model; *"climb early. Slow down a bit if necessary so that we can climb
+     faster"* — the user did not say "climb to the highest point".
+   - **Suggests:** what each point ahead asks of him should depend on how soon he gets there (at
+     hover, nothing ahead is urgent), with an early start as the lead. How is Architect's. Q1.
+2. **"Explicitly commanded" must travel with the altitude goal, or he contradicts his own
+   readback** — lens: crew sense
+   - **Assumption:** the obvious filling marks only `altitude <n>` as explicit and keeps today's
+     floor clamps with 40 → 50 (`clamp_altitude`, and the unpark take seed's
+     `seed.alt_m < fc_limits.floor_agl_m` clamp, `flight_control.lua` ~L2892).
+   - **In the sim:** at 20 m, "hold altitude" reads back *"Holding 20 meters."* (`flight.lua`
+     `hold_altitude`) and "descend 30" from 60 m reads back "30 meters." — and he would then climb
+     to 50 m. A "height 20" commanded in mode 2 is clamped to 50 at the unpark seed, a 30 m jump at
+     the unpark.
+   - **The pilot would see:** Petrovich saying one height and flying another. Contradicts **E5**,
+     **E10**.
+   - **Grounded in:** the user's *"if player explicitly commands lower altitude it is allowed"*;
+     the project's rule that he never says one value and flies another (LV-1 U8's reasoning,
+     `plan.md` ~L746).
+   - **Suggests:** explicitness belongs to the altitude goal in the desired state and goes
+     wherever it goes (set, step, hold, park/unpark seed); everything else floors at 50. Q2 settles
+     the edge.
+3. **A take below 50 m with no height spoken climbs him to 50 m** — lens: non-obvious case
+   - **Assumption:** the settled reading floors "default hold at take" at 50 m.
+   - **In the sim:** the pilot at 20 m — or in a low hover behind cover, about to move to the
+     9K113 — says "you have controls" and nothing else; Petrovich's first act is a 30 m climb.
+   - **The pilot would see:** an unasked-for pop-up at the moment he looks away. Consistent with
+     the user's words (handing over is not an explicit height), which is why this is a question and
+     not a concern. Q3.
+4. **No visibility input exists; the obvious fallback sees through fog** — lens: bounded knowledge
+   - **Assumption:** if fog cannot be read, use the configured 1 km.
+   - **In the sim:** in 300 m fog at 200 km/h he would climb for a ridge 18 s away that nobody in
+     the cockpit can see. Contradicts **E6** (*"no further than atmospheric visibility (ie fog)"*).
+   - **Grounded in:** the user's words; `body-layer/src/perception/visibility.py` ~L120 (no fog
+     input today). Needs recon before planning; what to do if recon finds nothing is Q4.
+
+Not raised: the AGL source (telemetry AGL, bare ground — settled), the removal of the climb and
+descent caps (settled, VRS guard kept), and whether the look-ahead should also lead an AGL hold
+that is well above the floor (nothing the user said asks for it; the reactive AGL hold covers it,
+and Flight M-B's "hold 60 m over rising ground" will show any sag).
+
+### Questions for the user
+
+- **Q1.** Toward rising ground, should he clear each point ahead by the time he reaches it (on a
+  long 10 % upslope he stays about 50 m over the ground; in a hover nothing ahead lifts him), or
+  climb now to clear the highest point within 1 km (~150 m over the ground on that slope; a hover
+  400 m behind a ridge pops him above it)? *Recommend the first, with an early start — it matches
+  "accept any altitude" and the speed × slope table you answered.*
+- **Q2.** Does "hold altitude" at 20 m (he answers "Holding 20 meters") or "descend 30" ending
+  below 50 m count as explicitly commanding the lower height? *Recommend yes — otherwise he reads
+  back one height and flies another.*
+- **Q3.** If you hand over below 50 m without saying a height — e.g. low behind cover before
+  moving to the 9K113 — should he climb to 50 m, or keep the height you gave him?
+- **Q4.** If DCS's fog distance turns out not to be readable, how far should he look ahead: the
+  full 1 km, a shorter fixed distance, or the mission's weather setting?
+- **Q5.** Over a crest at cruise speed, should he follow the far slope down straight away, or ease
+  down?
+- **Q6.** At night without NVG, does the look-ahead shrink the way it does in fog, or does only fog
+  limit it? *(Low priority.)*
