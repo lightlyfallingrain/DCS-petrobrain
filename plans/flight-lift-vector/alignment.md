@@ -1317,3 +1317,217 @@ nothing is implemented yet).
    that can settle to zero on its own clock well before a long released break's real margin runs
    out? (Recommend: yes — `state.w_ref` has no feedback path from the real aircraft during
    RELEASED, so it is the wrong signal for "is a real sink being clawed back.")
+
+## Goal check — 2026-11-28 — low-speed yaw authority
+
+**Verdict:** CONCERNS
+
+Checked at `8189b96a` (`fix/bl16-flight-epoch-bound`). Inputs: `docs/acceptance/2026-11-28-sortie-
+feedback.md` (second sortie, third sortie, "User's answers on the pedal cap", the hover/temperature
+remark, "Pedal-stops probe and the stops decision"); `aircraft-layer/research/2026-11-28-mi24p-hand-
+flown-trim-and-transitions.md`; `aircraft-layer/research/2026-11-28-mi24p-pedal-stops.md` (both
+probe runs); `plan.md` "LV-3 amendment (2026-11-27)" incl. U12–U17 answers; `explore-notes.md` "LV-3
+explore" and "LV-3 diagram review corrections"; `debug-2026-11-24c.md` finding 1; earlier user words
+on the same failure (`2026-11-24-sortie-feedback.md` row 10, `2026-11-27-sortie-feedback.md`,
+`plans/flight-control/explore-notes.md` 2026-10-26); this file's 2026-11-20 E8/E10;
+`body-layer/ROADMAP/BL-16.md` (the U17 open item); `flight_control.lua` read only to confirm what
+the pedal-limit guard and write bias do today.
+
+### Why
+
+When Petrovich slows the Hind down or holds it slow, he must **never lose the nose to the left**:
+a left-yaw runaway at low speed and low height is the one thing a pilot cannot recover from
+afterwards (*"left yaw can get out of control fast and then there's no more right pedal to do
+anything about it"*). The player hands over at low speed so they can look out and work the sight.
+That only works if Petrovich flies the slow end the way they do: right pedal in before the nose
+moves (*"I lead since I know more right pedal will be required"*), and knowing where the pedal
+ends so he gives up collective, and height if he has to, *before* he gets there.
+
+Why once more: this is the **fourth** sortie in five days to lose yaw at about 50–60 km/h
+(2026-11-24 row 10 *"Not enough right pedal"*; 2026-11-27 *"right pedal was added too late and too
+slowly"*; the sixth re-fly's runaway; 2026-11-28 *"pedal reacts too slowly -> loss of control"*).
+Each fix so far dealt with one mechanism. The purpose is wider than any of them. Low speed is
+where the Hind has least yaw margin, so Petrovich has to manage that margin the whole time, not
+only react when it runs out. The user's first complaint is **speed of reaction**; the stop is
+what turns a slow reaction into a loss of control.
+
+### Player expectations
+
+Each one is checked on the trace and from the seat, re-flown with **SAU H/K/T/ALT off and the
+stops off**, as M4 now does (sortie 2 had SAU H on, and that channel works the pedal hydraulics).
+The numbers are the pilot's own from one sortie (≈ 925 m field, 13 °C). Treat them as the shape to
+match, not as constants.
+
+- **E1 — The slow-down looks like the pilot's.** From cruise to a low commanded speed the nose
+  comes up a median of **+5…+8°**, peaks at +10…+15° only briefly, and eases off as the target
+  nears. 80 km/h to hover takes about 20–50 s, and vertical speed stays within about ±3.5 m/s. It
+  is not +8…+15° held for 20 s (sortie 2).
+- **E2 — Speed settles on the target.** On "speed 50" the forward speed settles at 50 within its
+  band. It does not run through the target and never goes backwards (sortie 2 reached −58 km/h).
+- **E3 — The nose stays on the flight path.** Through the whole slow-down sideslip stays small
+  (LV-3's own aim is about 10°). It never builds to 29° and beyond as in sortie 2. If the nose starts
+  yawing left while Petrovich wants it straight or right, right pedal moves **within a second or
+  two**. Sortie 2's 0.11 → 0.65 over 7 s is the opposite.
+- **E4 — Right pedal leads the collective.** As collective comes up through transitional lift,
+  right pedal goes in at the same moment. It reaches about the pilot's trim at each speed (arg
+  −0.24 at 50–70, −0.36 at 30–50, −0.56 at hover, this density) **without** a left-yaw excursion
+  first. The trace shows pedal moving with collective, not after the yaw.
+- **E5 — He knows where his right pedal ends.** The pedal ceiling Petrovich believes in is the
+  one he actually has: with the stops off, arg ≈ −0.678 at this sortie's conditions, not the
+  ±1.0 axis end. On the trace the believed ceiling and the observed pin are the same number. When
+  they differ, the observed pin wins.
+- **E6 — Ease the collective before the stop.** When the total right pedal comes within a margin of
+  that ceiling and more is still needed, collective comes **down**, not merely stops rising, and a
+  slight descent is accepted. The nose stops yawing left. He never sits pinned at the stop with
+  collective still rising, which is sortie 2's 47–58 s.
+- **E7 — No height to spare: speed up.** If easing the collective would take him through the floor
+  (`F_eff`, M3), he lowers the nose and gains speed until the pedal margin comes back. By the
+  pilot's trim that is about 50–70 km/h, where the right pedal needed is about half the hover
+  value. Height never goes below the floor to save the yaw.
+- **E8 — Right turns at hover respect the margin.** A commanded right turn at hover is the turn
+  that uses up margin. It runs slower, or is finished with collective easing, and never runs out of
+  pedal. A left turn is unaffected.
+- **E9 — The low-speed yaw handling stays on in a slide.** A sideways slide at low forward speed
+  is not forward flight: the nose is not following the flight path and the ball reads nothing. The
+  hover yaw-rate loop and the low-speed gentleness must not drop out just because a slide keeps
+  total ground speed high. (See Finding 2. As filled today this expectation is broken.)
+- **E10 — Silent.** Easing the collective, a slower right turn and a speed-up out of a hover are
+  the envelope binding. Per this file's 2026-11-20 E8/E10 (*"the aircraft just does less …
+  silently"*), nothing new is said unless the user answers otherwise (Q5).
+- **E11 — Same rules on any mission.** On a hot or high mission where hover needs nearly all the
+  pedal, he applies the same rules from what he measures. He ends up hovering with less collective,
+  or he stops slowing at the speed where his margin runs out. He does not lose yaw because this
+  sortie's numbers were assumed. (User: *"Higher up and/or hot air, the opposite."*)
+- **E12 — No yaw kick at hand-back.** If he hands back at low speed, switching the stops back on
+  does not cut the pedal under the player's feet into a left yaw (Finding 5, Q4).
+
+### Open assumptions
+
+- **Which pedal the ceiling is compared against.** Serves the why: the **total** commanded pedal.
+  That is the integrator plus the yaw damper (up to 0.25), the ball term, turn-coordination and
+  torque feed-forward, because that sum is what reaches the stop. Would not serve: the integrator
+  alone. Today's guard reads `state.t_y` only (`flight_control.lua` ~1550), so a pedal pinned by
+  the overlays never trips it.
+- **Which domain the ceiling is in, given the ~0.32 write offset.** The law's limits bound the
+  *intended* pedal (`p_meas = −arg`). The write is `intended + b`, clamped to ±1. So the reachable
+  right pedal is `min(physical stop, 1 − b)`. With b = 0.32 that is about 0.68, which is the
+  stops-off pin. Serves the why: a ceiling that takes the smaller of the two, so a drifted `b` (the
+  bound allows up to 0.5) cannot make the write clamp the real, unseen limit. Would not serve: one
+  constant 0.678 that is right only while b = 0.32. Also `learn_write_bias` skips learning only at
+  |written| or |arg| ≥ 0.999, so a pedal pinned at a stop short of that (stops on, −0.567) is read
+  as a larger offset. This is not a goal question, but it does decide whether E5 holds.
+- **Measured live vs a profile number.** Serves the why: a **profile ceiling known in advance**
+  (stops-off value) that the observed pin corrects whenever he hits it, with the *margin* live
+  (ceiling minus current total pedal). The probes show the ceiling flat from 14 to 140 km/h and
+  moved only by the SPUU switch. What the user says changes with air density is the hover **need**.
+  Petrovich measures that anyway, since it is his own pedal position. Would not serve: detecting
+  the stop only once the arg stops following the command, because by then it is too late
+  (Finding 3). Unverified: whether the ceiling itself moves with OAT or altitude in DCS. One data
+  point (Q3).
+- **What "act early" means.** Serves the why: the margin is small **and** the need is still
+  growing (collective rising, slowing through transitional lift, nose yawing left, or a right hover
+  turn under way). Easing starts while there is still pedal left to stop a yaw. Would not serve: a
+  trigger at the stop, or one that only caps further collective rise.
+- **How much height "slight descent" may take.** Serves the why: easing is allowed down to the
+  floor the law already has (`F_eff`), and the speed-up (E7) starts when that floor is reached.
+  Would not serve: a new altitude limit of its own, or the altitude hold winding the collective
+  straight back up against the easing.
+- **Whether the speed-up is a new mechanism.** It is the same manoeuvre as the deferred U17 item
+  ("low and slow with RPM drooping — accelerate out of it", `BL-16.md`), which the user kept out of
+  LV-3 because *"a deliberate forward acceleration out of a low hover needs its own look at
+  obstacles and height"*. Serves the why: one mechanism for both, built when this need forces it,
+  using the M3 terrain look-ahead. Would not serve: a second accelerate path next to the deferred
+  one (Q2).
+- **Pedal lead: feedback or feed-forward.** The LV-3 explore reading left the growing right-pedal
+  need to the integrators (*"this can be done with the control law from vertical speed and yaw"*;
+  plan D: "No speed-scheduled pedal trim"). Four failures say the feedback arrives late. The
+  hand-flown data shows **pedal tracks collective**, and that is the existing torque feed-forward's
+  premise. Serves the why: whichever makes E3/E4 visible on the trace. A collective-driven lead fits
+  inside the user's words. A *speed-scheduled* trim would depart from plan D's line and is the
+  Architect's to justify in one sentence. Would not serve: only raising feedback gains, which still
+  lets the yaw lead.
+
+### Findings
+
+1. **The existing near-limit guard does the opposite of the pilot's rule.** Lens: crew sense.
+   - Assumption: "set `pedal_limit_positive` to the real ceiling" fixes it, and the guard
+     (`pedal_near_limit_margin`, `collective_rate_cap_near_pedal_limit`) "stays, now measured
+     against the real stop" (U13 answer).
+   - In the sim: the guard only **caps a rising** collective at 0.3/s. Its own comment says it
+     "never forces collective down". It also reads the integrator `t_y`, not the total pedal.
+   - The pilot would see: with the ceiling corrected, collective still rises, only more slowly,
+     while the pedal sits at the stop. That is sortie 2's out-of-control phase, a little slower.
+   - Grounded in: the user, verbatim: *"ease collective. That causes slight descent -> if there's
+     no altitude to spare, then speeding up is the only option."* The code comment was read to
+     confirm today's behaviour.
+   - Suggests: E6/E7 are a new behaviour (ease, then accelerate), not a re-tuned guard. Filling the
+     ceiling the obvious way and keeping the guard silently breaks **E6**.
+
+2. **λ from total ground speed is inflated by the very failure it exists to handle.** Lens: world
+   truth / the non-obvious case.
+   - Assumption: λ from horizontal ground speed including the sideways part (U12, the user's own
+     answer: *"ground speed (also sideways component)"*).
+   - In the sim: sortie 2's slide kept total ground speed above about 76 km/h, so λ fell only to
+     0.93 and came back to 1.0. The hover yaw-rate loop had 7 % weight at most. The forward law
+     (ball loop, bank to turn) kept flying an aircraft at 65–73° sideslip, sliding backwards.
+   - The pilot would see: the low-speed handling that LV-3 built never engages in the case that
+     needs it most.
+   - Grounded in: the sortie-2 log reading plus U12's verbatim answer. The brief's "λ by forward
+     speed" would reverse U12. That is the user's call, not a recommendation from this check. Why
+     they included the sideways part is not recorded. A sideways hover translate is the likely
+     reason, and a forward-component λ treats that as hover as well.
+   - Suggests: ask (Q1). Left as is, **E9** is broken. Note that λ is secondary: if E3 holds, the
+     slide never builds. It is still the backstop when E3 fails.
+
+3. **"Measured live" alone arrives too late for "act early".** Lens: purpose.
+   - Assumption: from the research note, "Petrovich's limits must come from what he measures in
+     flight (where the pedal is against the stop)".
+   - In the sim: the stop can be seen only once the pedal is on it, and that is the moment the user
+     says nothing is left. The probes show the ceiling fixed by the SPUU switch and flat with
+     speed. The density dependence the user describes is about the hover *need*, which Petrovich
+     already measures as his own pedal position.
+   - Grounded in: pedal-stops probe runs 1–2 and the user's temperature remark.
+   - Suggests: a ceiling known in advance and corrected by observation, with the margin measured
+     live. A planner who reads "measured, not fixed" literally breaks **E6**.
+
+4. **The first complaint is reaction speed, not the stop.** Lens: purpose.
+   - All four user reports name lateness: "too late and too slowly", "reacts too slowly", "I
+     lead". At 50 km/h the pilot's trim needs about −0.24…−0.36 of pedal, far from either stop. Sortie
+     2 reached the stop only because sideslip had already built to about 30° at the slow pedal
+     rate.
+   - Suggests: a plan that only fixes the ceiling and the collective easing would pass E5–E7 and
+     still fail **E3/E4**. Both halves belong in scope. The SAU H confound means the re-fly decides
+     how much of the lateness was SAU.
+
+5. **Hand-back at hover with the stops coming back on.** Lens: the non-obvious case.
+   - Vignette: Petrovich hovers with the stops off, using right pedal between −0.567 and −0.678
+     (trim −0.56, plus a right turn or a gust). The player says "I have controls". The
+     `controls-to-player` sequence switches SPUU power back on, and the cap drops to −0.567 under a
+     pedal that needed more. The player gets a left yaw at the moment they take over, with only
+     collective to stop it.
+   - Grounded in: the measured caps and trim, plus `controls-to-player.md`'s
+     `p_spuu_power | on`. The user chose option 2 (*"2"*) without this case being put to them.
+   - Suggests: ask (Q4). **E12**.
+
+Vignette walked for E6/E7: "speed 0" at 50 m AGL (AGL goal 50, so `F_eff` = 50 and there is no
+height to spare). Easing the collective has nowhere to go, so E7 applies. Petrovich, who was told
+to stop, accelerates forward at 50 m toward whatever is ahead. That is exactly the U17 concern
+about obstacles. It shows why Q2 is the user's to answer.
+
+### Questions for the user
+
+1. **λ in a slide.** In sortie 2, λ stayed at 1.0 because the sideways slide counted as speed (you
+   chose "also sideways component" for U12). Should a slide at low *forward* speed count as slow?
+   If the sideways part was there for sideways hover translate, say so and the planner can keep
+   both.
+2. **Speed-up fallback now?** "No height to spare → speed up" is the same manoeuvre as the deferred
+   "low and slow, accelerate out of it" item. Build it now as one mechanism, or ship collective
+   easing only and keep the speed-up deferred?
+3. **The ceiling in other conditions.** Is the stops-off right-pedal limit (−0.678 here) worth one
+   check on a hot or high mission, or do you expect it to stay put while only the hover need
+   changes?
+4. **Hand-back near hover.** With the stops back on at hand-back, the cap drops under Petrovich's
+   pedal if he is using more than −0.567. Keep stops-on-at-hand-back as decided, or switch them back
+   on only once you are above some speed or the pedal is inside the cap?
+5. **Saying it.** When Petrovich gives height, or speeds up against a "speed 0", stay silent as
+   the envelope does today, or one short line, for example "slowing the turn, pedal's out"?
