@@ -1,0 +1,176 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>M3 Terrain Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{--bg:#0c1210;--bg-panel:#141c19;--fg:#e9efe9;--fg-dim:#9fb0a8;--accent:#e8a33d;--record:#4fa3c4;--record-dim:#1c3038;--warn:#d9684b;--rule:#263430;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f1e8;--bg-panel:#fff;--fg:#1b2420;--fg-dim:#5a6a62;--accent:#a9661b;--record:#1f6e8c;--record-dim:#dceef4;--warn:#b03a24;--rule:#dcd6c4;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;font:17px/1.5 "Source Sans 3",system-ui,sans-serif;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+h1,h2{font-family:"Barlow Condensed",system-ui,sans-serif;margin:0}
+code{font-family:"JetBrains Mono",monospace;font-size:.88em;overflow-wrap:anywhere}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:2.1rem;text-transform:uppercase;color:var(--accent);letter-spacing:.02em}
+header p{margin:0;color:var(--fg-dim)}
+.branch{background:var(--bg-panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.tag{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.branch code{color:var(--accent)}
+.note{background:var(--bg-panel);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 6px 6px 0}
+.note.warn{border-left-color:var(--warn)}
+.card{background:var(--bg-panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.card.prize{border-color:var(--accent)}
+.card h2{font-size:1.35rem}
+.prizetag{font-size:.75rem;background:var(--accent);color:var(--bg);padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.record{background:var(--record-dim);border-left:3px solid var(--record);padding:10px 12px;border-radius:0 6px 6px 0}
+.chk{display:flex;gap:10px;align-items:center}
+.chk input{width:22px;height:22px;accent-color:var(--accent)}
+.row{display:flex;flex-wrap:wrap;gap:6px 18px}
+svg{width:100%;height:auto;display:block}
+svg text{font:12px "Source Sans 3",sans-serif;fill:var(--fg-dim)}
+ul{margin:0;padding-left:1.2em}
+</style>
+<div class="wrap">
+  <header>
+    <h1>M3 Terrain</h1>
+    <p>BL-16 lift-vector law &mdash; terrain floor and look-ahead, mode 1 &mdash; 2026-11-28</p>
+  </header>
+  <div class="branch"><span class="tag">Branch</span><code>feature/bl16-lift-vector-law</code><span class="tag">repo root: <code>git checkout feature/bl16-lift-vector-law &amp;&amp; git pull</code>, usual redeploy. Both debug flags on.</span></div>
+
+  <div class="note warn"><strong>New deploy step: the LOS Hook changed.</strong> Copy <code>aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua</code> to <code>Saved Games\DCS\Scripts\Hooks\</code> (your updated script, or by hand), then <strong>restart DCS</strong> &mdash; Hooks load at DCS start. Without it: no look-ahead, silently; only the 50&nbsp;m floor beneath holds.</div>
+
+  <div class="note"><strong>What changed.</strong> A 50&nbsp;m floor in normal flight; a lower height you command is accepted. He reads ground height 1&nbsp;km ahead along the nose (200&nbsp;m steps, &plusmn;200&nbsp;m wide, ~1&nbsp;Hz) and climbs early to clear it <strong>at your commanded height</strong>. No 5&nbsp;m/s climb cap: power is the limit, and <strong>any climb trades speed</strong> down to ~100&nbsp;km/h, then back. Past a crest he eases down at &le;&nbsp;10&nbsp;m/s. No callouts.</div>
+
+  <div class="card">
+    <span class="tag">The look-ahead</span>
+    <svg viewBox="0 0 640 170" role="img" aria-label="Side view: aircraft at 50 m AGL, grid points every 200 m to 1 km ahead, climb begins before the ridge">
+      <path d="M0 150 L250 150 Q330 150 400 90 Q450 55 500 70 Q560 95 640 120" fill="none" stroke="var(--fg-dim)" stroke-width="2"/>
+      <path d="M40 120 L200 120 Q300 110 380 60 Q440 28 500 38" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="6 4"/>
+      <circle cx="40" cy="120" r="6" fill="var(--accent)"/>
+      <g fill="var(--record)"><circle cx="40" cy="150" r="3.5"/><circle cx="140" cy="150" r="3.5"/><circle cx="240" cy="150" r="3.5"/><circle cx="340" cy="136" r="3.5"/><circle cx="440" cy="64" r="3.5"/><circle cx="540" cy="84" r="3.5"/></g>
+      <line x1="40" y1="162" x2="540" y2="162" stroke="var(--rule)"/>
+      <text x="40" y="112">you</text><text x="210" y="105">climb starts early</text><text x="480" y="168">1 km</text><text x="300" y="168">200 m steps</text><text x="520" y="30">clears at your height</text>
+    </svg>
+    <div><span class="tag">Not on this card</span><br>Fog limit on look-ahead range (BL-B138, later). The simulation had no terrain and a helicopter that climbs exactly as asked, so every terrain row and every "speed gives" row is tested here first.</div>
+  </div>
+
+  <div class="card">
+    <h2>1 &middot; Data check</h2>
+    <div><span class="tag">Do</span><br>Nothing in the cockpit &mdash; the logs carry it.</div>
+    <div class="record"><span class="tag">Record</span><br>Just bring the logs.</div>
+  </div>
+
+  <div class="card">
+    <h2>2 &middot; Below the floor, on request</h2>
+    <div><span class="tag">Do</span><br>Over flat ground: &ldquo;altitude 2 0&rdquo;.</div>
+    <div><span class="tag">Expect</span><br>&ldquo;20 meters.&rdquo; Flown at 20&nbsp;m.</div>
+    <div class="record"><span class="tag">Record</span><br>Did he hold 20?</div>
+    <label class="chk"><input type="checkbox" data-k="r2">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>3 &middot; Barometric toward rising ground</h2>
+    <div><span class="tag">Do</span><br>&ldquo;altitude 6 0 0 barometric&rdquo; (or a height that brings the ground within 50&nbsp;m), fly toward rising ground.</div>
+    <div><span class="tag">Expect</span><br>Climbs early, never below 50&nbsp;m AGL, back to the barometric height afterwards. Silent.</div>
+    <div class="record"><span class="tag">Record</span><br>Lowest AGL? How far before the rise did the climb start?</div>
+    <label class="chk"><input type="checkbox" data-k="r3">Flown</label>
+  </div>
+
+  <div class="card prize">
+    <h2>4 &middot; Low cruise into a ridge<span class="prizetag">The prize</span></h2>
+    <div><span class="tag">Do</span><br>200&nbsp;km/h, &ldquo;altitude 5 0&rdquo;, straight at a ridge. A steep one if you can.</div>
+    <div><span class="tag">Expect</span><br>Climbs early. On a steep ridge: nose back, speed falls (not below ~100&nbsp;km/h), back to 200 after the crest.</div>
+    <div class="record"><span class="tag">Record</span><br>Clearance at the top? Climb start: late, early, about right? Lowest speed? Did it feel like a pilot would fly it?</div>
+    <label class="chk"><input type="checkbox" data-k="r4">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>5 &middot; Past the crest</h2>
+    <div><span class="tag">Expect</span><br>Eases back down, no faster than 10&nbsp;m/s.</div>
+    <div class="record"><span class="tag">Record</span><br>Gentle enough? Too slow?</div>
+    <label class="chk"><input type="checkbox" data-k="r5">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>6 &middot; Long upslope</h2>
+    <div><span class="tag">Do</span><br>&ldquo;altitude 6 0&rdquo;, up a long slope.</div>
+    <div><span class="tag">Expect</span><br>Stays near 60 over the slope &mdash; no sag below, not far above.</div>
+    <div class="record"><span class="tag">Record</span><br>AGL range on the slope?</div>
+    <label class="chk"><input type="checkbox" data-k="r6">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>7 &middot; Low goal kept through other commands</h2>
+    <div><span class="tag">Do</span><br>&ldquo;altitude 3 0&rdquo; toward a rise; then &ldquo;speed 1 5 0&rdquo; and a heading change; then park and unpark.</div>
+    <div><span class="tag">Expect</span><br>Clears the rise at 30. Still 30 after the other commands and after unpark, no jump.</div>
+    <div class="record"><span class="tag">Record</span><br>Held 30 throughout? Any jump at unpark?</div>
+    <label class="chk"><input type="checkbox" data-k="r7">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>8 &middot; Hold and take at 25&nbsp;m</h2>
+    <div><span class="tag">Do</span><br>At 25&nbsp;m: &ldquo;hold altitude&rdquo;. Later, a voice take at 25&nbsp;m.</div>
+    <div><span class="tag">Expect</span><br>&ldquo;Holding 25 meters&rdquo;, holds 25. The take holds ~25.</div>
+    <div class="record"><span class="tag">Record</span><br>Held 25 both times?</div>
+    <label class="chk"><input type="checkbox" data-k="r8a">Hold</label>
+    <label class="chk"><input type="checkbox" data-k="r8b">Take</label>
+  </div>
+
+  <div class="card">
+    <h2>9 &middot; Hover behind a ridge</h2>
+    <div><span class="tag">Do</span><br>Hover ~300&nbsp;m short of a ridge. Pedal turns &plusmn;90°. Then &ldquo;speed 2 0&rdquo; toward it.</div>
+    <div><span class="tag">Expect</span><br>No climb and no height pumping in the turns. A gentle climb only as he closes.</div>
+    <div class="record"><span class="tag">Record</span><br>Any pumping? When did the climb start?</div>
+    <label class="chk"><input type="checkbox" data-k="r9">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>10 &middot; Break low</h2>
+    <div><span class="tag">Do</span><br>Break at 70&nbsp;m AGL.</div>
+    <div><span class="tag">Expect</span><br>Never below 50&nbsp;m.</div>
+    <div class="record"><span class="tag">Record</span><br>Lowest AGL?</div>
+    <label class="chk"><input type="checkbox" data-k="r10">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>11 &middot; Big climb, big descents</h2>
+    <div><span class="tag">Do</span><br>At 220&nbsp;km/h: &ldquo;climb 3 0 0&rdquo;. Then &ldquo;descend 2 0 0&rdquo; at cruise. Then &ldquo;speed 4 0&rdquo;, &ldquo;descend 1 0 0&rdquo;.</div>
+    <div><span class="tag">Expect</span><br>Climb: no 5&nbsp;m/s cap; if the rate isn't there, speed falls (not below ~100) and comes back to 220. <strong>Levels off at the top without overshoot</strong> &mdash; the simulation couldn't show this. Cruise descent: no rate cap. At 40&nbsp;km/h: at most 4&nbsp;m/s down.</div>
+    <div class="record"><span class="tag">Record</span><br>Climb rate? Lowest speed? Overshoot at the top? How long back to 220?</div>
+    <div class="row"><label class="chk"><input type="checkbox" data-k="r11a">Climb</label><label class="chk"><input type="checkbox" data-k="r11b">Cruise descent</label><label class="chk"><input type="checkbox" data-k="r11c">Slow descent</label></div>
+  </div>
+
+  <div class="card">
+    <h2>12 &middot; Mode 2 near terrain</h2>
+    <div><span class="tag">Do</span><br>Park the controls near terrain.</div>
+    <div><span class="tag">Expect</span><br>Nothing from M3 &mdash; ED's AI flies as before.</div>
+    <div class="record"><span class="tag">Record</span><br>Anything different?</div>
+    <label class="chk"><input type="checkbox" data-k="r12">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>13 &middot; Forest edge</h2>
+    <div><span class="tag">Do</span><br>50&nbsp;m AGL across a forest edge.</div>
+    <div class="record"><span class="tag">Record</span><br>Did the height jump at the trees?</div>
+    <label class="chk"><input type="checkbox" data-k="r13">Flown</label>
+  </div>
+
+  <div class="card">
+    <h2>14 &middot; Pause in a climb</h2>
+    <div><span class="tag">Do</span><br>Pause during a terrain climb, wait, unpause.</div>
+    <div><span class="tag">Expect</span><br>No jump.</div>
+    <div class="record"><span class="tag">Record</span><br>Jump or lurch?</div>
+    <label class="chk"><input type="checkbox" data-k="r14">Flown</label>
+  </div>
+
+  <div class="note"><strong>15 &middot; Throughout:</strong> silent about terrain. Anything he says about it is a bug.</div>
+
+  <div class="record"><span class="tag">Bring back</span><br>Answers above, both logs (<code>aircraft_layer_flight_trace.log</code>, <code>aircraft_layer_debug.log</code>) and the body-layer logs. Anything that surprises you is worth more than anything on this list.</div>
+</div>
+<script>
+const KEY='m3-terrain-2026-11-28';
+let saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
+  if(saved[b.dataset.k]) b.checked=true;
+  b.addEventListener('change',()=>{try{const s=JSON.parse(localStorage.getItem(KEY)||'{}');s[b.dataset.k]=b.checked;localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}});
+});
+</script>
