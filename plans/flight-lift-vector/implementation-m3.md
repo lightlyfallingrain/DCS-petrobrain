@@ -235,3 +235,53 @@ exist to catch for real.
   Status` has no such literal; `agreed-guess` is this codebase's existing vocabulary for "the
   user's own stated number," already used by every sibling constant in the same module
   (`BREAK_MAX_HEIGHT_LOSS_M`, `VRS_IAS_THRESHOLD_KMH`, …).
+
+## Fix pass (`review-m3.md`)
+
+Branch `fix/bl16-flight-epoch-bound`, worktree at tip `6d789b38`. Addressed all three findings.
+
+**Required fix 1 — the missing U22 toy-plant case.** `aircraft-layer/tests/test_flight_control_
+law.py`, new `TestM3OrdinaryClimbTradesSpeedNoTerrain`: a direct, `collective_was_capped`-style
+scenario (`TestLV2HeightGivesFirst`'s own technique — a real `shortfall` forced via the rotor-RPM-
+warning guard against a large climb demand), on a PLAIN altitude command (no break set, so the
+break-only `effective_shortfall` scaling never engages) with `measured.terrain` never assigned
+anywhere in the scenario. Confirmed by running it against the actual law (not assumed from the
+formula): `v_ref` settles at exactly `speed_give_floor_kmh` (27.777... m/s) while the measured
+speed this phase is driven even lower (70 km/h), the strongest form of "never below it"; the
+shortfall that produced it is 0.368 (clearly real); once RPM and measured speed both recover,
+`v_ref` is climbing back (34.69 m/s after 60 s — `omega_speed` is deliberately slow, so this is a
+trend assertion, not full convergence, same posture every other toy-plant test in this file takes
+with a first-cut gain). This closes the exact gap plan-aligner's Finding 3 predicted and the
+Reviewer confirmed was never built: a future regression narrowing the governor's lead back to 0 for
+an ordinary (non-terrain) climb now fails this test.
+
+**Optional 2a — ease-down cap, direct.** New `TestM3EaseDownCapDirect`: a single `law_update` call
+with `state.w_ref` already far past the cap (-50 m/s) and `state.terrain_return` set directly (the
+Co-moving field a real terrain-stop-binding transition would have set, so no multi-ridge closed
+loop is needed) confirms the unconditional `max()` against `profile.terrain_ease_down_mps` (10.0,
+U20) binds every step regardless of how `w_ref` got there (`-10.0`, measured). The contrasting case
+(`terrain_return` false) shows the same steep `w_ref` is left essentially untouched (`-49.95`,
+measured) — "ordinary descents you command keep no limit" from the plan's own section C text.
+
+**Optional 2b — the `|h| < 1e5` magnitude bound.** `flight_control.lua`'s `parse_terrain_relay` now
+rejects a height outside `|h| < 1e5` the same way it already rejected a non-finite one (one `and
+math.abs(h) < 1e5` clause, section E's own text: "each height re-checked `h == h` and `|h| <
+1e5`"). New `aircraft-layer/tests/test_flight_control_lua.py` class
+`TestTerrainRelayMagnitudeBound`, run through the whole-module harness (`handle_flight_lease_
+command` → `fc_terrain_n` on the status line, confirmed live: a grid of one in-range and two
+out-of-range heights reports `fc_terrain_n = 1`; an all-out-of-range grid reports `0`).
+
+**Checks**, run from this worktree (no local `.venv`, so the main checkout's `aircraft-layer/
+.venv` was used; `luac5.1`/`luajit` from Homebrew):
+
+- `ruff format --check`: pass (the two touched test files).
+- `ruff check`: pass.
+- `mypy src` (from inside `aircraft-layer/`): pass, 0 issues in 29 source files (no production
+  source changed other than the Lua file, which mypy does not cover).
+- `luac5.1 -p flight_control.lua`: pass.
+- `pytest tests -q`: **1318 passed** (1313 (review's own baseline) + 5 new: 1 in
+  `TestM3OrdinaryClimbTradesSpeedNoTerrain`, 2 in `TestM3EaseDownCapDirect`, 2 in
+  `TestTerrainRelayMagnitudeBound`), zero regressions, identical count with and without `-m "not
+  slow"` (this subproject has no `slow`-marked tests).
+
+No `body-layer` file was touched by this fix pass, so its suite was not re-run.

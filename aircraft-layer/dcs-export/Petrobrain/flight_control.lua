@@ -510,8 +510,17 @@ local function parse_terrain_relay(raw, t)
             local x, z, h = tonumber(x_str), tonumber(z_str), tonumber(h_str)
             -- Non-finite standing rule: a point with any non-finite
             -- coordinate or height is dropped, never carried as a
-            -- plausible-looking value.
-            if x ~= nil and x == x and z ~= nil and z == z and h ~= nil and h == h then
+            -- plausible-looking value. The height also carries the
+            -- plan's own magnitude bound (section E: "each height
+            -- re-checked `h == h` and `|h| < 1e5`") -- a parse that
+            -- somehow produced a wildly-out-of-range but finite
+            -- number (never observed from the real relay, whose own
+            -- `_TERRAIN_RELAY_PATTERN` cannot carry one) is dropped
+            -- the same way a non-finite one is, not carried as a
+            -- plausible height.
+            if x ~= nil and x == x and z ~= nil and z == z
+                and h ~= nil and h == h and math.abs(h) < 1e5
+            then
                 points[#points + 1] = { x, z, h }
             end
         end

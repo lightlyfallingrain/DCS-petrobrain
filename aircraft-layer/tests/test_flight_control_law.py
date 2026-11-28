@@ -4136,6 +4136,152 @@ print(string.format("%.6f", measured.h_m))
         assert abs(float(final_h) - 40.0) < 15.0
 
 
+class TestM3OrdinaryClimbTradesSpeedNoTerrain:
+    """Fix pass (review-m3.md required fix 1) -- the plan's own Tests
+    entry for U22 ("speed gives for every climb, not terrain climbs
+    only") was promised but never built: no test anywhere drove a
+    PLAIN altitude command (no break, no `measured.terrain` at any
+    point) through capped climb authority and looked at `v_ref`. This
+    closes that gap with the cheapest shape the review names -- a
+    `collective_was_capped`-style direct scenario (`TestLV2HeightGives
+    First`'s own technique: a real `shortfall` forced via the rotor-
+    RPM-warning guard against a large climb demand), not a new closed-
+    loop plant. `measured.terrain` is never assigned anywhere in this
+    scenario, so a future regression that re-adds a terrain-only gate
+    around the speed-give branch (section D) fails this test even
+    though it never sets a grid."""
+
+    @staticmethod
+    def _run_scenario() -> tuple[float, float, float, float]:
+        driver = (
+            """
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = 650.0, speed_kmh = 220.0 }, PROFILE)
+local v_ref_before = state.v_ref
+-- Rotor RPM warning guard forces a real, large collective-rate
+-- shortfall (the climb demand above ensures the nominal rate is
+-- clearly positive, same technique `TestLV2HeightGivesFirst` uses);
+-- the measured speed is also dropped below the speed-give floor
+-- itself, so the clamp's `max(v_m, floor)` settles on the floor, not
+-- on `v_m` -- the strongest form of "never below it".
+measured.rotor_rpm_pct = 80.0
+measured.ias_mps = 70.0 / 3.6
+measured.v_t_mps = 70.0 / 3.6
+for i = 1, 20 do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+end
+local v_ref_floor_phase = state.v_ref
+local shortfall_floor_phase = state.dbg_shortfall
+-- Shortfall ends: RPM and measured speed both recover to the
+-- commanded value.
+measured.rotor_rpm_pct = 100.0
+measured.ias_mps = 220.0 / 3.6
+measured.v_t_mps = 220.0 / 3.6
+for i = 1, 1200 do
+    state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+end
+local v_ref_recovered = state.v_ref
+print(string.format("%.9f", v_ref_before))
+print(string.format("%.9f", v_ref_floor_phase))
+print(string.format("%.9f", shortfall_floor_phase))
+print(string.format("%.9f", v_ref_recovered))
+"""
+        ).replace(
+            "{measured}",
+            _measured(
+                ias_mps=220.0 / 3.6,
+                v_t_mps=220.0 / 3.6,
+                h_m=150.0,
+                asl_m=150.0,
+                rotor_rpm_pct=100.0,
+            ),
+        )
+        lines = _run(driver)
+        v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered = (
+            float(x) for x in lines
+        )
+        return v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered
+
+    def test_ordinary_climb_with_no_terrain_data_trades_speed_toward_the_floor(
+        self,
+    ) -> None:
+        v_ref_before, v_ref_floor_phase, shortfall_floor_phase, v_ref_recovered = (
+            self._run_scenario()
+        )
+        # Baseline: the take seeds `v_ref` at the commanded 220 km/h,
+        # no shortfall yet.
+        assert abs(v_ref_before - 220.0 / 3.6) < 1e-6
+        # The RPM-warning guard really is producing a shortfall.
+        assert shortfall_floor_phase > 0.3
+        # `v_ref` yields toward `speed_give_floor_kmh` (100 km/h =
+        # 27.777... m/s) -- settles exactly there since the measured
+        # speed this phase (70 km/h) is itself below the floor.
+        floor_mps = 100.0 / 3.6
+        assert abs(v_ref_floor_phase - floor_mps) < 1e-6
+        # Never below the floor, in either direction.
+        assert v_ref_floor_phase >= floor_mps - 1e-6
+        # Once the shortfall ends, `v_ref` returns toward the commanded
+        # speed through the ordinary S-curve (slow, `omega_speed` is
+        # small by design -- not asserted at full convergence, only
+        # that it is clearly moving back up, not pinned at the floor).
+        assert v_ref_recovered > v_ref_floor_phase + 5.0
+
+
+class TestM3EaseDownCapDirect:
+    """Optional refinement (review-m3.md) -- a cheap, direct check of
+    the ease-down cap (`terrain_ease_down_mps`, U20's 10 m/s) in
+    isolation, independent of `TestM3TerrainClimbScenario`'s own
+    disclosed gap (it never reaches a second ridge/ease-down cycle).
+    A single `law_update` call with `state.w_ref` already far past the
+    cap and `state.terrain_return` set directly (the Co-moving field a
+    real terrain-stop-binding transition would have set) is enough:
+    the cap is an unconditional `max()` against `profile.terrain_ease_
+    down_mps` applied every step while `terrain_return` holds, so it
+    does not depend on how `w_ref` got there. The contrasting case
+    (`terrain_return` false) shows an ordinary, PLAYER-commanded
+    descent is not capped by this mechanism at all."""
+
+    @staticmethod
+    def _w_ref_after_one_step(*, terrain_return: bool) -> float:
+        driver = (
+            """
+local measured = {measured}
+local state = flight_control.law_init_at_take(measured, LIMITS, { pitch = 0, roll = 0, pedals = 0, collective = 0.2 }, { heading_deg = 0.0, alt_m = 150.0, alt_ref = "B" }, PROFILE)
+-- A steep, pre-existing descent reference (far past the 10 m/s cap)
+-- and a neutral collective (`u_c`/`dbg_shortfall` from the take seed
+-- -- not saturated), so the power governor (section C) cannot also be
+-- the thing clamping this step; only the ease-down max() is under
+-- test.
+state.w_ref = -50.0
+state.terrain_return = """
+            + ("true" if terrain_return else "false")
+            + """
+local next_state = flight_control.law_update(state, 0.05, measured, LIMITS, PROFILE)
+print(string.format("%.9f", next_state.w_ref))
+"""
+        ).replace(
+            "{measured}",
+            _measured(ias_mps=150.0 / 3.6, v_t_mps=150.0 / 3.6, h_m=150.0, asl_m=150.0),
+        )
+        lines = _run(driver)
+        return float(lines[0])
+
+    def test_ease_down_after_a_terrain_climb_is_capped_at_ten(self) -> None:
+        w_ref = self._w_ref_after_one_step(terrain_return=True)
+        # `PROFILE.terrain_ease_down_mps` is 10.0 in this file's own
+        # fixture (matching U20's "at most 10"): never looser than that.
+        assert w_ref >= -10.0 - 1e-6
+        assert w_ref > -49.0  # the cap actually bound this step
+
+    def test_a_player_commanded_descent_stays_uncapped(self) -> None:
+        """`terrain_return` false (an ordinary commanded descent, no
+        terrain-stop-binding transition) -- the same steep `w_ref` is
+        left essentially untouched by this mechanism (only the
+        shaper's own small per-step correction moves it)."""
+        w_ref = self._w_ref_after_one_step(terrain_return=False)
+        assert w_ref < -40.0
+
+
 def test_file_parses_without_a_lua_interpreter_too() -> None:
     """`luac5.1` sanity, independent of whether a runtime interpreter is
     on `PATH` -- mirrors `test_flight_control_lua.py`'s own copy of

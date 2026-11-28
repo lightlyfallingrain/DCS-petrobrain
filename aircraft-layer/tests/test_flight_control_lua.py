@@ -1770,6 +1770,54 @@ print(sent_lines[#sent_lines])  -- [4] a real unpark+re-park self-arms again
     # layer to send "arm" to.
 
 
+class TestTerrainRelayMagnitudeBound:
+    """Fix pass (review-m3.md, optional refinement) -- the plan's own
+    section E text ("each height re-checked `h == h` and `|h| < 1e5`")
+    was only half built: `parse_terrain_relay` checked for non-finite
+    but had no magnitude bound at all. A height outside `|h| < 1e5` is
+    now dropped the same way a non-finite one already was -- never
+    carried as a plausible-looking value, never substituted with `0`.
+    Low risk in practice (the lease `terrain` field's own encoder
+    already applies `math.isfinite` before writing a height, and
+    `w_floor` is clamped through `alt_accel_cap` the same way an
+    ordinary demand is regardless), but a real, undisclosed gap
+    against the plan's own text -- closed here with a one-line bound
+    and this test."""
+
+    def test_out_of_range_heights_are_dropped_in_range_ones_kept(self) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"terrain":"1|100,0,50;200,0,200000;300,0,-200000"}',
+    0.0)
+flight_control.run_flight_control(0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        # Only the one in-range point (50 m) survives -- the two
+        # out-of-bound-but-finite heights (200000, -200000) are
+        # dropped, the same as a non-finite one would be.
+        assert _field(line, "fc_terrain_n") == "1"
+
+    def test_a_grid_of_entirely_out_of_range_heights_leaves_no_points(
+        self,
+    ) -> None:
+        driver = """
+heading_rad = math.rad(0.0)
+flight_control.handle_flight_lease_command(
+    '{"op":"flight_lease","epoch":1,'
+    .. '"terrain":"1|100,0,200000;200,0,-150000"}',
+    0.0)
+flight_control.run_flight_control(0.0)
+flight_control.push_flight_control_state(0.0)
+print(sent_lines[#sent_lines])
+"""
+        line = _run(driver)[0]
+        assert _field(line, "fc_terrain_n") == "0"
+
+
 class TestStage2VoiceTakePrecondition:
     """BL-16 Stage 2: a voice take re-checks AGL itself (`check_unpark_
     preconditions`), rather than trusting body-layer's own pre-send
