@@ -3,14 +3,13 @@
 DCS World video game add-on (Mi-24P) — no real hardware. Source of truth for running
 `Export.probe-pedal-stops.lua` (`aircraft-layer/research/2026-11-28-mi24p-pedal-stops.md`).
 
-- **Branch:** `fix/bl16-flight-epoch-bound` (as of this card; confirm it has landed on whatever
-  branch you're testing from — `git log --oneline -- aircraft-layer/dcs-export/Export.probe-pedal-stops.lua`).
+- **Branch:** `feature/bl16-lift-vector-law` — in the repo root: `git checkout feature/bl16-lift-vector-law && git pull`.
 - **Deploy:** copy `aircraft-layer/dcs-export/Export.probe-pedal-stops.lua` over
   `Saved Games\DCS\Scripts\Export.lua`. **This replaces the production Export.lua — Petrovich does
   not run while this is deployed.** Restore the real `Export.lua` afterwards.
 - Log: `Saved Games\DCS\Logs\aircraft_layer_probe_pedal_stops.log`.
 - **Flight:** air start (warm unit), hover or straight-and-level at ≤ 50 km/h — same regime as the
-  2026-11-18 sortie that first measured the cap. SAU H/K/T off (not under test). Hold **full RIGHT
+  2026-11-18 sortie that first measured the cap. SAU H/K/T and ALT off (not under test). Hold **full RIGHT
   pedal** through every step below.
 - **Control:** a pilot-seat ICS **half-press** ends the current step and starts the next one's
   write (if any) — do this once you've held the pedal steady for a couple of seconds after the
